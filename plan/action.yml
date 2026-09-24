@@ -1,0 +1,64 @@
+name: Plan release
+description: Validate a committed releases/v<semver>.md request and output the version, commit, and notes to publish.
+inputs:
+  base:
+    description: Commit before the release request. Defaults to the PR base or the commit before the push.
+    required: false
+    default: ''
+  head:
+    description: Commit containing the approved notes. Defaults to the PR head or the pushed commit.
+    required: false
+    default: ''
+  first-version:
+    description: Version required when the repository has no release yet.
+    required: false
+    default: v0.1.0
+  notes-dir:
+    description: Directory holding v<semver>.md release requests.
+    required: false
+    default: releases
+outputs:
+  tag:
+    description: Requested tag, such as v1.2.0. Empty when the range requests no release.
+    value: ${{ steps.plan.outputs.tag }}
+  version:
+    description: Requested version without the leading v.
+    value: ${{ steps.plan.outputs.version }}
+  commit:
+    description: Approved commit the release tags.
+    value: ${{ steps.plan.outputs.commit }}
+  prerelease:
+    description: Whether the version has a prerelease suffix.
+    value: ${{ steps.plan.outputs.prerelease }}
+  plan-file:
+    description: Path to the full plan JSON, including the approved notes. Upload it for the publish action.
+    value: ${{ steps.plan.outputs.plan-file }}
+runs:
+  using: composite
+  steps:
+    - id: plan
+      shell: bash
+      env:
+        BASE: ${{ inputs.base || github.event.pull_request.base.sha || github.event.before }}
+        HEAD: ${{ inputs.head || github.event.pull_request.head.sha || github.sha }}
+        FIRST: ${{ inputs.first-version }}
+        NOTES_DIR: ${{ inputs.notes-dir }}
+        EVENT: ${{ github.event_name }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      run: |
+        # Requires a checkout with full history and tags (fetch-depth: 0).
+        set -euo pipefail
+        if [ "$EVENT" = workflow_dispatch ]; then
+          # A retry must name the original approved range exactly, never the latest main.
+          [[ "$HEAD" =~ ^[0-9a-f]{40}$ && "$BASE" =~ ^[0-9a-f]{40}$ ]] || { echo 'Retry requires full base and approved head SHAs'; exit 1; }
+          git merge-base --is-ancestor "$HEAD" "origin/$DEFAULT_BRANCH" || { echo 'Approved head is not on the default branch'; exit 1; }
+        fi
+        printf 'Release request range\n\nBase SHA: `%s`\n\nApproved head SHA: `%s`\n' "$BASE" "$HEAD" >> "$GITHUB_STEP_SUMMARY"
+        file="$RUNNER_TEMP/release-plan.json"
+        python3 "$GITHUB_ACTION_PATH/../src/release_planner.py" --first "$FIRST" --notes-dir "$NOTES_DIR" \
+          plan --base "$BASE" --head "$HEAD" > "$file"
+        if [ "$EVENT" = workflow_dispatch ]; then
+          jq -e '.tag != ""' "$file" > /dev/null || { echo 'Retry range contains no release request'; exit 1; }
+        fi
+        jq -r '"tag=\(.tag)\nversion=\(.version)\ncommit=\(.commit)\nprerelease=\(.prerelease)"' "$file" >> "$GITHUB_OUTPUT"
+        echo "plan-file=$file" >> "$GITHUB_OUTPUT"
