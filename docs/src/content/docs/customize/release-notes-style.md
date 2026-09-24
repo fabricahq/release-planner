@@ -10,7 +10,7 @@ The release notes style tells the agent how to write the notes: how to open, whi
 Unless you change it, the agent:
 
 - opens with one or two sentences on what the release means for its readers
-- organizes changes under these headings, leaving out any that are empty:
+- organizes changes under these headings, in the order your [policy](/customize/policy/) gives, leaving out any that are empty:
   - ✨ New Features
   - ⬆️ Improvements
   - 🐛 Squashed Bugs
@@ -53,10 +53,12 @@ Use [Keep a Changelog](https://keepachangelog.com) headings instead of the defau
 
 ```markdown
 - Open with one sentence naming the most important change.
-- Use only these headings, in this order, leaving out empty ones:
+- Use only these headings, leaving out empty ones:
   `## Added`, `## Changed`, `## Deprecated`, `## Removed`, `## Fixed`, `## Security`.
 - Write one bullet per change, in the past tense, ending with the pull request link.
 ```
+
+List the same headings, in the order you want, under **Order of the release notes** in your policy.
 
 To start a replacement from the default text:
 

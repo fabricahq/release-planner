@@ -147,7 +147,7 @@ jobs:
 
 ### Release notes style
 
-The release notes style tells the agent how to write the notes: how to open, which headings to use, and how to write each entry. Release Planner's default style opens with one or two sentences on what the release means for its readers, then uses these headings, leaving out any that are empty:
+The release notes style tells the agent how to write the notes: how to open, which headings to use, and how to write each entry. Release Planner's default style opens with one or two sentences on what the release means for its readers, then uses these headings, in the order your policy gives, leaving out any that are empty:
 
 - ✨ New Features
 - ⬆️ Improvements
@@ -172,19 +172,22 @@ Or to replace, using [Keep a Changelog](https://keepachangelog.com) headings:
 
 ```markdown
 - Open with one sentence naming the most important change.
-- Use only these headings, in this order, leaving out empty ones: `## Added`, `## Changed`, `## Deprecated`, `## Removed`, `## Fixed`, `## Security`.
+- Use only these headings, leaving out empty ones: `## Added`, `## Changed`, `## Deprecated`, `## Removed`, `## Fixed`, `## Security`.
 - Write one bullet per change, in the past tense, ending with the pull request link.
 ```
+
+List the same headings, in the order you want, under **Order of the release notes** in your policy.
 
 Whatever the style says, every release keeps the parts `draft` writes: the **What's Changed** list, and the **Full Changelog** link (or, for a first release, a link to the tagged source).
 
 ## Write your release policy
 
-`.release-planner/policy.md` tells the agent how your repository releases. `init` creates a starter with four sections, each a short list to edit:
+`.release-planner/policy.md` tells the agent how your repository releases. `init` creates a starter with five sections, each a short list to edit:
 
 - **Breaking changes.** Common things users depend on, such as commands, configuration keys, and APIs. Keep what applies, delete the rest, add your own.
 - **Choosing a version.** What makes a release major, minor, or patch. If your first release is before 1.0.0, it also covers 0.x releases: SemVer lets anything change before 1.0, so the starter uses the common convention of a minor bump for breaking changes and a patch bump for everything else.
-- **Who reads the release notes.** Your readers, developers by default, and what they want to know, most important first. The agent leads with whatever you put first.
+- **Who reads the release notes.** Your readers, developers by default.
+- **Order of the release notes.** The order changes appear in: new features, improvements, bug fixes, then breaking changes by default. Reorder it to taste.
 - **Always and never.** Anything the notes must always include or leave out.
 
 Each section ends with a `TODO:` line. Until you delete every one, the agent stops and asks instead of guessing a version. The starter opens with a prompt, in a comment, that you can give your agent to fill it in for your review. The docs have [example policies](docs/src/content/docs/customize/policy.md) for a library, a CLI, and a service.

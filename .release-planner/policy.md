@@ -35,12 +35,16 @@ Readers:
 
 - Maintainers of repositories that use Release Planner, deciding whether to bump `version`
 
-What they want to know, most important first:
+They want to know what changes for them when they upgrade, including whether their generated files change.
 
-1. Anything that changes what they must configure or how releases behave, with the upgrade steps
-2. Whether upgrading changes their generated files
-3. New features
-4. Bug fixes
+## Order of the release notes
+
+The notes present changes in this order, leaving out any with nothing to say:
+
+1. New features
+2. Improvements
+3. Bug fixes
+4. Breaking changes, with the upgrade steps
 
 ## Always and never
 
