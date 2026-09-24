@@ -3,7 +3,7 @@ title: What is Release Planner?
 description: A simple, agent-assisted way to publish well-written GitHub releases.
 ---
 
-Release Planner makes it easy for your GitHub repository to publish releases people actually want to read. Your coding agent does the tedious work of reviewing what changed and drafting the notes. You stay in charge of what ships: nothing is published until you approve it.
+Release Planner makes it easy for your GitHub repository to publish release notes people actually want to read. Your coding agent does the tedious work of reviewing what changed and drafting the notes. You stay in charge of what ships: nothing is published until you approve it.
 
 Release Planner works with GitHub only for now. It publishes GitHub releases, and it runs on GitHub Actions.
 
