@@ -78,9 +78,9 @@ func TestWriteDraftsAFirstRelease(t *testing.T) {
 	notes := string(data)
 	for _, want := range []string{
 		Opening,
-		Opening + "\n\n## What's Changed\n\n",
+		Opening + "\n\n## Pull Requests\n\n### Other Changes\n\n",
 		"- Initial in https://github.com/fabricahq/example/commit/",
-		"- Add b in https://github.com/fabricahq/example/pull/1\n",
+		"- Add b in #1\n",
 		"This is the first release. Browse the source at [v1.0.0](https://github.com/fabricahq/example/tree/v1.0.0).",
 	} {
 		if !strings.Contains(notes, want) {
@@ -109,22 +109,28 @@ func TestWriteDraftsALaterRelease(t *testing.T) {
 	}
 	data, _ := os.ReadFile(filepath.Join(repo.Dir, name))
 	notes := string(data)
-	want := Opening + "\n\n## What's Changed\n\n- Add a Svelte group in https://github.com/fabricahq/example/pull/7\n\n**Full Changelog**: https://github.com/fabricahq/example/compare/v1.0.0...v1.1.0\n"
+	want := Opening + "\n\n## Pull Requests\n\n### Other Changes\n\n- Add a Svelte group in #7\n\n**Full Changelog**: https://github.com/fabricahq/example/compare/v1.0.0...v1.1.0\n"
 	if notes != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", notes, want)
 	}
 }
 
-func TestRenderListsBranchChangesAndLinksTheComparison(t *testing.T) {
+func TestRenderGroupsPullRequestsByType(t *testing.T) {
 	inv := plan.Inventory{Previous: "v1.0.0", Commits: []plan.Commit{
-		{SHA: "1d7ee9b0000000000000000000000000000000000", Subject: "Add runes rules", Title: "Add runes rules"},
-		{SHA: "5ba22db0000000000000000000000000000000000", Subject: "Merge pull request #7 from example/svelte", Title: "Add a Svelte group", PullRequest: 7, OnBranch: true},
+		{SHA: "1d7ee9b0000000000000000000000000000000000", Subject: "feat: add runes rules", Title: "feat: add runes rules"},
+		{SHA: "5ba22db0000000000000000000000000000000000", Subject: "Merge pull request #7 from example/svelte", Title: "feat(svelte): add a Svelte group", PullRequest: 7, OnBranch: true},
+		{SHA: "6c33d1e0000000000000000000000000000000000", Subject: "fix!: reject empty rule IDs (#9)", Title: "fix!: reject empty rule IDs", PullRequest: 9, OnBranch: true},
+		{SHA: "7aa0b120000000000000000000000000000000000", Subject: "Docs: explain groups (#8)", Title: "Docs: explain groups", PullRequest: 8, OnBranch: true},
+		{SHA: "8bb1c230000000000000000000000000000000000", Subject: "chore(deps): bump yaml (#10)", Title: "chore(deps): bump yaml", PullRequest: 10, OnBranch: true},
 		{SHA: "9c01ab30000000000000000000000000000000000", Subject: "Fix a typo", Title: "Fix a typo", OnBranch: true},
 		{SHA: "4e5f6a70000000000000000000000000000000000", Subject: "Merge branch 'main' into feature", Title: "Merge branch 'main' into feature", OnBranch: true},
 	}}
-	want := Opening + "\n\n## What's Changed\n\n" +
-		"- Add a Svelte group in https://github.com/fabricahq/example/pull/7\n" +
-		"- Fix a typo in https://github.com/fabricahq/example/commit/9c01ab3\n" +
+	want := Opening + "\n\n## Pull Requests\n" +
+		"\n### ✨ Features\n\n- feat(svelte): add a Svelte group in #7\n" +
+		"\n### 🐛 Bug Fixes\n\n- fix!: reject empty rule IDs in #9\n" +
+		"\n### 📖 Documentation\n\n- Docs: explain groups in #8\n" +
+		"\n### 🧹 Chores\n\n- chore(deps): bump yaml in #10\n" +
+		"\n### Other Changes\n\n- Fix a typo in https://github.com/fabricahq/example/commit/9c01ab3\n" +
 		"\n**Full Changelog**: https://github.com/fabricahq/example/compare/v1.0.0...v1.1.0\n"
 	if got := Render(inv, "fabricahq/example", "v1.1.0"); got != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", got, want)

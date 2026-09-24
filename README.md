@@ -186,7 +186,7 @@ Or to replace, using [Keep a Changelog](https://keepachangelog.com) headings:
 
 List the same headings, in the order you want, under **Order of the release notes** in your policy.
 
-Whatever the style says, every release keeps the parts `draft` writes: the **What's Changed** list, and the **Full Changelog** link (or, for a first release, a link to the tagged source).
+Whatever the style says, every release keeps the parts `draft` writes: the **Pull Requests** section, listing every pull request with its author under Features, Bug Fixes, Documentation, CI, and Chores, and the **Full Changelog** link (or, for a first release, a link to the tagged source).
 
 ## Write your release policy
 

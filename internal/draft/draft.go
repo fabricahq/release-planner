@@ -10,6 +10,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/fabricahq/release-planner/internal/config"
@@ -82,26 +83,41 @@ func Write(ctx context.Context, repo gitrepo.Repo, c config.Config, ownerName, v
 
 // Render returns a draft's notes for version from the inventory since the previous release,
 // with links into the GitHub repository ownerName. The agent adds headings as the release
-// notes style says; the draft holds only the fixed parts.
+// notes style says; the draft holds only the fixed parts: a Pull Requests section grouped by
+// conventional-commit type, and the closing link.
 func Render(inv plan.Inventory, ownerName, version string) string {
 	base := "https://github.com/" + ownerName
-	var b strings.Builder
-	b.WriteString(Opening + "\n")
-	b.WriteString("\n## What's Changed\n\n")
-	listed := 0
+	entries := map[string][]string{}
 	for _, commit := range inv.Commits {
+		var entry string
 		switch {
 		case commit.PullRequest != 0 && commit.OnBranch:
-			fmt.Fprintf(&b, "- %s in %s/pull/%d\n", commit.Title, base, commit.PullRequest)
+			entry = fmt.Sprintf("- %s in #%d\n", commit.Title, commit.PullRequest)
 		case commit.OnBranch && !strings.HasPrefix(commit.Subject, "Merge "):
-			fmt.Fprintf(&b, "- %s in %s/commit/%s\n", commit.Title, base, commit.SHA[:7])
+			entry = fmt.Sprintf("- %s in %s/commit/%s\n", commit.Title, base, commit.SHA[:7])
 		default:
 			continue
 		}
-		listed++
+		group := groupOf(commit.Title)
+		entries[group] = append(entries[group], entry)
 	}
-	if listed == 0 {
-		b.WriteString("- No changes on the release branch since the previous release.\n")
+
+	var b strings.Builder
+	b.WriteString(Opening + "\n")
+	b.WriteString("\n## Pull Requests\n")
+	listed := false
+	for _, group := range groups {
+		if len(entries[group.heading]) == 0 {
+			continue
+		}
+		listed = true
+		fmt.Fprintf(&b, "\n### %s\n\n", group.heading)
+		for _, entry := range entries[group.heading] {
+			b.WriteString(entry)
+		}
+	}
+	if !listed {
+		b.WriteString("\n- No changes on the release branch since the previous release.\n")
 	}
 	if inv.Previous != "" {
 		fmt.Fprintf(&b, "\n**Full Changelog**: %s/compare/%s...%s\n", base, inv.Previous, version)
@@ -109,4 +125,35 @@ func Render(inv plan.Inventory, ownerName, version string) string {
 		fmt.Fprintf(&b, "\nThis is the first release. Browse the source at [%s](%s/tree/%s).\n", version, base, version)
 	}
 	return b.String()
+}
+
+// groups are the Pull Requests subsections, in order, with the conventional-commit types
+// each collects. Other Changes holds titles without a recognized type, for the agent to sort.
+var groups = []struct {
+	heading string
+	types   []string
+}{
+	{"✨ Features", []string{"feat"}},
+	{"🐛 Bug Fixes", []string{"fix"}},
+	{"📖 Documentation", []string{"docs"}},
+	{"🤖 CI", []string{"ci"}},
+	{"🧹 Chores", []string{"chore", "refactor", "test", "build", "perf", "style", "revert", "deps"}},
+	{OtherChanges, nil},
+}
+
+// OtherChanges is the group for titles without a conventional-commit type.
+const OtherChanges = "Other Changes"
+
+var conventional = regexp.MustCompile(`^([a-z]+)(\([^)]*\))?!?:\s`)
+
+// groupOf returns the Pull Requests subsection for a pull request or commit title.
+func groupOf(title string) string {
+	if m := conventional.FindStringSubmatch(strings.ToLower(title)); m != nil {
+		for _, group := range groups {
+			if slices.Contains(group.types, m[1]) {
+				return group.heading
+			}
+		}
+	}
+	return OtherChanges
 }

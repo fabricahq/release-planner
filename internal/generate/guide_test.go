@@ -51,7 +51,7 @@ func TestGuideAppendsOrReplacesTheReleaseNotesStyle(t *testing.T) {
 		t.Errorf("replace:\n%s", replaced)
 	}
 	// The fixed rules around the style apply whatever the style says.
-	if !strings.Contains(replaced, "Keep `## What's Changed` and the closing line") {
+	if !strings.Contains(replaced, "Keep `## Pull Requests` and the closing line") {
 		t.Error("replace dropped the fixed rules")
 	}
 }

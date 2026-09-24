@@ -83,4 +83,4 @@ release-planner guide --default-style > .release-planner/release-notes-style.md
 
 ## What every release keeps
 
-Whatever your style says, the notes end with a **What's Changed** list of the pull requests, followed by a **Full Changelog** link (or, for a first release, a link to the released source). The release workflow also rejects notes that still contain the draft's placeholder line or have empty headings.
+Whatever your style says, the notes end with a **Pull Requests** section listing every pull request with its author, grouped into Features, Bug Fixes, Documentation, CI, and Chores, followed by a **Full Changelog** link (or, for a first release, a link to the released source). The release workflow also rejects notes that still contain the draft's placeholder line or have empty headings.

@@ -44,10 +44,13 @@ Create a release branch, then run:
 release-planner draft <version>
 ```
 
-It creates `{{.NotesDir}}/<version>.md` with a TODO opening line, a `## What's Changed` list of the pull requests, and a closing link: the **Full Changelog** comparison, or for a first release, a link to the tagged source. Write the notes in it, following the release notes style below. Whatever the style says:
+It creates `{{.NotesDir}}/<version>.md` with a TODO opening line, a `## Pull Requests` section, and a closing link: the **Full Changelog** comparison, or for a first release, a link to the tagged source. The Pull Requests section lists every pull request merged into `{{.Branch}}`, and every direct commit, grouped by conventional-commit type under ✨ Features, 🐛 Bug Fixes, 📖 Documentation, 🤖 CI, and 🧹 Chores. Titles without a type go under Other Changes. Write the notes in it, following the release notes style below. Whatever the style says:
 
 - Replace the TODO line, and don't leave empty headings. `plan` rejects both.
-- Keep `## What's Changed` and the closing line, removing entries the inventory leaves out. Add `## New Contributors` only for verified first contributions.
+- Keep `## Pull Requests` and the closing line, removing entries the inventory leaves out. Keep each title as written.
+- Move every entry under Other Changes into the group that fits it, reading the pull request if the title doesn't say. Delete Other Changes once it's empty.
+- Add the author's GitHub handle to each pull request entry, as `- <title> by @<handle> in #<number>`, such as `- feat: add login command by @octocat in #7`. Take the handle from the pull request, for example `gh pr view <number> --json author --jq .author.login`. The inventory's `author` is a git name, not a handle, so never guess one.
+- Add `## New Contributors` only for verified first contributions.
 - Use absolute URLs for links to files and pages, because the notes render on the release page. Pull request numbers such as `#7` link automatically.
 
 ### Release notes style
