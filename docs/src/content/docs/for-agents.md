@@ -34,8 +34,8 @@ Run every command from the repository root, with the pinned version installed. E
 | `check` | CI, maintainer | Exits 1 if a generated file is missing, stale, or edited by hand. Writes nothing. |
 | `uninstall [--force]` | Maintainer | Deletes the generated files and the `AGENTS.md` section. |
 | `guide [--default-style]` | Agent | Prints the release procedure, or only the default release notes style. |
-| `inventory [--head <ref>]` | Agent | Prints JSON describing everything since the previous release. |
-| `draft [--repository <owner/name>] <version>` | Agent | Creates the notes file for a version. |
+| `inventory [--head <ref>] [--repository <owner/name>] [--offline]` | Agent | Prints JSON describing everything since the previous release, including each pull request author's GitHub handle. |
+| `draft [--repository <owner/name>] [--offline] <version>` | Agent | Checks the version and creates the notes file with its raw material: every pull request with its author, new contributors, and the closing link. |
 | `plan --base <ref> [--head <ref>] [--out <file>]` | CI, agent | Validates the release request between two commits and prints the plan as JSON. |
 | `publish --plan <file> --commit <sha> --branch <name> [--assets <dir>]` | CI | Tags the approved commit and publishes the release. Refuses unless the commit is a pull request merged into the branch. With `--assets`, uploads the directory's files to a draft, verifies GitHub's checksums for them, and publishes last. Needs `GITHUB_TOKEN` and `GITHUB_REPOSITORY`. |
 | `version` | Anyone | Prints the running version. |
@@ -74,8 +74,10 @@ If `policy.md` is missing or still contains `TODO:` prompts, stop and ask the ma
     { "sha": "1d7ee9b…", "author": "Ada", "subject": "Add Svelte runes rules",
       "title": "Add Svelte runes rules", "onBranch": false },
     { "sha": "5ba22db…", "author": "Ada", "subject": "Merge pull request #7 from example/svelte",
-      "title": "Add a Svelte group", "pullRequest": 7, "onBranch": true }
-  ]
+      "title": "Add a Svelte group", "pullRequest": 7, "authorHandle": "ada", "onBranch": true }
+  ],
+  "newContributors": [{ "handle": "ada", "pullRequest": 7 }],
+  "warnings": []
 }
 ```
 
@@ -84,17 +86,24 @@ If `policy.md` is missing or still contains `TODO:` prompts, stop and ask the ma
 - `unmergedNewerTags` lists version tags newer than `previous` that the head doesn't contain. Stop and ask.
 - `title` is the pull request's title for merge and squash commits, read from the merge commit's body or the squash subject.
 - `onBranch` is true for commits made directly on the release branch: pull request merges and direct commits. The others are commits inside merged branches.
-- `author` is the git author name, not a GitHub username.
+- `author` is the git author name, not a GitHub handle. `authorHandle` is the pull request author's GitHub handle, which `inventory` looks up on GitHub for each pull request.
+- `newContributors` lists each author with no commits in the previous release, with the first pull request in this release that is theirs. In a first release, every author is new. Bots are left out.
+- `warnings` explains anything `inventory` couldn't look up, such as a handle when GitHub was unreachable. It never fails for that reason.
+
+To look up handles, `inventory` uses `GITHUB_TOKEN`, `GH_TOKEN`, or the GitHub CLI's login, in that order, or no token for a public repository. It reads the repository from the `origin` remote unless given `--repository`. Pass `--offline` to skip the lookups.
 
 ## Drafts
 
-`draft <version>` creates `releases/<version>.md` containing:
+`draft` does everything about the notes that can be worked out deterministically, so the agent spends its effort on judgment: what the changes mean, how to group them, and how to say it. `draft <version>` checks the version, then creates `releases/<version>.md` containing:
 
 1. A placeholder opening line starting `TODO: Open with one or two sentences`.
-2. `## What's Changed`, listing each pull request merged into the release branch, and each direct commit, with links.
-3. A closing line: `**Full Changelog**: <compare link>`, or for a first release, a link to the tagged source.
+2. `## Pull Requests`: each pull request merged into the release branch and each direct commit, in merge order, as `- <title> by @<handle> in #<number>`, or `- <title> in <commit URL>` for a direct commit.
+3. `## New Contributors`, when there are any: `- @<handle> made their first contribution in #<number>` for each author with no commits in the previous release, credited for their first pull request listed above, in merge order. In a first release, every author is new. Bots are left out.
+4. A closing line: `**Full Changelog**: <compare link>`, or for a first release, a link to the tagged source.
 
-The agent replaces the placeholder, adds headings and entries following the release notes style, and removes What's Changed entries the inventory leaves out. `draft` refuses a version that isn't newer than every tag, a first release that doesn't match `first-version`, an existing file, or an unpublished earlier request. It reads the GitHub repository from the `origin` remote unless given `--repository`.
+`draft` makes no choices about grouping or wording, and it leaves pull request numbers such as `#7` for GitHub to link. The agent replaces the placeholder, writes the notes, and organizes the Pull Requests entries as the release notes style says, keeping every entry. The default style groups them by conventional-commit type.
+
+`draft` looks up handles and new contributors on GitHub, as `inventory` does. A failed lookup prints a warning after `created`, and leaves the handle out rather than failing; fill it in from the pull request. Pass `--offline` to skip the lookups. `draft` refuses a version that isn't newer than every tag, a first release that doesn't match `first-version`, an existing file, or an unpublished earlier request. It reads the GitHub repository from the `origin` remote unless given `--repository`.
 
 ## What `plan` checks
 

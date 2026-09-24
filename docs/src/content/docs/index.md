@@ -39,11 +39,16 @@ A new `techs/svelte` group with six rules for writing Svelte 5 components with r
 
 - `techs/zustand/rehydrate-persisted-stores-after-hydration` no longer shows reading storage during server rendering. (#8)
 
-#### What's Changed
+#### Pull Requests
 
-- Add a Svelte group in #7
-- Correct the Zustand hydration example in #8
-- Add Svelte examples for stores and snippets in #9
+**✨ Features**
+
+- feat: add a Svelte group by @ada in #7
+- feat(svelte): add examples for stores and snippets by @grace in #9
+
+**🐛 Bug Fixes**
+
+- fix(zustand): correct the hydration example by @ada in #8
 
 **Full Changelog**: v1.0.0...v1.1.0
 
