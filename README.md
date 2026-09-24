@@ -64,7 +64,7 @@ From the repository root:
 5. **Protect releases** in your repository settings:
    - Require pull requests for your release branch, with your CI as required status checks, and require branches to be up to date before merging (or use a merge queue). This is what guarantees that the commit you release was tested.
    - Block force pushes to and deletion of that branch.
-   - Create an environment named `release` that allows only your release branch, with no required reviewers. The merge is the approval.
+   - Create an environment named `release` (Settings → Environments). Under **Deployment branches and tags**, add a branch rule for your release branch only. Leave **Required reviewers** off: the merge is the approval, and reviewers would make every release wait for a second approval in the Actions tab.
    - Turn on immutable releases, so published tags and releases can't be changed.
 
 6. **Commit the files**, then tell your agent "let's release."
