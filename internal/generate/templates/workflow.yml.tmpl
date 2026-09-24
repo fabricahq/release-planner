@@ -29,10 +29,10 @@ name: Release
 # so ordinary changes never create releases.
 on:
   push:
-    branches: [{{.Branch}}]
-    paths: ['{{.NotesDir}}/v*.md']
+    branches: [{{yamlString .Branch}}]
+    paths: [{{yamlString (printf "%s/v*.md" .NotesDir)}}]
   pull_request:
-    paths: ['{{.NotesDir}}/**', '.release-planner/**', '.github/workflows/release-planner.yml']
+    paths: [{{yamlString (printf "%s/**" .NotesDir)}}, '.release-planner/**', '.github/workflows/release-planner.yml']
   # Retry a failed publication with both endpoints of the original approved push.
   workflow_dispatch:
     inputs:

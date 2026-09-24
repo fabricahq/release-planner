@@ -126,9 +126,17 @@ func Read(ctx context.Context, repo gitrepo.Repo, opts Options, base, head strin
 			continue
 		}
 		if status != "A" {
-			// Published notes are history; later corrections belong in a new release.
+			// Published notes are history; later corrections belong in a new release. The one
+			// exception is retrying the approved range itself: a corrected request whose tag
+			// publication already created at this head.
 			if slices.Contains(tags, tag) {
-				return empty, fmt.Errorf("tagged release notes are immutable: %s", name)
+				target, err := repo.Resolve(ctx, "refs/tags/"+tag)
+				if err != nil {
+					return empty, err
+				}
+				if status != "M" || target != head {
+					return empty, fmt.Errorf("tagged release notes are immutable: %s", name)
+				}
 			}
 			if status == "D" {
 				continue

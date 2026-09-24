@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -70,8 +72,12 @@ func TestBuild(t *testing.T) {
 	if strings.Count(string(sums), "\n") != len(Targets) {
 		t.Fatal(string(sums))
 	}
-	// The native binary reports the stamped version.
-	archive, _ := os.ReadFile(filepath.Join(out, ArchiveName("v9.9.9", "linux/amd64")))
+	// The host platform's binary reports the stamped version. The others are only cross-compiled.
+	host := runtime.GOOS + "/" + runtime.GOARCH
+	if !slices.Contains(Targets, host) {
+		t.Skipf("no release archive for %s", host)
+	}
+	archive, _ := os.ReadFile(filepath.Join(out, ArchiveName("v9.9.9", host)))
 	gz, _ := gzip.NewReader(bytes.NewReader(archive))
 	tr := tar.NewReader(gz)
 	if _, err := tr.Next(); err != nil {

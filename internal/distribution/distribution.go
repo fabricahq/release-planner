@@ -107,7 +107,7 @@ func Build(ctx context.Context, source, version, out string) ([]string, error) {
 		cmd.Dir = source
 		cmd.Env = append(os.Environ(), "GOOS="+goos, "GOARCH="+goarch, "CGO_ENABLED=0")
 		if output, err := cmd.CombinedOutput(); err != nil {
-			return nil, fmt.Errorf("build %s: %w: %s", target, err, output)
+			return nil, fmt.Errorf("build %s: %v: %s", target, err, output)
 		}
 		data, err := os.ReadFile(bin)
 		if err != nil {

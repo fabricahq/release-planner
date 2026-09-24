@@ -31,7 +31,10 @@ var Actions = struct {
 //go:embed templates
 var templates embed.FS
 
-var parsed = template.Must(template.New("").Option("missingkey=error").ParseFS(templates, "templates/*.tmpl"))
+var parsed = template.Must(template.New("").Option("missingkey=error").Funcs(template.FuncMap{"yamlString": yamlString}).ParseFS(templates, "templates/*.tmpl"))
+
+// yamlString quotes s as a single-quoted YAML scalar, so any value reads back unchanged.
+func yamlString(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
 
 type data struct {
 	config.Config

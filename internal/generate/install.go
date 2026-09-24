@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/fabricahq/release-planner/internal/config"
@@ -286,7 +287,7 @@ func callableWorkflow(root, name string) (string, error) {
 		On any `yaml:"on"`
 	}
 	if err := yaml.Unmarshal([]byte(data), &wf); err != nil {
-		return "", fmt.Errorf(".github/workflows/%s: %w", name, err)
+		return "", fmt.Errorf(".github/workflows/%s: %v", name, err)
 	}
 	const need = "add a workflow_call trigger with a string input named ref, and check out that ref"
 	on, _ := wf.On.(map[string]any)
@@ -296,8 +297,23 @@ func callableWorkflow(root, name string) (string, error) {
 	}
 	callMap, _ := call.(map[string]any)
 	inputs, _ := callMap["inputs"].(map[string]any)
-	if _, ok := inputs["ref"]; !ok {
+	ref, ok := inputs["ref"]
+	if !ok {
 		return "has no ref input, so it cannot check the release commit; " + need, nil
+	}
+	if refMap, _ := ref.(map[string]any); refMap["type"] != "string" {
+		return "declares ref without type: string, but the Release workflow passes a commit SHA; " + need, nil
+	}
+	var extra []string
+	for name, input := range inputs {
+		spec, _ := input.(map[string]any)
+		if _, hasDefault := spec["default"]; name != "ref" && spec["required"] == true && !hasDefault {
+			extra = append(extra, name)
+		}
+	}
+	if len(extra) > 0 {
+		slices.Sort(extra)
+		return fmt.Sprintf("requires inputs the Release workflow can't supply (%s); give them defaults or make them optional", strings.Join(extra, ", ")), nil
 	}
 	return "", nil
 }

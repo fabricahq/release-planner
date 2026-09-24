@@ -159,6 +159,25 @@ func TestCorrectOrWithdrawUntaggedRequest(t *testing.T) {
 	}
 }
 
+// Publication can create the tag and then fail. Retrying the same corrected range must
+// still plan, while any later edit to the now-published notes stays immutable.
+func TestRetriesCorrectedRequestAfterTagCreated(t *testing.T) {
+	f := newFixture(t)
+	f.write("releases/v1.0.0.md", "Original")
+	original := f.commit("Request")
+	f.write("releases/v1.0.0.md", "Corrected")
+	corrected := f.commit("Correct")
+	f.git("tag", "v1.0.0", corrected)
+	if p, err := f.plan(original, corrected); err != nil || p.Tag != "v1.0.0" || p.Notes != "Corrected" {
+		t.Fatal(p, err)
+	}
+	f.write("releases/v1.0.0.md", "Edited after publication")
+	f.commit("Edit")
+	if _, err := f.plan(corrected, "HEAD"); err == nil || !strings.Contains(err.Error(), "immutable") {
+		t.Fatal(err)
+	}
+}
+
 func TestIgnoresMalformedVersionTags(t *testing.T) {
 	f := newFixture(t)
 	f.git("tag", "v-preview")

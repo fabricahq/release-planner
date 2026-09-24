@@ -319,7 +319,7 @@ func cmdPlan(ctx context.Context, args []string, out io.Writer) error {
 		// doesn't contain once the branch has moved on. Check what the pull request adds.
 		mergeBase, err := repo.MergeBase(ctx, *base, *head)
 		if err != nil {
-			return fmt.Errorf("finding where the pull request branched from %s: %w", *base, err)
+			return fmt.Errorf("finding where the pull request branched from %s: %v", *base, err)
 		}
 		*base = mergeBase
 	}
@@ -399,7 +399,7 @@ func cmdPublish(ctx context.Context, args []string, out io.Writer) error {
 	}
 	var p plan.Plan
 	if err := json.Unmarshal(data, &p); err != nil {
-		return fmt.Errorf("read %s: %w", *planFile, err)
+		return fmt.Errorf("read %s: %v", *planFile, err)
 	}
 	var assets []publish.File
 	if *assetsDir != "" {

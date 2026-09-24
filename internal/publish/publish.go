@@ -132,10 +132,14 @@ func Publish(ctx context.Context, gh *GitHub, p plan.Plan, commit, branch string
 	if release != nil && (release.Name != p.Tag || normalize(release.Body) != normalize(p.Notes) || release.Prerelease != p.Prerelease) {
 		return Result{}, fmt.Errorf("an existing %s release differs from the approved notes; resolve it by hand", p.Tag)
 	}
+	if release != nil && release.Draft && existing == "" && release.TargetCommitish != commit {
+		// Publishing this draft would create the tag on its own target, not the approved commit.
+		return Result{}, fmt.Errorf("an existing %s draft targets %s, not the approved %s; delete the draft and retry", p.Tag, release.TargetCommitish, commit)
+	}
 	if release != nil && !release.Draft {
 		// A published release is immutable; accept it only if it is exactly what was approved.
 		if err := verifyAssets(ctx, gh, release, assets); err != nil {
-			return Result{}, fmt.Errorf("%s is already published, but %w", p.Tag, err)
+			return Result{}, fmt.Errorf("%s is already published, but %v", p.Tag, err)
 		}
 		return Result{URL: release.HTMLURL, AlreadyPublished: true}, verifyTag(ctx, gh, p.Tag, commit)
 	}
@@ -158,9 +162,9 @@ func Publish(ctx context.Context, gh *GitHub, p plan.Plan, commit, branch string
 			return Result{}, err
 		}
 		if err := verifyAssets(ctx, gh, fresh, assets); err != nil {
-			return Result{}, fmt.Errorf("staged %s draft: %w", p.Tag, err)
+			return Result{}, fmt.Errorf("staged %s draft: %v", p.Tag, err)
 		}
-		if release, err = gh.PublishDraft(ctx, release.ID, !p.Prerelease); err != nil {
+		if release, err = gh.PublishDraft(ctx, release.ID, commit, !p.Prerelease); err != nil {
 			return Result{}, err
 		}
 	}

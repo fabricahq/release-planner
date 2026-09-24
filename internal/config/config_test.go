@@ -99,6 +99,7 @@ func TestRejections(t *testing.T) {
 		"bad first":         {"schema-version: 1\nversion: v0.2.0\nfirst-version: 1.0\nvalidate:\n  run: x\n", "first-version"},
 		"escaping dir":      {"schema-version: 1\nversion: v0.2.0\nnotes-dir: ../x\nvalidate:\n  run: x\n", "notes-dir"},
 		"absolute dir":      {"schema-version: 1\nversion: v0.2.0\nnotes-dir: /x\nvalidate:\n  run: x\n", "notes-dir"},
+		"pattern dir":       {"schema-version: 1\nversion: v0.2.0\nnotes-dir: rel*\n", "path filters treat as patterns"},
 		"config dir":        {"schema-version: 1\nversion: v0.2.0\nnotes-dir: .release-planner/notes\nvalidate:\n  run: x\n", "notes-dir"},
 		"run and workflow":  {"schema-version: 1\nversion: v0.2.0\nvalidate:\n  run: x\n  workflow: ci.yml\n", "run or workflow, not both"},
 		"workflow tools":    {"schema-version: 1\nversion: v0.2.0\nvalidate:\n  go: '1.27.x'\n  workflow: ci.yml\n", "set up toolchains in ci.yml"},

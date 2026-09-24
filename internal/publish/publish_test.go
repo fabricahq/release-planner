@@ -55,7 +55,7 @@ func newFake() *fakeGitHub {
 }
 
 func (f *fakeGitHub) release(tag string, draft bool, body string) {
-	f.releases = append(f.releases, Release{ID: int64(len(f.releases) + 1), TagName: tag, Name: tag, Body: body, Draft: draft})
+	f.releases = append(f.releases, Release{ID: int64(len(f.releases) + 1), TagName: tag, Name: tag, Body: body, Draft: draft, TargetCommitish: approved})
 }
 
 func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -143,7 +143,7 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if _, ok := f.tags[tag]; !ok && !draft {
 			f.tags[tag] = ref{"commit", f.targets[id]}
 		}
-		rel := Release{ID: id, TagName: tag, Name: body["name"].(string), Body: body["body"].(string), Draft: draft,
+		rel := Release{ID: id, TagName: tag, Name: body["name"].(string), Body: body["body"].(string), Draft: draft, TargetCommitish: f.targets[id],
 			Prerelease: body["prerelease"].(bool), HTMLURL: "https://github.com/fabricahq/example/releases/tag/" + tag,
 			UploadURL: fmt.Sprintf("http://%s/repos/fabricahq/example/releases/%d/assets{?name,label}", r.Host, id)}
 		f.releases = append(f.releases, rel)
@@ -151,12 +151,15 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodPatch && strings.HasPrefix(path, "/releases/"):
 		var id int64
 		fmt.Sscanf(strings.TrimPrefix(path, "/releases/"), "%d", &id)
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
 		f.writes = append(f.writes, "publish draft")
 		rel := &f.releases[id-1]
 		rel.Draft = false
-		target := f.targets[id]
-		if target == "" {
-			target = approved
+		// Like GitHub, a target in the request replaces the draft's own.
+		target := rel.TargetCommitish
+		if t, ok := body["target_commitish"].(string); ok {
+			target = t
 		}
 		if _, ok := f.tags[rel.TagName]; !ok {
 			f.tags[rel.TagName] = ref{"commit", target}
@@ -396,6 +399,23 @@ func TestVerifiesAssetsWithoutGitHubDigests(t *testing.T) {
 	f.hideDigests = true
 	if _, err := runWith(t, f, minor(), files(t, map[string]string{"a.tar.gz": "a"})); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A matching draft left on another commit must not be published: its tag would be
+// created on that commit instead of the approved one.
+func TestRefusesADraftTargetingAnotherCommit(t *testing.T) {
+	f := withPrevious()
+	f.release("v1.1.0", true, "## Notes\n")
+	f.releases[len(f.releases)-1].TargetCommitish = other
+	if _, err := run(t, f, minor()); err == nil || !strings.Contains(err.Error(), "draft targets "+other) {
+		t.Fatal(err)
+	}
+	if len(f.writes) != 0 {
+		t.Fatalf("wrote before refusing: %v", f.writes)
+	}
+	if _, ok := f.tags["v1.1.0"]; ok {
+		t.Fatal("created the tag")
 	}
 }
 

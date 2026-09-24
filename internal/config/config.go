@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"unicode"
 
 	"github.com/fabricahq/release-planner/internal/semver"
 	"go.yaml.in/yaml/v3"
@@ -160,7 +161,7 @@ func decode(data []byte) (Config, error) {
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&c); err != nil && !errors.Is(err, io.EOF) {
-		return Config{}, fmt.Errorf("%s: %w", File, err)
+		return Config{}, fmt.Errorf("%s: %v", File, err)
 	}
 	return c, nil
 }
@@ -185,6 +186,9 @@ func (c Config) check() error {
 	}
 	if clean := path.Clean(c.NotesDir); clean != c.NotesDir || path.IsAbs(clean) || clean == "." || strings.HasPrefix(clean, "..") || clean == Dir || strings.HasPrefix(clean, Dir+"/") {
 		add("notes-dir: use a relative directory inside the repository and outside %s, such as releases", Dir)
+	}
+	if strings.ContainsAny(c.NotesDir, "*?[]!+\\") || strings.ContainsFunc(c.NotesDir, unicode.IsControl) {
+		add("notes-dir: %q has characters that GitHub path filters treat as patterns; use letters, digits, and punctuation such as - _ . /", c.NotesDir)
 	}
 	if !branchName.MatchString(c.Branch) {
 		add("branch: %q is not a valid branch name", c.Branch)

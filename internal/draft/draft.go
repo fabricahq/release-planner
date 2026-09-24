@@ -27,7 +27,7 @@ var repository = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 func Repository(ctx context.Context, repo gitrepo.Repo) (string, error) {
 	url, err := repo.Run(ctx, "remote", "get-url", "origin")
 	if err != nil {
-		return "", fmt.Errorf("find the GitHub repository from the origin remote, or pass --repository owner/name: %w", err)
+		return "", fmt.Errorf("find the GitHub repository from the origin remote, or pass --repository owner/name: %v", err)
 	}
 	url = strings.TrimSuffix(strings.TrimSuffix(strings.TrimSpace(url), "/"), ".git")
 	parts := strings.FieldsFunc(url, func(r rune) bool { return r == '/' || r == ':' })

@@ -24,15 +24,17 @@ type GitHub struct {
 
 // Release is a GitHub release, draft or published.
 type Release struct {
-	ID         int64   `json:"id"`
-	TagName    string  `json:"tag_name"`
-	Name       string  `json:"name"`
-	Body       string  `json:"body"`
-	Draft      bool    `json:"draft"`
-	Prerelease bool    `json:"prerelease"`
-	HTMLURL    string  `json:"html_url"`
-	UploadURL  string  `json:"upload_url"`
-	Assets     []Asset `json:"assets"`
+	ID         int64  `json:"id"`
+	TagName    string `json:"tag_name"`
+	Name       string `json:"name"`
+	Body       string `json:"body"`
+	Draft      bool   `json:"draft"`
+	Prerelease bool   `json:"prerelease"`
+	// TargetCommitish is the commit a draft's tag will be created on when it is published.
+	TargetCommitish string  `json:"target_commitish"`
+	HTMLURL         string  `json:"html_url"`
+	UploadURL       string  `json:"upload_url"`
+	Assets          []Asset `json:"assets"`
 }
 
 // Asset is a file attached to a release.
@@ -116,12 +118,12 @@ func (g *GitHub) do(ctx context.Context, method, target string, body any, out an
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%s %s: %v", method, req.URL.Path, err)
 	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%s %s: read response: %v", method, req.URL.Path, err)
 	}
 	if resp.StatusCode == http.StatusNotFound {
 		return "", errNotFound{}
@@ -134,7 +136,7 @@ func (g *GitHub) do(ctx context.Context, method, target string, body any, out an
 	}
 	if out != nil {
 		if err := json.Unmarshal(data, out); err != nil {
-			return "", fmt.Errorf("%s %s: decode response: %w", method, req.URL.Path, err)
+			return "", fmt.Errorf("%s %s: decode response: %v", method, req.URL.Path, err)
 		}
 	}
 	return next, nil
@@ -263,15 +265,15 @@ func (g *GitHub) AssetDigest(ctx context.Context, a Asset) (string, error) {
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("download release asset %s from %s: %v", a.Name, g.Repository, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
-		return "", fmt.Errorf("download %s: %s", a.Name, resp.Status)
+		return "", fmt.Errorf("download release asset %s from %s: %s", a.Name, g.Repository, resp.Status)
 	}
 	h := sha256.New()
 	if _, err := io.Copy(h, resp.Body); err != nil {
-		return "", err
+		return "", fmt.Errorf("download release asset %s from %s: %v", a.Name, g.Repository, err)
 	}
 	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
 }
@@ -298,11 +300,12 @@ func (g *GitHub) MergedPullRequest(ctx context.Context, commit, branch string) (
 	return 0, nil
 }
 
-// PublishDraft makes an existing draft release public.
-func (g *GitHub) PublishDraft(ctx context.Context, id int64, makeLatest bool) (*Release, error) {
+// PublishDraft makes an existing draft release public, creating its tag on commit if the
+// tag doesn't exist yet.
+func (g *GitHub) PublishDraft(ctx context.Context, id int64, commit string, makeLatest bool) (*Release, error) {
 	var r Release
 	_, err := g.do(ctx, http.MethodPatch, fmt.Sprintf("/releases/%d", id), map[string]any{
-		"draft": false, "make_latest": latest(makeLatest),
+		"draft": false, "target_commitish": commit, "make_latest": latest(makeLatest),
 	}, &r)
 	return &r, err
 }

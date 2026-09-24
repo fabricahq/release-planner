@@ -4,8 +4,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+
+	"go.yaml.in/yaml/v3"
 
 	"github.com/fabricahq/release-planner/internal/config"
 )
@@ -126,6 +129,31 @@ func TestInstallIsIdempotent(t *testing.T) {
 	}
 }
 
+// A notes directory with YAML-significant characters still produces a workflow that parses
+// back to the same path filters.
+func TestWorkflowQuotesNotesDirectory(t *testing.T) {
+	c, err := config.Parse([]byte("schema-version: 1\nversion: v0.2.0\nnotes-dir: \"team's releases\"\n"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	if _, err := Install(root, c, false); err != nil {
+		t.Fatal(err)
+	}
+	var wf struct {
+		On struct {
+			Push        struct{ Branches, Paths []string }
+			PullRequest struct{ Paths []string } `yaml:"pull_request"`
+		}
+	}
+	if err := yaml.Unmarshal([]byte(read(t, root, WorkflowPath)), &wf); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(wf.On.Push.Paths, []string{"team's releases/v*.md"}) || !slices.Equal(wf.On.Push.Branches, []string{"main"}) || wf.On.PullRequest.Paths[0] != "team's releases/**" {
+		t.Fatalf("%+v", wf.On)
+	}
+}
+
 func TestWorkflowContent(t *testing.T) {
 	root := t.TempDir()
 	if _, err := Install(root, cfg(t, "v0.2.0"), false); err != nil {
@@ -137,7 +165,7 @@ func TestWorkflowContent(t *testing.T) {
 		"RELEASE_PLANNER_VERSION: v0.2.0\n",
 		"gh attestation verify SHA256SUMS --repo fabricahq/release-planner\n",
 		"run: release-planner check\n",
-		"paths: ['releases/v*.md']",
+		"paths: ['releases/v*.md']\n",
 		"go-version: '1.27.x'",
 		"          go install example.com/tool@v1\n          tool check\n",
 		"environment: release",
@@ -335,6 +363,14 @@ func TestValidateForms(t *testing.T) {
 	put(t, root, ".github/workflows/ci.yml", "on:\n  workflow_call:\n")
 	_, err = Install(root, withCI, false)
 	problemFor(t, err, ".github/workflows/ci.yml", "no ref input")
+
+	put(t, root, ".github/workflows/ci.yml", "on:\n  workflow_call:\n    inputs:\n      ref:\n        type: boolean\n")
+	_, err = Install(root, withCI, false)
+	problemFor(t, err, ".github/workflows/ci.yml", "without type: string")
+
+	put(t, root, ".github/workflows/ci.yml", "on:\n  workflow_call:\n    inputs:\n      ref:\n        type: string\n      target:\n        type: string\n        required: true\n      mode:\n        type: string\n        required: true\n        default: fast\n")
+	_, err = Install(root, withCI, false)
+	problemFor(t, err, ".github/workflows/ci.yml", "can't supply (target)")
 
 	put(t, root, ".github/workflows/ci.yml", "on:\n  pull_request:\n  workflow_call:\n    inputs:\n      ref:\n        type: string\n")
 	if _, err := Install(root, withCI, false); err != nil {
