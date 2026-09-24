@@ -45,7 +45,9 @@ A new `techs/svelte` group with six rules for writing Svelte 5 components with r
 
 </div>
 
-The notes open with what the release means for readers, group changes under clear headings, and end with a linked list of every pull request. You can [change the style](/customize/release-notes-style/) to suit your project.
+Release Planner comes with an opinionated release notes style, shown above: open with what the release means for readers, group changes under **New Features**, **Improvements**, **Squashed Bugs**, and **Breaking Changes**, and end with a linked list of every pull request.
+
+The style is fully customizable. You can add your own rules on top of it, such as always naming affected API endpoints, or replace it entirely with your own headings and format. See [Release notes style](/customize/release-notes-style/).
 
 ## How it works
 
