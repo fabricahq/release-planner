@@ -108,7 +108,9 @@ func (g *GitHub) do(ctx context.Context, method, target string, body any, out an
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-	req.Header.Set("Authorization", "Bearer "+g.Token)
+	if g.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+g.Token)
+	}
 	if body != nil {
 		req.Header.Set("Content-Type", contentType)
 	}
@@ -258,7 +260,9 @@ func (g *GitHub) AssetDigest(ctx context.Context, a Asset) (string, error) {
 		return "", err
 	}
 	req.Header.Set("Accept", "application/octet-stream")
-	req.Header.Set("Authorization", "Bearer "+g.Token)
+	if g.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+g.Token)
+	}
 	client := g.HTTP
 	if client == nil {
 		client = http.DefaultClient
@@ -298,6 +302,22 @@ func (g *GitHub) MergedPullRequest(ctx context.Context, commit, branch string) (
 		}
 	}
 	return 0, nil
+}
+
+// PullRequestAuthor returns the GitHub handle of the pull request's author.
+func (g *GitHub) PullRequestAuthor(ctx context.Context, number int) (string, error) {
+	var pr struct {
+		User struct {
+			Login string `json:"login"`
+		} `json:"user"`
+	}
+	if _, err := g.do(ctx, http.MethodGet, fmt.Sprintf("/pulls/%d", number), nil, &pr); err != nil {
+		return "", err
+	}
+	if pr.User.Login == "" {
+		return "", fmt.Errorf("pull request #%d has no author", number)
+	}
+	return pr.User.Login, nil
 }
 
 // PublishDraft makes an existing draft release public, creating its tag on commit if the

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -238,8 +239,10 @@ func printJSON(out io.Writer, v any) error {
 }
 
 func cmdInventory(ctx context.Context, args []string, out io.Writer) error {
-	fs, dir := flags("inventory", "inventory [--head <ref>]")
+	fs, dir := flags("inventory", "inventory [--head <ref>] [--repository owner/name] [--offline]")
 	head := fs.String("head", "HEAD", "commit the release would tag")
+	repository := fs.String("repository", "", "GitHub repository to look up pull request authors in, as owner/name (default: from the origin remote)")
+	offline := fs.Bool("offline", false, "don't look up pull request authors on GitHub")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -247,11 +250,60 @@ func cmdInventory(ctx context.Context, args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	inv, err := plan.Take(ctx, gitrepo.Repo{Dir: *dir}, plan.Options{NotesDir: c.NotesDir, FirstVersion: c.FirstVersion}, *head)
+	repo := gitrepo.Repo{Dir: *dir}
+	inv, err := plan.Take(ctx, repo, plan.Options{NotesDir: c.NotesDir, FirstVersion: c.FirstVersion}, *head)
 	if err != nil {
 		return err
 	}
+	if !*offline && len(inv.PullRequests) > 0 {
+		addAuthorHandles(ctx, repo, *repository, &inv)
+	}
 	return printJSON(out, inv)
+}
+
+// addAuthorHandles looks up each pull request's author on GitHub. Git history records only
+// author names, and the notes credit people by handle. A lookup that fails adds a warning
+// instead of failing the inventory, so the agent can look the handle up itself.
+func addAuthorHandles(ctx context.Context, repo gitrepo.Repo, repository string, inv *plan.Inventory) {
+	warn := func(format string, args ...any) { inv.Warnings = append(inv.Warnings, fmt.Sprintf(format, args...)) }
+	if repository == "" {
+		var err error
+		if repository, err = draft.Repository(ctx, repo); err != nil {
+			warn("no pull request authors: %v", err)
+			return
+		}
+	}
+	api := os.Getenv("GITHUB_API_URL")
+	if api == "" {
+		api = "https://api.github.com"
+	}
+	gh := &publish.GitHub{BaseURL: api, Token: githubToken(ctx), Repository: repository}
+	handles := map[int]string{}
+	for _, number := range inv.PullRequests {
+		handle, err := gh.PullRequestAuthor(ctx, number)
+		if err != nil {
+			warn("no author for pull request #%d: %v", number, err)
+			continue
+		}
+		handles[number] = handle
+	}
+	for i := range inv.Commits {
+		inv.Commits[i].AuthorHandle = handles[inv.Commits[i].PullRequest]
+	}
+}
+
+// githubToken finds a token for GitHub API reads: GITHUB_TOKEN, GH_TOKEN, or the GitHub CLI's
+// login. With none, requests are unauthenticated, which works for public repositories.
+func githubToken(ctx context.Context) string {
+	for _, name := range []string{"GITHUB_TOKEN", "GH_TOKEN"} {
+		if token := os.Getenv(name); token != "" {
+			return token
+		}
+	}
+	if out, err := exec.CommandContext(ctx, "gh", "auth", "token").Output(); err == nil {
+		return strings.TrimSpace(string(out))
+	}
+	return ""
 }
 
 func cmdDraft(ctx context.Context, args []string, out io.Writer) error {

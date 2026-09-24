@@ -22,7 +22,7 @@ Fetch `{{.Branch}}` and tags, then run:
 release-planner inventory --head origin/{{.Branch}}
 ```
 
-It prints the previous release, every commit since it with its pull request number, and the candidate next versions.
+It prints the previous release, every commit since it with its pull request number and its author's GitHub handle, and the candidate next versions. `warnings` lists anything it couldn't look up, such as a handle when GitHub was unreachable.
 
 - If `pendingRequests` is not empty, an earlier release was approved but never published. Show the maintainer and resolve it before preparing another.
 - If `unmergedNewerTags` is not empty, a version tag exists that `{{.Branch}}` does not contain. Stop and ask.
@@ -48,7 +48,7 @@ It creates `{{.NotesDir}}/<version>.md` with a TODO opening line, a `## Pull Req
 
 - Replace the TODO line, and don't leave empty headings. `plan` rejects both.
 - Keep `## Pull Requests`, listing every pull request and direct commit the inventory includes, and keep the closing line.
-- When you name an author, take the GitHub handle from the pull request, for example `gh pr view <number> --json author --jq .author.login`. The inventory's `author` is a git name, not a handle, so never guess one.
+- When you name an author, use the inventory's `authorHandle`. If it's missing, take the handle from the pull request, for example `gh pr view <number> --json author --jq .author.login`. The inventory's `author` is a git name, not a handle, so never guess one.
 - Add `## New Contributors` only for verified first contributions.
 - Use absolute URLs for links to files and pages, because the notes render on the release page. Pull request numbers such as `#7` link automatically.
 

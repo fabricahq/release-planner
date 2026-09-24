@@ -34,7 +34,7 @@ Run every command from the repository root, with the pinned version installed. E
 | `check` | CI, maintainer | Exits 1 if a generated file is missing, stale, or edited by hand. Writes nothing. |
 | `uninstall [--force]` | Maintainer | Deletes the generated files and the `AGENTS.md` section. |
 | `guide [--default-style]` | Agent | Prints the release procedure, or only the default release notes style. |
-| `inventory [--head <ref>]` | Agent | Prints JSON describing everything since the previous release. |
+| `inventory [--head <ref>] [--repository <owner/name>] [--offline]` | Agent | Prints JSON describing everything since the previous release, including each pull request author's GitHub handle. |
 | `draft [--repository <owner/name>] <version>` | Agent | Creates the notes file for a version. |
 | `plan --base <ref> [--head <ref>] [--out <file>]` | CI, agent | Validates the release request between two commits and prints the plan as JSON. |
 | `publish --plan <file> --commit <sha> --branch <name> [--assets <dir>]` | CI | Tags the approved commit and publishes the release. Refuses unless the commit is a pull request merged into the branch. With `--assets`, uploads the directory's files to a draft, verifies GitHub's checksums for them, and publishes last. Needs `GITHUB_TOKEN` and `GITHUB_REPOSITORY`. |
@@ -74,8 +74,9 @@ If `policy.md` is missing or still contains `TODO:` prompts, stop and ask the ma
     { "sha": "1d7ee9b…", "author": "Ada", "subject": "Add Svelte runes rules",
       "title": "Add Svelte runes rules", "onBranch": false },
     { "sha": "5ba22db…", "author": "Ada", "subject": "Merge pull request #7 from example/svelte",
-      "title": "Add a Svelte group", "pullRequest": 7, "onBranch": true }
-  ]
+      "title": "Add a Svelte group", "pullRequest": 7, "authorHandle": "ada", "onBranch": true }
+  ],
+  "warnings": []
 }
 ```
 
@@ -84,7 +85,10 @@ If `policy.md` is missing or still contains `TODO:` prompts, stop and ask the ma
 - `unmergedNewerTags` lists version tags newer than `previous` that the head doesn't contain. Stop and ask.
 - `title` is the pull request's title for merge and squash commits, read from the merge commit's body or the squash subject.
 - `onBranch` is true for commits made directly on the release branch: pull request merges and direct commits. The others are commits inside merged branches.
-- `author` is the git author name, not a GitHub username.
+- `author` is the git author name, not a GitHub handle. `authorHandle` is the pull request author's GitHub handle, which `inventory` looks up on GitHub for each pull request.
+- `warnings` explains anything `inventory` couldn't look up, such as a handle when GitHub was unreachable. It never fails for that reason.
+
+To look up handles, `inventory` uses `GITHUB_TOKEN`, `GH_TOKEN`, or the GitHub CLI's login, in that order, or no token for a public repository. It reads the repository from the `origin` remote unless given `--repository`. Pass `--offline` to skip the lookups.
 
 ## Drafts
 

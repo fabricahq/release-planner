@@ -23,6 +23,8 @@ type Inventory struct {
 	UnmergedNewerTags []string `json:"unmergedNewerTags"`
 	PullRequests      []int    `json:"pullRequests"`
 	Commits           []Commit `json:"commits"`
+	// Warnings explain information inventory could not gather, such as GitHub handles.
+	Warnings []string `json:"warnings"`
 }
 
 // Commit is one commit in the release range.
@@ -33,6 +35,8 @@ type Commit struct {
 	// Title is the pull request's title for a merge or squash commit, else the subject.
 	Title       string `json:"title"`
 	PullRequest int    `json:"pullRequest,omitempty"`
+	// AuthorHandle is the pull request author's GitHub handle, when inventory could look it up.
+	AuthorHandle string `json:"authorHandle,omitempty"`
 	// OnBranch is true for commits made directly on the release branch: pull request
 	// merges and direct commits, but not the commits inside a merged branch.
 	OnBranch bool `json:"onBranch"`
@@ -51,7 +55,7 @@ func Take(ctx context.Context, repo gitrepo.Repo, opts Options, head string) (In
 	if err != nil {
 		return Inventory{}, err
 	}
-	inv := Inventory{Head: head, PendingRequests: []string{}, UnmergedNewerTags: []string{}, PullRequests: []int{}, Commits: []Commit{}}
+	inv := Inventory{Head: head, PendingRequests: []string{}, UnmergedNewerTags: []string{}, PullRequests: []int{}, Commits: []Commit{}, Warnings: []string{}}
 	var latest semver.Version
 	for _, t := range tags {
 		v, ok := semver.Parse(t)

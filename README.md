@@ -211,7 +211,7 @@ Everyone runs the version your config pins. Agents check `release-planner versio
 | `check` | CI and you | Fails if a generated file is missing, stale, or edited by hand. Changes nothing. |
 | `uninstall [--force]` | You | Deletes the generated files and the `AGENTS.md` section. Leaves `.release-planner/` and your notes. |
 | `guide [--default-style]` | Agent | Prints the release procedure for this version, or only the default release notes style. |
-| `inventory [--head <ref>]` | Agent | Lists the previous release, every commit since it, and the candidate next versions. |
+| `inventory [--head <ref>] [--offline]` | Agent | Lists the previous release, every commit since it with its pull request author's GitHub handle, and the candidate next versions. |
 | `draft <version>` | Agent | Creates the notes file with a linked list of pull requests and the closing link. |
 | `plan --base <ref> [--head <ref>]` | CI and agent | Validates a release request and prints the tag, commit, and notes to publish. |
 | `publish --plan <file> --commit <sha> --branch <name> [--assets <dir>]` | CI | Tags the approved commit and publishes the approved notes, with optional files staged on a draft and verified first. |
