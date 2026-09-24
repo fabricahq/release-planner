@@ -100,7 +100,7 @@ func style(c config.Config) string {
 	switch {
 	case c.Style == "":
 		return strings.TrimSpace(DefaultStyle())
-	case c.ReleaseNotesStyle == config.StyleReplace:
+	case c.ReleaseNotesStyle.Mode == config.StyleReplace:
 		return c.Style
 	}
 	return strings.TrimSpace(DefaultStyle()) + "\n\nThis repository adds:\n\n" + c.Style

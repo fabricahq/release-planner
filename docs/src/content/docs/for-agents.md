@@ -48,7 +48,7 @@ Run every command from the repository root, with the pinned version installed. E
 | --- | --- | --- |
 | `.release-planner/config.yml` | Repository | Settings. See [Configuration](/customize/configuration/). |
 | `.release-planner/policy.md` | Repository | What users depend on, how to choose versions, who reads the notes, and what to always include or leave out. Wins over the guide where they differ. |
-| `.release-planner/release-notes-style.md` | Repository, optional | Appends to or replaces the default release notes style. |
+| The file `release-notes-style.file` names, conventionally `.release-planner/release-notes-style.md` | Repository, optional | Appends to or replaces the default release notes style, as `release-notes-style.mode` says. |
 | `releases/v<version>.md` | Release pull request | The notes for one release, published word for word. |
 | `.github/workflows/release-planner.yml` | Generated | The release workflow. |
 | `.agents/skills/release/SKILL.md`, `.claude/skills/release/SKILL.md` | Generated | Tell agents to run `guide` when asked to release. |

@@ -75,7 +75,7 @@ From the repository root:
 .release-planner/
   config.yml                  # you write it: version pin and settings
   policy.md                   # you write it: versioning, audience, always and never
-  release-notes-style.md      # optional: how to write the notes
+  release-notes-style.md      # optional, if config.yml names it: how to write the notes
 releases/
   v1.0.0.md                   # the release notes, one file per release
 .github/workflows/release-planner.yml   # generated
@@ -96,7 +96,7 @@ Everything in `.release-planner/` belongs to you; Release Planner never rewrites
 | `version` | required | The Release Planner version to use: a release tag, or a full commit SHA. Bumping it upgrades the workflow, the agent guide, and the release checks together. |
 | `first-version` | `v0.1.0` | The version your first release must use. |
 | `validate` | none | Optional release-only checks. See [Release checks](#release-checks). |
-| `release-notes-style` | `append` | How `.release-planner/release-notes-style.md` applies, if it exists. See [Release notes style](#release-notes-style). |
+| `release-notes-style` | none | Your own release notes style: `file`, the markdown file that holds it, and `mode`, `append` or `replace`. See [Release notes style](#release-notes-style). |
 | `notes-dir` | `releases` | Where the release notes files live. |
 | `branch` | `main` | The branch whose notes changes publish releases. |
 
@@ -156,10 +156,18 @@ The release notes style tells the agent how to write the notes: how to open, whi
 
 Each entry ends with the pull requests it covers, such as (#7) or (#7, #9).
 
-To change it, create `.release-planner/release-notes-style.md`:
+To change it, write your style in a markdown file, such as `.release-planner/release-notes-style.md`, and name it in `config.yml` with how it applies:
 
-- With `release-notes-style: append`, the default, the agent follows the default style and then yours. Use it to add rules while keeping improvements to the default style when you upgrade.
-- With `release-notes-style: replace`, the agent follows only yours. Start from the default with `release-planner guide --default-style > .release-planner/release-notes-style.md`, then edit it. A replaced style doesn't change when you upgrade.
+```yaml
+release-notes-style:
+  file: .release-planner/release-notes-style.md
+  mode: append   # append or replace
+```
+
+- With `mode: append`, the agent follows the default style and then yours. Use it to add rules while keeping improvements to the default style when you upgrade.
+- With `mode: replace`, the agent follows only yours. Start from the default with `release-planner guide --default-style > .release-planner/release-notes-style.md`, then edit it. A replaced style doesn't change when you upgrade.
+
+Release Planner reads only the file `config.yml` names, and fails if that file is missing or empty.
 
 For example, to append:
 

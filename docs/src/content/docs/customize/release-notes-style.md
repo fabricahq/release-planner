@@ -27,12 +27,14 @@ release-planner guide --default-style
 
 ## Change the style
 
-Create `.release-planner/release-notes-style.md` with your guidance. Then, in `.release-planner/config.yml`, set `release-notes-style` to one of two values.
+Write your style in a markdown file, such as `.release-planner/release-notes-style.md`. Then name that file in `.release-planner/config.yml`, and choose one of two modes.
 
-**Add to the default style** (the default, so you can leave the setting out):
+**Add to the default style:**
 
 ```yaml
-release-notes-style: append
+release-notes-style:
+  file: .release-planner/release-notes-style.md
+  mode: append
 ```
 
 The agent follows the default style, then yours. Use this to add rules. When you upgrade Release Planner, you still get improvements to the default style.
@@ -40,10 +42,14 @@ The agent follows the default style, then yours. Use this to add rules. When you
 **Replace the default style:**
 
 ```yaml
-release-notes-style: replace
+release-notes-style:
+  file: .release-planner/release-notes-style.md
+  mode: replace
 ```
 
 The agent follows only your style. Use this when you want different headings or a different format altogether. Your style stays exactly as you wrote it when you upgrade.
+
+Release Planner reads only the file your config names. If that file is missing or empty, every command fails and says so, rather than quietly using the default style. Without a `release-notes-style` setting, the agent uses the default style.
 
 ### Append example
 

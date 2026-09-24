@@ -27,10 +27,12 @@ first-version: {{.FirstVersion}}
 # validate:
 #   workflow: release-checks.yml
 
-# How .release-planner/release-notes-style.md applies, if you create it: append (the
-# default) adds it after Release Planner's release notes style, and replace uses only yours.
+# Your own release notes style, if you want one: a markdown file, and how it combines with
+# Release Planner's default style. append adds yours after the default; replace uses only yours.
 # Print the default style with: release-planner guide --default-style
-# release-notes-style: append
+# release-notes-style:
+#   file: .release-planner/release-notes-style.md
+#   mode: append
 
 # Where release notes live, and the branch whose notes changes publish releases.
 # notes-dir: releases

@@ -66,7 +66,7 @@ func TestInit(t *testing.T) {
 		t.Fatalf("init: %d %s %s", code, out, errOut)
 	}
 	data, _ := os.ReadFile(filepath.Join(dir, ".release-planner/config.yml"))
-	for _, want := range []string{"schema-version: 1\n", "version: v0.1.0\n", "first-version: v1.0.0\n", "# release-notes-style: append\n"} {
+	for _, want := range []string{"schema-version: 1\n", "version: v0.1.0\n", "first-version: v1.0.0\n", "#   file: .release-planner/release-notes-style.md\n#   mode: append\n"} {
 		if !strings.Contains(string(data), want) {
 			t.Errorf("config lacks %q:\n%s", want, data)
 		}

@@ -13,7 +13,7 @@ Everything that controls how your releases work lives in one folder at the root 
 .release-planner/
   config.yml                 # settings, including the Release Planner version to use
   policy.md                  # how you choose versions, and who reads your notes
-  release-notes-style.md     # optional: how the notes are written
+  release-notes-style.md     # optional, if config.yml names it: how the notes are written
 ```
 
 You write these files, and Release Planner never changes them. See [Customize](/customize/policy/) for what goes in each one.

@@ -13,7 +13,7 @@ Release Planner reads `.release-planner/config.yml`. After changing it, run `rel
 | `version` | required | The Release Planner version to use: a release tag such as `v0.1.0`. A full commit SHA also works; your workflow then builds Release Planner from source with Go instead of downloading a release. |
 | `first-version` | `v0.1.0` | The version your first release must use. |
 | `validate` | none | Optional [release checks](/customize/release-checks/). |
-| `release-notes-style` | `append` | How `.release-planner/release-notes-style.md` applies, if it exists. See [Release notes style](/customize/release-notes-style/). |
+| `release-notes-style` | none | Your own release notes style: `file`, the markdown file that holds it, and `mode`, `append` or `replace`. See [Release notes style](/customize/release-notes-style/). |
 | `notes-dir` | `releases` | Where the release notes files live. |
 | `branch` | `main` | The branch that releases are published from. |
 
@@ -23,7 +23,9 @@ A complete example:
 schema-version: 1
 version: v0.1.0
 first-version: v1.0.0
-release-notes-style: append
+release-notes-style:
+  file: .release-planner/release-notes-style.md
+  mode: append
 validate:
   run: make smoke-test
 ```

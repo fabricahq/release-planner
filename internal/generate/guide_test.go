@@ -11,7 +11,7 @@ func guideFor(t *testing.T, style, mode string) string {
 	t.Helper()
 	yaml := "schema-version: 1\nversion: v0.2.0\nfirst-version: v1.0.0\nnotes-dir: docs/releases\nbranch: trunk\nvalidate:\n  run: make test\n"
 	if mode != "" {
-		yaml += "release-notes-style: " + mode + "\n"
+		yaml += "release-notes-style:\n  file: .release-planner/release-notes-style.md\n  mode: " + mode + "\n"
 	}
 	c, err := config.Parse([]byte(yaml), style)
 	if err != nil {
@@ -41,7 +41,7 @@ func TestGuide(t *testing.T) {
 func TestReleaseNotesStyle(t *testing.T) {
 	custom := "- Use only `## Added`, `## Changed`, and `## Fixed`."
 
-	appended := guideFor(t, custom, "")
+	appended := guideFor(t, custom, "append")
 	if !strings.Contains(appended, "### Release notes style\n\n"+strings.TrimSpace(DefaultStyle())+"\n\nThis repository adds:\n\n"+custom+"\n\n## 6.") {
 		t.Errorf("append:\n%s", appended)
 	}
