@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
 
 	"github.com/fabricahq/release-planner/internal/config"
+	"go.yaml.in/yaml/v3"
 )
 
 // Paths of the generated files, relative to the repository root.
@@ -258,14 +258,48 @@ func planInstall(root string, c config.Config, force bool) ([]write, Problems, e
 		writes = append(writes, write{change: change, content: content})
 	}
 
+	if c.Validate.Workflow != "" {
+		if problem, err := callableWorkflow(root, c.Validate.Workflow); err != nil {
+			return nil, nil, err
+		} else if problem != "" {
+			problems = append(problems, Problem{".github/workflows/" + c.Validate.Workflow, problem})
+		}
+	}
+
 	// The policy belongs to the repository: seed it once, never rewrite or check it.
-	policy := path.Join(c.NotesDir, "README.md")
+	policy := config.Policy
 	if _, ok, err := readFile(root, policy); err != nil {
 		return nil, nil, err
 	} else if !ok {
 		writes = append(writes, write{change: Change{Path: policy, Action: "created", Detail: "fill in your release policy"}, content: Policy(c)})
 	}
 	return writes, problems, nil
+}
+
+// callableWorkflow checks that validate.workflow can be called with the commit to check.
+func callableWorkflow(root, name string) (string, error) {
+	data, ok, err := readFile(root, ".github/workflows/"+name)
+	if err != nil || !ok {
+		return "missing; validate.workflow in " + config.File + " names it", err
+	}
+	var wf struct {
+		On any `yaml:"on"`
+	}
+	if err := yaml.Unmarshal([]byte(data), &wf); err != nil {
+		return "", fmt.Errorf(".github/workflows/%s: %w", name, err)
+	}
+	const need = "add a workflow_call trigger with a string input named ref, and check out that ref"
+	on, _ := wf.On.(map[string]any)
+	call, found := on["workflow_call"]
+	if !found {
+		return "cannot be called by the Release workflow; " + need, nil
+	}
+	callMap, _ := call.(map[string]any)
+	inputs, _ := callMap["inputs"].(map[string]any)
+	if _, ok := inputs["ref"]; !ok {
+		return "has no ref input, so it cannot check the release commit; " + need, nil
+	}
+	return "", nil
 }
 
 // Install writes or updates every generated file. It changes nothing if any file blocks it.
@@ -286,7 +320,7 @@ func Check(root string, c config.Config) error {
 	if err != nil {
 		return err
 	}
-	policy := path.Join(c.NotesDir, "README.md")
+	policy := config.Policy
 	for _, w := range writes {
 		ch := w.change
 		switch {

@@ -6,7 +6,7 @@ on:
     branches: [{{.Branch}}]
     paths: ['{{.NotesDir}}/v*.md']
   pull_request:
-    paths: ['{{.NotesDir}}/**', 'release-planner.yml', '.github/workflows/release-planner.yml']
+    paths: ['{{.NotesDir}}/**', '.release-planner/**', '.github/workflows/release-planner.yml']
   # Retry a failed publication with both endpoints of the original approved push.
   workflow_dispatch:
     inputs:
@@ -55,8 +55,18 @@ jobs:
           name: release-plan
           path: ${{"{{"}} runner.temp {{"}}"}}/release-plan.json
           if-no-files-found: error
-
-  # Run this repository's checks on the exact commit being released.
+{{if .Validate.Workflow}}
+  # Run this repository's release-only checks on the exact commit being released.
+  # The called workflow gets the repository's secrets, but never the release-write token.
+  validate:
+    needs: plan
+    if: needs.plan.outputs.tag != ''
+    uses: ./.github/workflows/{{.Validate.Workflow}}
+    with:
+      ref: ${{"{{"}} needs.plan.outputs.commit {{"}}"}}
+    secrets: inherit
+{{else if .Validate.Run}}
+  # Run this repository's release-only checks on the exact commit being released.
   validate:
     needs: plan
     if: needs.plan.outputs.tag != ''
@@ -81,13 +91,13 @@ jobs:
         with:
           python-version: '{{.Validate.Python}}'
 {{- end}}
-      - name: Validate the release
+      - name: Run the release checks
         run: |
 {{.ValidateRun}}
-
+{{end}}
   # The only job that can write. It runs Release Planner at the pinned version and no repository code.
   publish:
-    needs: [plan, validate]
+    needs: {{if .Validate.Enabled}}[plan, validate]{{else}}[plan]{{end}}
     if: needs.plan.outputs.tag != '' && github.event_name != 'pull_request' && github.ref == 'refs/heads/{{.Branch}}'
     runs-on: ubuntu-latest
     environment: release

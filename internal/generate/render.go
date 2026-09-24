@@ -38,6 +38,8 @@ type data struct {
 	Actions     any
 	Marker      string
 	ValidateRun string
+	PolicyPath  string
+	StyleText   string
 }
 
 func render(name string, c config.Config, marker string) string {
@@ -52,7 +54,8 @@ func render(name string, c config.Config, marker string) string {
 			run.WriteString("          " + line)
 		}
 	}
-	d := data{Config: c, Module: Module, Actions: Actions, Marker: marker, ValidateRun: run.String()}
+	d := data{Config: c, Module: Module, Actions: Actions, Marker: marker, ValidateRun: run.String(),
+		PolicyPath: config.Policy, StyleText: style(c)}
 	if err := parsed.ExecuteTemplate(&b, name, d); err != nil {
 		// Templates are embedded and the config is validated, so this is a programming error.
 		panic(err)
@@ -60,8 +63,37 @@ func render(name string, c config.Config, marker string) string {
 	return b.String()
 }
 
+// DefaultStyle is Release Planner's release notes style, which a repository can append to or replace.
+func DefaultStyle() string {
+	var b bytes.Buffer
+	if err := parsed.ExecuteTemplate(&b, "style.md.tmpl", nil); err != nil {
+		panic(err)
+	}
+	return b.String()
+}
+
+// style combines the default release notes style with the repository's style file.
+func style(c config.Config) string {
+	switch {
+	case c.Style == "":
+		return strings.TrimSpace(DefaultStyle())
+	case c.ReleaseNotesStyle == config.StyleReplace:
+		return c.Style
+	}
+	return strings.TrimSpace(DefaultStyle()) + "\n\nThis repository adds:\n\n" + c.Style
+}
+
 // Guide renders the agent release procedure for this config.
 func Guide(c config.Config) string { return render("guide.md.tmpl", c, "") }
+
+// InitConfig renders the starter config that release-planner init writes.
+func InitConfig(version, firstVersion string) string {
+	var b bytes.Buffer
+	if err := parsed.ExecuteTemplate(&b, "config.yml.tmpl", map[string]string{"Version": version, "FirstVersion": firstVersion}); err != nil {
+		panic(err)
+	}
+	return b.String()
+}
 
 // Policy renders the starter release policy a repository fills in.
 func Policy(c config.Config) string { return render("policy.md.tmpl", c, "") }

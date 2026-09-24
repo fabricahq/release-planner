@@ -41,7 +41,7 @@ func setup(t *testing.T) (gitrepo.Repo, config.Config) {
 	git(t, dir, "init", "-q", "-b", "main")
 	git(t, dir, "remote", "add", "origin", "git@github.com:fabricahq/example.git")
 	commit(t, dir, "a", "Initial")
-	c, err := config.Parse([]byte("version: v0.2.0\nfirst-version: v1.0.0\nvalidate:\n  run: make test\n"))
+	c, err := config.Parse([]byte("schema-version: 1\nversion: v0.2.0\nfirst-version: v1.0.0\nvalidate:\n  run: make test\n"), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestFirstRelease(t *testing.T) {
 	notes := string(data)
 	for _, want := range []string{
 		Opening,
-		"\n## ✨ New Features\n\n## ⬆️ Improvements\n\n## 🐛 Squashed Bugs\n\n## ⛓️‍💥 Breaking Changes\n",
+		Opening + "\n\n## What's Changed\n\n",
 		"- Initial in https://github.com/fabricahq/example/commit/",
 		"- Add b in https://github.com/fabricahq/example/pull/1\n",
 		"This is the first release. Browse the source at [v1.0.0](https://github.com/fabricahq/example/tree/v1.0.0).",
@@ -98,7 +98,6 @@ func TestLaterRelease(t *testing.T) {
 	commit(t, repo.Dir, "b", "Work in progress")
 	git(t, repo.Dir, "checkout", "-q", "main")
 	git(t, repo.Dir, "merge", "-q", "--no-ff", "feature", "-m", "Merge pull request #7 from fabricahq/feature", "-m", "Add a Svelte group")
-	c.Notes.Sections = []config.Section{{Heading: "Fixes", Include: "Bugs."}}
 
 	if _, err := Write(context.Background(), repo, c, "fabricahq/example", "v1.0.0", "HEAD"); err == nil || !strings.Contains(err.Error(), "newer") {
 		t.Fatal(err)
@@ -109,7 +108,7 @@ func TestLaterRelease(t *testing.T) {
 	}
 	data, _ := os.ReadFile(filepath.Join(repo.Dir, name))
 	notes := string(data)
-	want := Opening + "\n\n## Fixes\n\n## What's Changed\n\n- Add a Svelte group in https://github.com/fabricahq/example/pull/7\n\n**Full Changelog**: https://github.com/fabricahq/example/compare/v1.0.0...v1.1.0\n"
+	want := Opening + "\n\n## What's Changed\n\n- Add a Svelte group in https://github.com/fabricahq/example/pull/7\n\n**Full Changelog**: https://github.com/fabricahq/example/compare/v1.0.0...v1.1.0\n"
 	if notes != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", notes, want)
 	}

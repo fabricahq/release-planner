@@ -76,10 +76,8 @@ func Write(ctx context.Context, repo gitrepo.Repo, c config.Config, ownerName, v
 
 	base := "https://github.com/" + ownerName
 	var b strings.Builder
+	// The agent adds headings as the release notes style says; draft writes only the fixed parts.
 	b.WriteString(Opening + "\n")
-	for _, s := range c.Notes.Sections {
-		fmt.Fprintf(&b, "\n## %s\n", strings.TrimSpace(s.Heading))
-	}
 	b.WriteString("\n## What's Changed\n\n")
 	listed := 0
 	for _, commit := range inv.Commits {

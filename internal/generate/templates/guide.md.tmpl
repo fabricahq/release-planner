@@ -1,6 +1,6 @@
 # Prepare a release (Release Planner {{.Version}})
 
-The maintainer approves a release by merging a pull request that adds `{{.NotesDir}}/v<version>.md`. On merge, the Release workflow validates that commit, tags it, and publishes the file word for word as the GitHub release. Your job is to open that pull request with accurate notes. You never tag, publish, or merge.
+The maintainer approves a release by merging a pull request that adds `{{.NotesDir}}/v<version>.md`. On merge, the Release workflow checks the request, runs any release checks the repository configured, tags that commit, and publishes the file word for word as the GitHub release. Your job is to open that pull request with accurate notes. You never tag, publish, or merge.
 
 In this guide, `release-planner` means:
 
@@ -10,7 +10,7 @@ go run {{.Module}}@{{.Version}}
 
 ## 1. Read the release policy
 
-Read `{{.NotesDir}}/README.md`. It says what users depend on, what makes a release major, minor, or patch, who reads the notes, and anything to always include or leave out. Where it differs from this guide, it wins.
+Read `{{.PolicyPath}}`. It says what users depend on, what makes a release major, minor, or patch, who reads the notes, and anything to always include or leave out. Where it differs from this guide, it wins.
 
 If the file is missing, or still contains its `TODO:` prompts, stop. Tell the maintainer the policy needs writing before you can choose a version, and offer to draft it from the repository's history for their review.
 
@@ -44,17 +44,15 @@ Create a release branch, then run:
 release-planner draft <version>
 ```
 
-It creates `{{.NotesDir}}/<version>.md` with this repository's headings from `release-planner.yml`, a linked list of the pull requests, and a closing link. Write the notes in it:
+It creates `{{.NotesDir}}/<version>.md` with a TODO opening line, a `## What's Changed` list of the pull requests, and a closing link: the **Full Changelog** comparison, or for a first release, a link to the tagged source. Write the notes in it, following the release notes style below. Whatever the style says:
 
-- Open with one or two sentences on what the release means for its readers.
-- Fill in only the headings that have content, and delete the rest:
-{{- range .Notes.Sections}}
-  - `## {{.Heading}}`: {{.Include}}{{if .SummarizeFirst}} Also mention these in the opening sentences.{{end}}
-{{- end}}
-- Give significant changes a `###` heading and a sentence on why they matter. Use bullets for small changes, code blocks for commands, and before-and-after examples where they help.
-- Group related commits into one entry, and write for the readers the policy names.
-- Keep `## What's Changed` and the closing line that `draft` wrote, removing any entries the inventory leaves out. The closing line is the **Full Changelog** comparison link, or for a first release, a link to the tagged source. Add `## New Contributors` only for verified first contributions.
+- Replace the TODO line, and don't leave empty headings. `plan` rejects both.
+- Keep `## What's Changed` and the closing line, removing entries the inventory leaves out. Add `## New Contributors` only for verified first contributions.
 - Use absolute links, because the notes render on the release page.
+
+### Release notes style
+
+{{.StyleText}}
 
 ## 6. Validate and open the pull request
 

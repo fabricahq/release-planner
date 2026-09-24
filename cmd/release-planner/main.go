@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -19,13 +20,15 @@ import (
 	"github.com/fabricahq/release-planner/internal/gitrepo"
 	"github.com/fabricahq/release-planner/internal/plan"
 	"github.com/fabricahq/release-planner/internal/publish"
+	"github.com/fabricahq/release-planner/internal/semver"
 )
 
 const usage = `release-planner prepares, validates, and publishes releases that an agent drafts and a maintainer approves by merging.
 
 Set up a repository:
+  init        Create .release-planner/config.yml and a starter release policy
   install     Write or update the generated workflow, agent skill, and AGENTS.md section
-  check       Verify that the generated files match release-planner.yml
+  check       Verify that the generated files match .release-planner/config.yml
   uninstall   Remove the generated files and the AGENTS.md section
 
 Prepare a release (agents):
@@ -53,7 +56,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 	commands := map[string]func(context.Context, []string, io.Writer) error{
-		"install": cmdInstall, "check": cmdCheck, "uninstall": cmdUninstall,
+		"init": cmdInit, "install": cmdInstall, "check": cmdCheck, "uninstall": cmdUninstall,
 		"guide": cmdGuide, "inventory": cmdInventory, "draft": cmdDraft,
 		"plan": cmdPlan, "publish": cmdPublish, "version": cmdVersion,
 	}
@@ -100,6 +103,46 @@ func loadPinned(dir string) (config.Config, error) {
 		return c, fmt.Errorf("%s pins %s, but this is %s; run: go run %s@%s", config.File, c.Version, running, generate.Module, c.Version)
 	}
 	return c, nil
+}
+
+func cmdInit(_ context.Context, args []string, out io.Writer) error {
+	fs, dir := flags("init", "init [--version <tag>] [--first-version <version>]")
+	version := fs.String("version", "", "Release Planner version to pin (default: the running version)")
+	first := fs.String("first-version", "v0.1.0", "the version the repository's first release must use")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	file := filepath.Join(*dir, filepath.FromSlash(config.File))
+	if _, err := os.Stat(file); err == nil {
+		return fmt.Errorf("%s already exists; edit it, then run release-planner install", config.File)
+	}
+	if *version == "" {
+		*version = buildinfo.Version()
+		if _, ok := semver.Parse(*version); !ok || buildinfo.Local() {
+			return fmt.Errorf("this build is %s; pass --version with a Release Planner release tag or full commit SHA", *version)
+		}
+	}
+	content := generate.InitConfig(*version, *first)
+	c, err := config.Parse([]byte(content), "")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(file, []byte(content), 0o644); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "created   %s\n", config.File)
+	policy := filepath.Join(*dir, filepath.FromSlash(config.Policy))
+	if _, err := os.Stat(policy); errors.Is(err, os.ErrNotExist) {
+		if err := os.WriteFile(policy, []byte(generate.Policy(c)), 0o644); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "created   %s\n", config.Policy)
+	}
+	fmt.Fprintf(out, "Next: fill in %s, review the settings in %s, then run release-planner install.\n", config.Policy, config.File)
+	return nil
 }
 
 func cmdInstall(_ context.Context, args []string, out io.Writer) error {
@@ -170,9 +213,14 @@ func cmdUninstall(_ context.Context, args []string, out io.Writer) error {
 }
 
 func cmdGuide(_ context.Context, args []string, out io.Writer) error {
-	fs, dir := flags("guide", "guide")
+	fs, dir := flags("guide", "guide [--default-style]")
+	defaultStyle := fs.Bool("default-style", false, "print only Release Planner's default release notes style, to start "+config.StyleFile+" from")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *defaultStyle {
+		fmt.Fprint(out, generate.DefaultStyle())
+		return nil
 	}
 	c, err := config.Load(*dir)
 	if err != nil {

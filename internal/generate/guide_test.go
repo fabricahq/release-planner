@@ -7,34 +7,51 @@ import (
 	"github.com/fabricahq/release-planner/internal/config"
 )
 
-func TestGuide(t *testing.T) {
-	c, err := config.Parse([]byte("version: v0.2.0\nfirst-version: v1.0.0\nnotes-dir: docs/releases\nbranch: trunk\nvalidate:\n  run: make test\n"))
+func guideFor(t *testing.T, style, mode string) string {
+	t.Helper()
+	yaml := "schema-version: 1\nversion: v0.2.0\nfirst-version: v1.0.0\nnotes-dir: docs/releases\nbranch: trunk\nvalidate:\n  run: make test\n"
+	if mode != "" {
+		yaml += "release-notes-style: " + mode + "\n"
+	}
+	c, err := config.Parse([]byte(yaml), style)
 	if err != nil {
 		t.Fatal(err)
 	}
-	guide := Guide(c)
+	return Guide(c)
+}
+
+func TestGuide(t *testing.T) {
+	guide := guideFor(t, "", "")
 	for _, want := range []string{
 		"# Prepare a release (Release Planner v0.2.0)",
 		"go run github.com/fabricahq/release-planner/cmd/release-planner@v0.2.0\n",
-		"Read `docs/releases/README.md`.",
+		"Read `.release-planner/policy.md`.",
 		"release-planner inventory --head origin/trunk",
 		"With no previous release, use `v1.0.0`.",
-		"with this repository's headings from `release-planner.yml`",
-		"  - `## ✨ New Features`: what users can do that they couldn't before.\n",
-		"  - `## ⛓️‍💥 Breaking Changes`: who is affected, the old and new behavior, and exact migration steps. Also mention these in the opening sentences.\n",
-		"or for a first release, a link to the tagged source",
+		"It creates `docs/releases/<version>.md` with a TODO opening line",
+		"- Replace the TODO line, and don't leave empty headings. `plan` rejects both.\n",
+		"### Release notes style\n\n" + strings.TrimSpace(DefaultStyle()) + "\n\n## 6. Validate",
 	} {
 		if !strings.Contains(guide, want) {
 			t.Errorf("guide lacks %q", want)
 		}
 	}
-	if strings.Contains(guide, "standard headings") {
-		t.Error("guide still says standard headings")
+}
+
+func TestReleaseNotesStyle(t *testing.T) {
+	custom := "- Use only `## Added`, `## Changed`, and `## Fixed`."
+
+	appended := guideFor(t, custom, "")
+	if !strings.Contains(appended, "### Release notes style\n\n"+strings.TrimSpace(DefaultStyle())+"\n\nThis repository adds:\n\n"+custom+"\n\n## 6.") {
+		t.Errorf("append:\n%s", appended)
 	}
 
-	c.Notes.Sections = []config.Section{{Heading: "🔒 Security", Include: "vulnerabilities fixed, with their CVE IDs.", SummarizeFirst: true}}
-	guide = Guide(c)
-	if !strings.Contains(guide, "  - `## 🔒 Security`: vulnerabilities fixed, with their CVE IDs. Also mention these in the opening sentences.\n") || strings.Contains(guide, "New Features") {
-		t.Errorf("custom sections:\n%s", guide)
+	replaced := guideFor(t, custom, "replace")
+	if !strings.Contains(replaced, "### Release notes style\n\n"+custom+"\n\n## 6.") || strings.Contains(replaced, "New Features") {
+		t.Errorf("replace:\n%s", replaced)
+	}
+	// The fixed rules around the style apply whatever the style says.
+	if !strings.Contains(replaced, "Keep `## What's Changed` and the closing line") {
+		t.Error("replace dropped the fixed rules")
 	}
 }

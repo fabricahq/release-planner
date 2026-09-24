@@ -1,0 +1,37 @@
+# Release Planner configuration: https://github.com/fabricahq/release-planner#configuration
+
+# The format of this file.
+schema-version: 1
+
+# The Release Planner version to use. Bumping it upgrades the Release workflow, the agent
+# guide, and the release checks together; run release-planner install after changing it.
+version: {{.Version}}
+
+# The version your first release must use.
+first-version: {{.FirstVersion}}
+
+# Optional release-only checks, run on the exact commit being released, before it is
+# tagged. Your required pull request checks already test what merges, so use this only for
+# checks they don't run: a smoke test of what you ship, an API compatibility check against
+# the previous release, a fresh vulnerability scan, or a slow end-to-end suite.
+#
+# Either a Bash script, with optional go, node, and python toolchains:
+# validate:
+#   go: '1.27.x'
+#   run: |
+#     go install golang.org/x/vuln/cmd/govulncheck@latest
+#     govulncheck ./...
+#
+# Or one of your workflows, called with the commit to check and your repository's secrets.
+# It needs a workflow_call trigger with a string input named ref, and must check out that ref:
+# validate:
+#   workflow: release-checks.yml
+
+# How .release-planner/release-notes-style.md applies, if you create it: append (the
+# default) adds it after Release Planner's release notes style, and replace uses only yours.
+# Print the default style with: release-planner guide --default-style
+# release-notes-style: append
+
+# Where release notes live, and the branch whose notes changes publish releases.
+# notes-dir: releases
+# branch: main
