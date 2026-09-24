@@ -3,19 +3,25 @@ title: Release policy
 description: Tell the agent what counts as a breaking change, how you choose versions, and who reads your notes.
 ---
 
-Your release policy lives in `.release-planner/policy.md`. The agent reads it before every release to choose the version and decide what the notes need to say. It's yours: Release Planner creates a starter once and never changes it.
+Your release policy is a plain markdown file, `.release-planner/policy.md`, that describes how your project does releases: what counts as a breaking change, how to choose the next version, and what the release notes should say.
+
+The agent reads it at the start of every release, before it chooses a version or writes a word of the notes. Where the policy and Release Planner's default guidance disagree, the policy wins.
 
 ## What's in the starter
 
-The starter has five sections, each a short list for you to edit:
+When you run `release-planner init`, it creates a starter policy with five sections already written. Each section is a short list of sensible defaults for you to edit:
 
-- **Breaking changes.** A list of common things users depend on, such as commands, configuration keys, and APIs. Keep the ones that apply, delete the rest, and add your own.
+- **Breaking changes.** The things your users depend on, where a change would force them to update their code or setup. The starter lists common ones, such as commands, configuration keys, and APIs. Keep the ones that apply, delete the rest, and add your own.
 - **Choosing a version.** What makes a release major, minor, or patch. If your first release is before 1.0.0, it also covers 0.x releases: SemVer lets anything change before 1.0, so the starter shifts each rule down one place: a minor bump for breaking changes and new features, and a patch bump for everything else.
 - **Who reads the release notes.** Your readers, which default to developers. The agent writes for them.
 - **Order of the release notes.** The order changes appear in: new features, then improvements, then bug fixes, then breaking changes. Reorder it to taste; some projects put breaking changes first.
 - **Always and never.** Anything the notes must always include or leave out.
 
 Each section ends with a `TODO:` line. Until you delete every one, the agent stops and asks you instead of guessing a version.
+
+You can add your own sections too, such as how to handle security fixes or when to mention deprecations. The agent reads the whole file, so anything you write in plain language becomes part of the policy.
+
+After `init`, the file is yours: Release Planner never changes it again.
 
 ## Have your agent fill it in
 
