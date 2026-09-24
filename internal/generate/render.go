@@ -46,6 +46,8 @@ type data struct {
 	IsRelease bool
 	// Install is the command that installs the pinned version on a developer's machine.
 	Install string
+	// StartsBeforeOne is true when the first release is 0.x, so the policy needs pre-1.0 rules.
+	StartsBeforeOne bool
 }
 
 func render(name string, c config.Config, marker string) string {
@@ -61,7 +63,8 @@ func render(name string, c config.Config, marker string) string {
 		}
 	}
 	d := data{Config: c, Module: Module, Actions: Actions, Marker: marker, ValidateRun: run.String(),
-		PolicyPath: config.Policy, StyleText: style(c), IsRelease: IsRelease(c.Version), Install: InstallCommand(c.Version)}
+		PolicyPath: config.Policy, StyleText: style(c), IsRelease: IsRelease(c.Version), Install: InstallCommand(c.Version),
+		StartsBeforeOne: semver.MustParse(c.FirstVersion).Major == 0}
 	if err := parsed.ExecuteTemplate(&b, name, d); err != nil {
 		// Templates are embedded and the config is validated, so this is a programming error.
 		panic(err)

@@ -1,72 +1,96 @@
 ---
 title: Release policy
-description: Tell the agent what your users depend on and how you choose versions.
+description: Tell the agent what counts as a breaking change, how you choose versions, and who reads your notes.
 ---
 
 Your release policy lives in `.release-planner/policy.md`. The agent reads it before every release to choose the version and decide what the notes need to say. It's yours: Release Planner creates a starter once and never changes it.
 
-## What to write
+## What's in the starter
 
-The starter has four sections, each with a `TODO:` prompt. Until you replace the prompts, the agent stops and asks you instead of guessing.
+The starter has four sections, each a short list for you to edit:
 
-- **What users depend on.** What must stay compatible: commands and flags, configuration, APIs, file formats, or identifiers other projects reference.
-- **Choosing a version.** What makes a release major, minor, or patch, in terms of that list.
-- **Who reads the release notes.** Who they are and what they need to know first.
+- **Breaking changes.** A list of common things users depend on, such as commands, configuration keys, and APIs. Keep the ones that apply, delete the rest, and add your own.
+- **Choosing a version.** What makes a release major, minor, or patch. If your first release is before 1.0.0, it also covers 0.x releases: SemVer lets anything change before 1.0, so the starter uses the common convention of a minor bump for breaking changes and a patch bump for everything else.
+- **Who reads the release notes.** Your readers, which default to developers, and what they want to know, most important first: breaking changes, then new features, then bug fixes. The agent leads with whatever you put first.
 - **Always and never.** Anything the notes must always include or leave out.
 
-Write it the way you'd brief a new maintainer. Where your policy and the default guidance disagree, your policy wins.
+Each section ends with a `TODO:` line. Until you delete every one, the agent stops and asks you instead of guessing a version.
+
+## Have your agent fill it in
+
+The starter opens with a prompt, in a comment, that you can copy and give to your agent:
+
+```text
+Fill in .release-planner/policy.md for this repository. Read the README, the docs,
+the public interfaces, and the release history to work out what counts as a breaking
+change and who reads our release notes. Keep the bulleted lists, delete items that
+don't apply, add ones that do, and remove every TODO line. Ask me about anything you
+can't tell from the repository.
+```
+
+Review what it writes before your first release. Where your policy and the default guidance disagree, your policy wins.
 
 ## Examples
 
 ### A library that other projects import
 
 ```markdown
-## What users depend on
-Group IDs and rule IDs. Projects list group IDs to import and rule IDs to
-exclude or replace, and an unknown ID is an error.
+## Breaking changes
+- Removing or renaming a group or rule ID
+- Reversing what a rule requires
 
 ## Choosing a version
-- Major: removing or renaming a group or rule, or reversing what a rule requires.
-- Minor: new rules or groups, or extending a rule to new situations.
-- Patch: corrections, clearer wording, and better examples.
+- Major: any breaking change
+- Minor: new rules or groups, or extending a rule to new situations
+- Patch: corrections, clearer wording, and better examples
 
 ## Who reads the release notes
-Engineers deciding whether to adopt the new version. Name every rule ID that
-was added, renamed, or removed.
+Readers:
+- Engineers deciding whether to adopt the new version
+
+What they want to know, most important first:
+1. Every rule ID that was removed or renamed
+2. New rules and groups
+3. Corrections to existing rules
 ```
 
 ### A command-line tool
 
 ```markdown
-## What users depend on
-Command names, flags, exit codes, configuration keys, and JSON output.
-
-## Choosing a version
-- Major: removing or renaming a command, flag, or key, or changing output that scripts parse.
-- Minor: new commands, flags, or keys.
-- Patch: bug fixes and help-text changes.
+## Breaking changes
+- Command names, flags, and exit codes
+- Configuration keys
+- JSON output that scripts parse
 
 ## Who reads the release notes
-Developers upgrading the tool. Lead with anything that requires them to change
-configuration or scripts.
+Readers:
+- Developers upgrading the tool
+
+What they want to know, most important first:
+1. Changes that require them to update configuration or scripts
+2. New commands and flags
+3. Bug fixes
 
 ## Always and never
-Always show the upgrade command. Leave out dependency updates unless they fix a
-security issue.
+- Always show the upgrade command.
+- Never mention dependency updates unless they fix a security issue.
 ```
 
 ### A service with an HTTP API
 
 ```markdown
-## What users depend on
-The public API: endpoints, request and response fields, status codes, and
-authentication.
-
-## Choosing a version
-- Major: removing an endpoint or field, or changing its meaning.
-- Minor: new endpoints or optional fields.
-- Patch: fixes and performance work with no API change.
+## Breaking changes
+- Removing an endpoint or field
+- Changing the meaning of a field or status code
+- Changing authentication
 
 ## Who reads the release notes
-API consumers and our support team. Link every change to its API reference page.
+Readers:
+- Developers who call the API
+- Our support team
+
+What they want to know, most important first:
+1. Breaking changes and their deadlines
+2. New endpoints and fields, linked to the API reference
+3. Bug fixes
 ```
