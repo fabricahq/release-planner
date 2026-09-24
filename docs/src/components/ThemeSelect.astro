@@ -1,0 +1,91 @@
+---
+/** @fileoverview Presents an icon-only Fabrica-style theme menu while Starlight owns theme application and persistence. */
+import DefaultThemeSelect from '@astrojs/starlight/components/ThemeSelect.astro';
+import { Icon } from '@astrojs/starlight/components';
+const choices = [
+  { value: 'light', label: 'Light', icon: 'sun' },
+  { value: 'dark', label: 'Dark', icon: 'moon' },
+  { value: 'auto', label: 'Auto', icon: 'desktop' },
+] as const;
+---
+<fabrica-theme-menu class="block shrink-0">
+  <div hidden><DefaultThemeSelect /></div>
+  <details class="group/theme relative" hidden>
+    <summary class="flex items-center justify-center size-11 rounded-full list-none cursor-pointer text-muted transition-colors duration-160 ease-[ease] hover:bg-surface hover:text-ink group-open/theme:bg-surface group-open/theme:text-ink focus-visible:outline-2 focus-visible:outline-ink focus-visible:outline-offset-2 motion-reduce:transition-none [&>span]:flex" aria-label="Color theme: Auto" title="Color theme: Auto">
+      {choices.map(({ value, icon }) => <span data-theme-icon={value} hidden={value !== 'auto'}><Icon name={icon} size="19px" /></span>)}
+    </summary>
+    <div class="absolute right-0 top-[calc(100%+8px)] z-20 grid w-44 gap-1 p-1.5 border border-border rounded-card bg-paper shadow-[0_10px_15px_-3px_#0000001a,0_4px_6px_-4px_#0000001a] in-[.mobile-preferences]:top-auto in-[.mobile-preferences]:bottom-[calc(100%+8px)]" role="group" aria-label="Color theme">
+      {choices.map(({ value, label, icon }) => <button class="group flex items-center gap-3 min-h-11 w-full py-0 px-3 border border-transparent rounded-lg bg-transparent text-muted font-sans text-sm font-normal leading-[normal] text-left cursor-pointer transition-colors duration-160 ease-[ease] hover:bg-surface hover:text-ink aria-pressed:border-border aria-pressed:bg-paper aria-pressed:text-ink aria-pressed:font-medium focus-visible:outline-2 focus-visible:outline-ink focus-visible:outline-offset-2 motion-reduce:transition-none" type="button" data-theme-choice={value} aria-pressed={value === 'auto'}>
+        <Icon name={icon} size="18px" /><span>{label}</span><Icon name="approve-check" size="14px" class="ml-auto opacity-0 group-aria-pressed:opacity-100" />
+      </button>)}
+    </div>
+  </details>
+</fabrica-theme-menu>
+<script>
+  /** Adapts menu buttons to Starlight's native select and synchronizes desktop and mobile pickers. */
+  class FabricaThemeMenu extends HTMLElement {
+    private events: AbortController | undefined;
+
+    async connectedCallback() {
+      await customElements.whenDefined('starlight-theme-select');
+      if (!this.isConnected || this.events) return;
+      this.events = new AbortController();
+      const { signal } = this.events;
+      const details = this.querySelector('details');
+      const trigger = this.querySelector('summary');
+      const select = this.querySelector('select');
+      if (!details || !trigger || !select) return;
+
+      const close = (restoreFocus = false) => {
+        details.open = false;
+        if (restoreFocus) trigger.focus();
+      };
+      const sync = () => {
+        const value = select.value;
+        const label = `Color theme: ${select.selectedOptions[0]?.textContent ?? 'Auto'}`;
+        trigger.setAttribute('aria-label', label);
+        trigger.title = label;
+        this.querySelectorAll<HTMLElement>('[data-theme-icon]').forEach((icon) => {
+          icon.hidden = icon.dataset.themeIcon !== value;
+        });
+        this.querySelectorAll<HTMLButtonElement>('[data-theme-choice]').forEach((button) => {
+          button.setAttribute('aria-pressed', String(button.dataset.themeChoice === value));
+        });
+      };
+      this.addEventListener('click', (event) => {
+        const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>('[data-theme-choice]') : null;
+        if (!button) return;
+        select.value = button.dataset.themeChoice ?? 'auto';
+        // Let Starlight update the document, storage, and every native picker first.
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        close(true);
+      }, { signal });
+      document.addEventListener('change', (event) => {
+        if (event.target instanceof HTMLSelectElement && event.target.closest('starlight-theme-select')) sync();
+      }, { signal });
+      document.addEventListener('click', (event) => {
+        if (event.target instanceof Node && !this.contains(event.target)) close();
+      }, { signal });
+      document.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape' || !details.open) return;
+        event.preventDefault();
+        close(true);
+      }, { signal });
+      this.addEventListener('focusout', (event) => {
+        if (!(event.relatedTarget instanceof Node) || !this.contains(event.relatedTarget)) close();
+      }, { signal });
+      sync();
+      details.hidden = false;
+    }
+
+    disconnectedCallback() {
+      this.events?.abort();
+      this.events = undefined;
+    }
+  }
+  if (!customElements.get('fabrica-theme-menu')) customElements.define('fabrica-theme-menu', FabricaThemeMenu);
+</script>
+<style>
+  [hidden] { display: none !important; }
+  summary::-webkit-details-marker { display: none; }
+</style>

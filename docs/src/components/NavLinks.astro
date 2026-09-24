@@ -1,0 +1,9 @@
+---
+/** @fileoverview Renders primary documentation, agent guidance, and GitHub navigation links. */
+import { Icon } from '@astrojs/starlight/components';
+---
+<nav class="flex items-center gap-[1.6rem] text-sm max-md:hidden" aria-label="Main navigation">
+  <a class="inline-flex min-h-11 items-center text-ink no-underline hover:underline hover:underline-offset-[5px]" href="/">Docs</a>
+  <a class="inline-flex min-h-11 items-center text-ink no-underline hover:underline hover:underline-offset-[5px]" href="/for-agents/">For agents</a>
+  <a class="inline-flex min-h-11 w-11 h-11 items-center no-underline justify-center rounded-full text-muted transition-colors duration-160 ease-[ease] hover:bg-surface hover:text-ink hover:no-underline focus-visible:outline-2 focus-visible:outline-ink focus-visible:outline-offset-2" href="https://github.com/fabricahq/release-planner" aria-label="Release Planner on GitHub" title="Release Planner on GitHub"><Icon name="github" size="19px" /></a>
+</nav>
