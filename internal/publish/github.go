@@ -402,7 +402,7 @@ func branchRule(pattern, branch string) bool {
 }
 
 // EnvironmentDocs explains how to set up the release environment.
-const EnvironmentDocs = "https://github.com/fabricahq/release-planner/blob/main/docs/src/content/docs/start-here/set-up.md#create-the-release-environment"
+const EnvironmentDocs = "https://release-planner.fabricahq.com/start-here/set-up/#create-the-release-environment"
 
 // EnvironmentWarnings explains how the release environment differs from the recommended
 // setup: it exists, only the release branch can deploy to it, and the merge is the only
