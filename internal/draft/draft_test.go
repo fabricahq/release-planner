@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -69,10 +70,10 @@ func TestRepositoryReadsOwnerAndNameFromOrigin(t *testing.T) {
 func TestWriteDraftsAFirstRelease(t *testing.T) {
 	repo, c := setup(t)
 	commit(t, repo.Dir, "b", "Add b (#1)")
-	if _, err := Write(context.Background(), repo, c, "fabricahq/example", "v0.1.0", "HEAD", nil); err == nil || !strings.Contains(err.Error(), "first release must be v1.0.0") {
+	if _, _, err := Write(context.Background(), repo, c, "fabricahq/example", "v0.1.0", "HEAD", nil); err == nil || !strings.Contains(err.Error(), "first release must be v1.0.0") {
 		t.Fatal(err)
 	}
-	name, err := Write(context.Background(), repo, c, "fabricahq/example", "v1.0.0", "HEAD", nil)
+	name, _, err := Write(context.Background(), repo, c, "fabricahq/example", "v1.0.0", "HEAD", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +82,7 @@ func TestWriteDraftsAFirstRelease(t *testing.T) {
 	for _, want := range []string{
 		Opening,
 		Opening + "\n\n## Pull Requests\n\n",
-		"- Initial in ",
+		"- Initial in https://github.com/fabricahq/example/commit/",
 		"- Add b in #1\n",
 		"This is the first release. Browse the source at [v1.0.0](https://github.com/fabricahq/example/tree/v1.0.0).",
 	} {
@@ -89,7 +90,7 @@ func TestWriteDraftsAFirstRelease(t *testing.T) {
 			t.Errorf("notes lack %q:\n%s", want, notes)
 		}
 	}
-	if _, err := Write(context.Background(), repo, c, "fabricahq/example", "v1.0.0", "HEAD", nil); err == nil || !strings.Contains(err.Error(), "already exists") {
+	if _, _, err := Write(context.Background(), repo, c, "fabricahq/example", "v1.0.0", "HEAD", nil); err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Fatal(err)
 	}
 }
@@ -102,10 +103,10 @@ func TestWriteDraftsALaterRelease(t *testing.T) {
 	git(t, repo.Dir, "checkout", "-q", "main")
 	git(t, repo.Dir, "merge", "-q", "--no-ff", "feature", "-m", "Merge pull request #7 from fabricahq/feature", "-m", "Add a Svelte group")
 
-	if _, err := Write(context.Background(), repo, c, "fabricahq/example", "v1.0.0", "HEAD", nil); err == nil || !strings.Contains(err.Error(), "newer") {
+	if _, _, err := Write(context.Background(), repo, c, "fabricahq/example", "v1.0.0", "HEAD", nil); err == nil || !strings.Contains(err.Error(), "newer") {
 		t.Fatal(err)
 	}
-	name, err := Write(context.Background(), repo, c, "fabricahq/example", "v1.1.0", "HEAD", nil)
+	name, _, err := Write(context.Background(), repo, c, "fabricahq/example", "v1.1.0", "HEAD", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +153,7 @@ func TestWriteCreditsAuthorsAndNewContributors(t *testing.T) {
 		authors: map[int]string{7: "octocat", 8: "hubot", 9: "dependabot[bot]"},
 		before:  map[string]bool{"octocat": false, "hubot": true},
 	}
-	name, err := Write(context.Background(), repo, c, "fabricahq/example", "v1.1.0", "HEAD", gh)
+	name, warnings, err := Write(context.Background(), repo, c, "fabricahq/example", "v1.1.0", "HEAD", gh)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,8 +164,8 @@ func TestWriteCreditsAuthorsAndNewContributors(t *testing.T) {
 		"- chore: bump d by @dependabot[bot] in #9\n" +
 		"\n## New Contributors\n\n- @octocat made their first contribution in #7\n" +
 		"\n**Full Changelog**: https://github.com/fabricahq/example/compare/v1.0.0...v1.1.0\n"
-	if string(data) != want {
-		t.Fatalf("got:\n%s\nwant:\n%s", data, want)
+	if string(data) != want || len(warnings) != 0 {
+		t.Fatalf("got:\n%s\nwant:\n%s\nwarnings: %v", data, want, warnings)
 	}
 
 	// A failed author lookup drops only that handle.
@@ -175,6 +176,24 @@ func TestWriteCreditsAuthorsAndNewContributors(t *testing.T) {
 	contributors.Add(context.Background(), fakeGitHub{authors: map[int]string{7: "octocat"}}, &inv)
 	if inv.Commits[0].AuthorHandle != "octocat" || inv.Commits[1].AuthorHandle != "" || len(inv.Warnings) != 2 {
 		t.Fatalf("%+v %v", inv.Commits, inv.Warnings)
+	}
+}
+
+// A new contributor is credited for their first pull request merged into the release branch,
+// in merge order: not a lower-numbered one merged later, and not one merged inside another
+// branch, which the notes don't list.
+func TestNewContributorsAreCreditedInMergeOrder(t *testing.T) {
+	inv := plan.Inventory{PullRequests: []int{9, 10, 11, 20}, Commits: []plan.Commit{
+		{SHA: "9999999000000000000000000000000000000000", Title: "fix typo", PullRequest: 9, OnBranch: false},
+		{SHA: "1010101000000000000000000000000000000000", Title: "Add docs", PullRequest: 10, OnBranch: true},
+		{SHA: "2020202000000000000000000000000000000000", Title: "Add feature", PullRequest: 20, OnBranch: true},
+		{SHA: "1111111000000000000000000000000000000000", Title: "Fix feature", PullRequest: 11, OnBranch: true},
+	}}
+	gh := fakeGitHub{authors: map[int]string{9: "grace", 10: "hubot", 11: "ada", 20: "ada"}}
+	contributors.Add(context.Background(), gh, &inv)
+	want := []plan.NewContributor{{Handle: "hubot", PullRequest: 10}, {Handle: "ada", PullRequest: 20}}
+	if !slices.Equal(inv.NewContributors, want) {
+		t.Fatalf("got %+v, want %+v", inv.NewContributors, want)
 	}
 }
 
@@ -205,7 +224,7 @@ func TestRenderListsBranchChangesInOrder(t *testing.T) {
 	want := Opening + "\n\n## Pull Requests\n\n" +
 		"- feat(svelte): add a Svelte group in #7\n" +
 		"- fix!: reject empty rule IDs in #9\n" +
-		"- Fix a typo in 9c01ab3\n" +
+		"- Fix a typo in https://github.com/fabricahq/example/commit/9c01ab3\n" +
 		"\n**Full Changelog**: https://github.com/fabricahq/example/compare/v1.0.0...v1.1.0\n"
 	if got := Render(inv, "fabricahq/example", "v1.1.0"); got != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", got, want)

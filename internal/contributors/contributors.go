@@ -6,7 +6,6 @@ package contributors
 import (
 	"context"
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/fabricahq/release-planner/internal/plan"
@@ -39,10 +38,15 @@ func Add(ctx context.Context, gh GitHub, inv *plan.Inventory) {
 	}
 
 	// An author is new when none of their commits is in the previous release. In a first
-	// release, every author is new. Each is credited for their first pull request here.
+	// release, every author is new. Each is credited for their first pull request merged into
+	// the release branch, in merge order, so the credit names an entry the notes list. Pull
+	// requests merged inside other branches aren't listed, so they don't count.
 	seen := map[string]bool{}
-	for _, number := range inv.PullRequests {
-		handle := handles[number]
+	for _, commit := range inv.Commits {
+		if commit.PullRequest == 0 || !commit.OnBranch {
+			continue
+		}
+		number, handle := commit.PullRequest, commit.AuthorHandle
 		// Bots aren't contributors to welcome.
 		if handle == "" || seen[handle] || strings.HasSuffix(handle, "[bot]") {
 			continue
@@ -60,5 +64,4 @@ func Add(ctx context.Context, gh GitHub, inv *plan.Inventory) {
 		}
 		inv.NewContributors = append(inv.NewContributors, plan.NewContributor{Handle: handle, PullRequest: number})
 	}
-	slices.SortFunc(inv.NewContributors, func(a, b plan.NewContributor) int { return a.PullRequest - b.PullRequest })
 }

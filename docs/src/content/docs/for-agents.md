@@ -97,13 +97,13 @@ To look up handles, `inventory` uses `GITHUB_TOKEN`, `GH_TOKEN`, or the GitHub C
 `draft` does everything about the notes that can be worked out deterministically, so the agent spends its effort on judgment: what the changes mean, how to group them, and how to say it. `draft <version>` checks the version, then creates `releases/<version>.md` containing:
 
 1. A placeholder opening line starting `TODO: Open with one or two sentences`.
-2. `## Pull Requests`: each pull request merged into the release branch and each direct commit, in merge order, as `- <title> by @<handle> in #<number>`, or `- <title> in <short SHA>` for a direct commit.
-3. `## New Contributors`, when there are any: `- @<handle> made their first contribution in #<number>` for each author with no commits in the previous release. In a first release, every author is new. Bots are left out.
+2. `## Pull Requests`: each pull request merged into the release branch and each direct commit, in merge order, as `- <title> by @<handle> in #<number>`, or `- <title> in <commit URL>` for a direct commit.
+3. `## New Contributors`, when there are any: `- @<handle> made their first contribution in #<number>` for each author with no commits in the previous release, credited for their first pull request listed above, in merge order. In a first release, every author is new. Bots are left out.
 4. A closing line: `**Full Changelog**: <compare link>`, or for a first release, a link to the tagged source.
 
-`draft` makes no choices about grouping or wording, and it builds no URLs except the closing link: GitHub links `#7` and commit SHAs on the release page. The agent replaces the placeholder, writes the notes, and organizes the Pull Requests entries as the release notes style says, keeping every entry. The default style groups them by conventional-commit type.
+`draft` makes no choices about grouping or wording, and it leaves pull request numbers such as `#7` for GitHub to link. The agent replaces the placeholder, writes the notes, and organizes the Pull Requests entries as the release notes style says, keeping every entry. The default style groups them by conventional-commit type.
 
-`draft` looks up handles and new contributors on GitHub, as `inventory` does. A failed lookup prints a warning and leaves the handle out rather than failing. Pass `--offline` to skip the lookups. `draft` refuses a version that isn't newer than every tag, a first release that doesn't match `first-version`, an existing file, or an unpublished earlier request. It reads the GitHub repository from the `origin` remote unless given `--repository`.
+`draft` looks up handles and new contributors on GitHub, as `inventory` does. A failed lookup prints a warning after `created`, and leaves the handle out rather than failing; fill it in from the pull request. Pass `--offline` to skip the lookups. `draft` refuses a version that isn't newer than every tag, a first release that doesn't match `first-version`, an existing file, or an unpublished earlier request. It reads the GitHub repository from the `origin` remote unless given `--repository`.
 
 ## What `plan` checks
 

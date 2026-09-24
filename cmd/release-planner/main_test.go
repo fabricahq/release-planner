@@ -222,3 +222,40 @@ func TestInventoryAddsAuthorHandles(t *testing.T) {
 		t.Fatal("looked up authors offline")
 	}
 }
+
+// draft tells the agent when it couldn't look up an author, instead of leaving a silent gap.
+func TestDraftPrintsLookupWarnings(t *testing.T) {
+	api := httptest.NewServer(http.NotFoundHandler())
+	t.Cleanup(api.Close)
+	t.Setenv("GITHUB_API_URL", api.URL)
+	t.Setenv("GITHUB_TOKEN", "token")
+
+	dir := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-c", "commit.gpgsign=false"}, args...)...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	git("init", "-q", "-b", "main")
+	git("remote", "add", "origin", "https://github.com/fabricahq/example.git")
+	if err := os.MkdirAll(filepath.Join(dir, ".release-planner"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".release-planner/config.yml"), []byte("schema-version: 1\nversion: v0.1.0\nfirst-version: v1.0.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "-A")
+	git("commit", "-q", "-m", "feat: add login (#7)")
+
+	code, out, errOut := cli(t, "draft", "--dir", dir, "v1.0.0")
+	if code != 0 || !strings.Contains(out, "created releases/v1.0.0.md\nwarning: no author for pull request #7") {
+		t.Fatalf("%d %q %s", code, out, errOut)
+	}
+	if data, _ := os.ReadFile(filepath.Join(dir, "releases/v1.0.0.md")); !strings.Contains(string(data), "- feat: add login in #7\n") {
+		t.Fatalf("notes:\n%s", data)
+	}
+}

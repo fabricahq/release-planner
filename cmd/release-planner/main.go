@@ -326,11 +326,15 @@ func cmdDraft(ctx context.Context, args []string, out io.Writer) error {
 		}
 		gh = client
 	}
-	name, err := draft.Write(ctx, repo, c, *repository, fs.Arg(0), *head, gh)
+	name, warnings, err := draft.Write(ctx, repo, c, *repository, fs.Arg(0), *head, gh)
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "created %s\nWrite the notes, delete empty headings, then run release-planner plan.\n", name)
+	fmt.Fprintf(out, "created %s\n", name)
+	for _, w := range warnings {
+		fmt.Fprintf(out, "warning: %s. Fill in what's missing from the pull request.\n", w)
+	}
+	fmt.Fprintln(out, "Write the notes, delete empty headings, then run release-planner plan.")
 	return nil
 }
 

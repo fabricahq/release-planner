@@ -42,35 +42,35 @@ func Repository(ctx context.Context, repo gitrepo.Repo) (string, error) {
 	return parts[len(parts)-2] + "/" + parts[len(parts)-1], nil
 }
 
-// Write creates <notes-dir>/<version>.md for a release cut at head and returns its path.
-// With gh, it credits pull request authors by GitHub handle and names new contributors;
-// with nil, it writes the notes without them.
-func Write(ctx context.Context, repo gitrepo.Repo, c config.Config, ownerName, version, head string, gh contributors.GitHub) (string, error) {
+// Write creates <notes-dir>/<version>.md for a release cut at head, and returns its path and
+// warnings about anything it couldn't look up. With gh, it credits pull request authors by
+// GitHub handle and names new contributors; with nil, it writes the notes without them.
+func Write(ctx context.Context, repo gitrepo.Repo, c config.Config, ownerName, version, head string, gh contributors.GitHub) (string, []string, error) {
 	if !repository.MatchString(ownerName) {
-		return "", fmt.Errorf("repository must be owner/name, not %q", ownerName)
+		return "", nil, fmt.Errorf("repository must be owner/name, not %q", ownerName)
 	}
 	v, ok := semver.Parse(version)
 	if !ok {
-		return "", fmt.Errorf("%q is not a version such as v1.2.0", version)
+		return "", nil, fmt.Errorf("%q is not a version such as v1.2.0", version)
 	}
 	inv, err := plan.Take(ctx, repo, plan.Options{NotesDir: c.NotesDir, FirstVersion: c.FirstVersion}, head)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if len(inv.PendingRequests) > 0 {
-		return "", fmt.Errorf("resolve untagged release request %s first", inv.PendingRequests[0])
+		return "", nil, fmt.Errorf("resolve untagged release request %s first", inv.PendingRequests[0])
 	}
 	tags, err := repo.Tags(ctx)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	for _, t := range tags {
 		if other, ok := semver.Parse(t); ok && semver.Compare(v, other) <= 0 {
-			return "", fmt.Errorf("%s must be newer than existing tag %s", version, t)
+			return "", nil, fmt.Errorf("%s must be newer than existing tag %s", version, t)
 		}
 	}
 	if inv.Previous == "" && version != c.FirstVersion {
-		return "", fmt.Errorf("the first release must be %s", c.FirstVersion)
+		return "", nil, fmt.Errorf("the first release must be %s", c.FirstVersion)
 	}
 	if gh != nil {
 		contributors.Add(ctx, gh, &inv)
@@ -79,21 +79,21 @@ func Write(ctx context.Context, repo gitrepo.Repo, c config.Config, ownerName, v
 	name := path.Join(c.NotesDir, version+".md")
 	file := filepath.Join(repo.Dir, filepath.FromSlash(name))
 	if _, err := os.Stat(file); err == nil {
-		return "", fmt.Errorf("%s already exists; edit it instead", name)
+		return "", nil, fmt.Errorf("%s already exists; edit it instead", name)
 	} else if !errors.Is(err, fs.ErrNotExist) {
-		return "", err
+		return "", nil, err
 	}
 
 	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
-		return "", err
+		return "", nil, err
 	}
-	return name, os.WriteFile(file, []byte(Render(inv, ownerName, version)), 0o644)
+	return name, inv.Warnings, os.WriteFile(file, []byte(Render(inv, ownerName, version)), 0o644)
 }
 
 // Render returns a draft's notes for version from the inventory. It writes a TODO opening
 // for the agent to replace, then every pull request and direct commit in merge order with its
 // author's handle when known, the new contributors, and the closing link. Pull request numbers
-// and commit SHAs are left for GitHub to link, so the only URL it builds is the closing link.
+// are left for GitHub to link; direct commits and the closing link get explicit URLs.
 func Render(inv plan.Inventory, ownerName, version string) string {
 	var b strings.Builder
 	b.WriteString(Opening + "\n")
@@ -108,7 +108,7 @@ func Render(inv plan.Inventory, ownerName, version string) string {
 		case commit.PullRequest != 0 && commit.OnBranch:
 			fmt.Fprintf(&b, "- %s%s in #%d\n", commit.Title, by, commit.PullRequest)
 		case commit.OnBranch && !strings.HasPrefix(commit.Subject, "Merge "):
-			fmt.Fprintf(&b, "- %s in %s\n", commit.Title, commit.SHA[:7])
+			fmt.Fprintf(&b, "- %s in https://github.com/%s/commit/%s\n", commit.Title, ownerName, commit.SHA[:7])
 		default:
 			continue
 		}
