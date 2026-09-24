@@ -126,6 +126,7 @@ jobs:
     environment: release
     permissions:
       contents: write
+      pull-requests: read # to confirm the commit is a merged pull request
     # Serialize publication so competing releases cannot race.
     concurrency:
       group: release-publication
@@ -140,4 +141,4 @@ jobs:
         env:
           GITHUB_TOKEN: ${{"{{"}} github.token {{"}}"}}
           COMMIT: ${{"{{"}} needs.plan.outputs.commit {{"}}"}}
-        run: release-planner publish --plan "$RUNNER_TEMP/plan/release-plan.json" --commit "$COMMIT"
+        run: release-planner publish --plan "$RUNNER_TEMP/plan/release-plan.json" --commit "$COMMIT" --branch {{.Branch}}

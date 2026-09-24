@@ -68,7 +68,10 @@ func ReadAssets(dir string) ([]File, error) {
 // Publish verifies the plan against GitHub, then creates the tag and release. With assets,
 // it stages them on a draft, verifies GitHub's stored checksums, and publishes last, because
 // immutable releases freeze their assets at publication.
-func Publish(ctx context.Context, gh *GitHub, p plan.Plan, commit string, assets []File) (Result, error) {
+//
+// Merging the release pull request is the approval, so the commit must be the result of
+// merging a pull request into branch. A direct push of release notes publishes nothing.
+func Publish(ctx context.Context, gh *GitHub, p plan.Plan, commit, branch string, assets []File) (Result, error) {
 	if p.Tag == "" {
 		return Result{}, fmt.Errorf("the plan requests no release")
 	}
@@ -77,6 +80,13 @@ func Publish(ctx context.Context, gh *GitHub, p plan.Plan, commit string, assets
 	}
 	if strings.TrimSpace(p.Notes) == "" {
 		return Result{}, fmt.Errorf("the plan has no release notes")
+	}
+	pr, err := gh.MergedPullRequest(ctx, commit, branch)
+	if err != nil {
+		return Result{}, err
+	}
+	if pr == 0 {
+		return Result{}, fmt.Errorf("%s is not the merge of a pull request into %s; a release is approved by merging its pull request, so a direct push publishes nothing", commit, branch)
 	}
 
 	// Refuse to act on a stale plan: the tags seen at planning must be the tags that exist now.

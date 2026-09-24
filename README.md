@@ -214,7 +214,7 @@ Everyone runs the version your config pins. Agents check `release-planner versio
 | `inventory [--head <ref>]` | Agent | Lists the previous release, every commit since it, and the candidate next versions. |
 | `draft <version>` | Agent | Creates the notes file with a linked list of pull requests and the closing link. |
 | `plan --base <ref> [--head <ref>]` | CI and agent | Validates a release request and prints the tag, commit, and notes to publish. |
-| `publish --plan <file> --commit <sha> [--assets <dir>]` | CI | Tags the approved commit and publishes the approved notes, with optional files staged on a draft and verified first. |
+| `publish --plan <file> --commit <sha> --branch <name> [--assets <dir>]` | CI | Tags the approved commit and publishes the approved notes, with optional files staged on a draft and verified first. |
 | `version` | Anyone | Prints the running version. |
 
 ## Upgrading

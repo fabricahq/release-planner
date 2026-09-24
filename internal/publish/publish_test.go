@@ -25,6 +25,8 @@ const (
 
 type ref struct{ typ, sha string }
 
+var mergedAt = "2026-09-24T12:00:00Z"
+
 // fakeGitHub stores tags and releases in memory and serves the endpoints the publisher uses.
 type fakeGitHub struct {
 	mu          sync.Mutex
@@ -37,10 +39,19 @@ type fakeGitHub struct {
 	host        string
 	hideDigests bool
 	content     map[int64][]byte
+	pulls       map[int]pull
+	server      *httptest.Server
+}
+
+// pull is a pull request as the commits/{sha}/pulls endpoint lists it for commit.
+type pull struct {
+	commit, merge, base string
+	mergedAt            *string
 }
 
 func newFake() *fakeGitHub {
-	return &fakeGitHub{tags: map[string]ref{}, annotated: map[string]string{}, targets: map[int64]string{}, content: map[int64][]byte{}, pageSize: 100}
+	return &fakeGitHub{tags: map[string]ref{}, annotated: map[string]string{}, targets: map[int64]string{}, content: map[int64][]byte{}, pageSize: 100,
+		pulls: map[int]pull{7: {commit: approved, merge: approved, base: "main", mergedAt: &mergedAt}}}
 }
 
 func (f *fakeGitHub) release(tag string, draft bool, body string) {
@@ -58,9 +69,18 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.host = r.Host
 	send := func(v any) { _ = json.NewEncoder(w).Encode(v) }
 	switch {
-	case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/uploads/"):
+	case r.Method == http.MethodGet && strings.HasPrefix(path, "/commits/"):
+		sha := strings.TrimSuffix(strings.TrimPrefix(path, "/commits/"), "/pulls")
+		var pulls []map[string]any
+		for number, pr := range f.pulls {
+			if pr.commit == sha {
+				pulls = append(pulls, map[string]any{"number": number, "merged_at": pr.mergedAt, "merge_commit_sha": pr.merge, "base": map[string]string{"ref": pr.base}})
+			}
+		}
+		send(pulls)
+	case r.Method == http.MethodPost && strings.HasSuffix(path, "/assets"):
 		var id int64
-		fmt.Sscanf(strings.TrimPrefix(r.URL.Path, "/uploads/"), "%d", &id)
+		fmt.Sscanf(strings.TrimPrefix(path, "/releases/"), "%d", &id)
 		data, _ := io.ReadAll(r.Body)
 		name := r.URL.Query().Get("name")
 		f.writes = append(f.writes, "upload "+name)
@@ -68,12 +88,12 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		assetID := int64(1000 + len(f.content))
 		f.content[assetID] = data
 		asset := Asset{ID: assetID, Name: name, Size: int64(len(data)), Digest: "sha256:" + hex.EncodeToString(sum[:]),
-			URL: fmt.Sprintf("http://%s/assets/%d", r.Host, assetID)}
+			URL: fmt.Sprintf("http://%s/repos/fabricahq/example/releases/assets/%d", r.Host, assetID)}
 		f.releases[id-1].Assets = append(f.releases[id-1].Assets, asset)
 		send(asset)
-	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/assets/"):
+	case r.Method == http.MethodGet && strings.HasPrefix(path, "/releases/assets/"):
 		var id int64
-		fmt.Sscanf(strings.TrimPrefix(r.URL.Path, "/assets/"), "%d", &id)
+		fmt.Sscanf(strings.TrimPrefix(path, "/releases/assets/"), "%d", &id)
 		_, _ = w.Write(f.content[id])
 	case r.Method == http.MethodGet && strings.HasPrefix(path, "/releases/"):
 		var id int64
@@ -125,7 +145,7 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		rel := Release{ID: id, TagName: tag, Name: body["name"].(string), Body: body["body"].(string), Draft: draft,
 			Prerelease: body["prerelease"].(bool), HTMLURL: "https://github.com/fabricahq/example/releases/tag/" + tag,
-			UploadURL: fmt.Sprintf("http://%s/uploads/%d/assets{?name,label}", r.Host, id)}
+			UploadURL: fmt.Sprintf("http://%s/repos/fabricahq/example/releases/%d/assets{?name,label}", r.Host, id)}
 		f.releases = append(f.releases, rel)
 		send(f.view(rel))
 	case r.Method == http.MethodPatch && strings.HasPrefix(path, "/releases/"):
@@ -165,10 +185,13 @@ func run(t *testing.T, f *fakeGitHub, p plan.Plan) (Result, error) {
 
 func runWith(t *testing.T, f *fakeGitHub, p plan.Plan, assets []File) (Result, error) {
 	t.Helper()
-	server := httptest.NewServer(f)
-	t.Cleanup(server.Close)
-	gh := &GitHub{BaseURL: server.URL, Token: "token", Repository: "fabricahq/example", HTTP: server.Client()}
-	return Publish(context.Background(), gh, p, approved, assets)
+	// Keep one server per fake, so URLs it returned earlier stay on the same origin.
+	if f.server == nil {
+		f.server = httptest.NewServer(f)
+		t.Cleanup(f.server.Close)
+	}
+	gh := &GitHub{BaseURL: f.server.URL, Token: "token", Repository: "fabricahq/example", HTTP: f.server.Client()}
+	return Publish(context.Background(), gh, p, approved, "main", assets)
 }
 
 func minor() plan.Plan {
@@ -264,6 +287,14 @@ func TestRefusals(t *testing.T) {
 		"missing previous":  {func(f *fakeGitHub) { f.releases = nil }, nil, "publish v1.0.0 first"},
 		"commit mismatch":   {nil, func(p *plan.Plan) { p.Commit = other }, "does not match"},
 		"no release":        {nil, func(p *plan.Plan) { p.Tag = "" }, "requests no release"},
+		"direct push":       {func(f *fakeGitHub) { f.pulls = nil }, nil, "a direct push publishes nothing"},
+		"unmerged pull":     {func(f *fakeGitHub) { f.pulls = map[int]pull{7: {commit: approved, merge: approved, base: "main"}} }, nil, "a direct push publishes nothing"},
+		"other base": {func(f *fakeGitHub) {
+			f.pulls = map[int]pull{7: {commit: approved, merge: approved, base: "dev", mergedAt: &mergedAt}}
+		}, nil, "a direct push publishes nothing"},
+		"commit in a pull": {func(f *fakeGitHub) {
+			f.pulls = map[int]pull{7: {commit: approved, merge: other, base: "main", mergedAt: &mergedAt}}
+		}, nil, "a direct push publishes nothing"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := withPrevious()
@@ -364,6 +395,35 @@ func TestVerifiesAssetsWithoutGitHubDigests(t *testing.T) {
 	f := withPrevious()
 	f.hideDigests = true
 	if _, err := runWith(t, f, minor(), files(t, map[string]string{"a.tar.gz": "a"})); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNeverSendsTheTokenElsewhere(t *testing.T) {
+	gh := &GitHub{BaseURL: "https://api.github.com", Token: "token", Repository: "fabricahq/example"}
+	for target, ok := range map[string]bool{
+		"https://api.github.com/repos/fabricahq/example/releases/assets/1":                  true,
+		"https://uploads.github.com/repos/fabricahq/example/releases/1/assets?name=a":       true,
+		"https://api.github.com/repos/fabricahq/example/releases?page=2":                    true,
+		"https://evil.example/repos/fabricahq/example/releases/assets/1":                    false,
+		"http://api.github.com/repos/fabricahq/example/releases/assets/1":                   false,
+		"https://api.github.com/repos/other/example/releases/assets/1":                      false,
+		"https://api.github.com/repos/fabricahq/example/../../other/example/releases/1":     false,
+		"https://user@api.github.com/repos/fabricahq/example/releases/assets/1":             false,
+		"https://uploads.github.com.evil.example/repos/fabricahq/example/releases/1/assets": false,
+	} {
+		if err := gh.trusted(target); (err == nil) != ok {
+			t.Errorf("trusted(%q) = %v, want ok %v", target, err, ok)
+		}
+	}
+	ghes := &GitHub{BaseURL: "https://ghe.example/api/v3", Token: "token", Repository: "fabricahq/example"}
+	for _, target := range []string{"https://ghe.example/api/v3/repos/fabricahq/example/releases/assets/1", "https://ghe.example/api/uploads/repos/fabricahq/example/releases/1/assets"} {
+		if err := ghes.trusted(target); err != nil {
+			t.Error(err)
+		}
+	}
+	// An asset URL outside the repository is refused before any request is made.
+	if _, err := gh.AssetDigest(context.Background(), Asset{Name: "a", URL: "https://evil.example/a"}); err == nil || !strings.Contains(err.Error(), "refusing to send the token") {
 		t.Fatal(err)
 	}
 }

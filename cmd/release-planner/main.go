@@ -314,6 +314,15 @@ func cmdPlan(ctx context.Context, args []string, out io.Writer) error {
 			return fmt.Errorf("the approved head %s is not on %s", *head, c.Branch)
 		}
 	}
+	if *ci && *event == "pull_request" {
+		// The pull request's base SHA is the base branch's current tip, which the head
+		// doesn't contain once the branch has moved on. Check what the pull request adds.
+		mergeBase, err := repo.MergeBase(ctx, *base, *head)
+		if err != nil {
+			return fmt.Errorf("finding where the pull request branched from %s: %w", *base, err)
+		}
+		*base = mergeBase
+	}
 	if *ci {
 		if err := appendEnvFile("GITHUB_STEP_SUMMARY", fmt.Sprintf("Release request range\n\nBase SHA: `%s`\n\nApproved head SHA: `%s`\n", *base, *head)); err != nil {
 			return err
@@ -367,17 +376,18 @@ func appendEnvFile(name, content string) error {
 }
 
 func cmdPublish(ctx context.Context, args []string, out io.Writer) error {
-	fs, _ := flags("publish", "publish --plan <file> --commit <sha> [--assets <dir>] [--repository owner/name]")
+	fs, _ := flags("publish", "publish --plan <file> --commit <sha> --branch <name> [--assets <dir>] [--repository owner/name]")
 	planFile := fs.String("plan", "", "plan written by release-planner plan")
 	commit := fs.String("commit", "", "approved commit from the plan job")
+	branch := fs.String("branch", "", "release branch; the commit must be a pull request merged into it")
 	repository := fs.String("repository", os.Getenv("GITHUB_REPOSITORY"), "GitHub repository, as owner/name")
 	assetsDir := fs.String("assets", "", "directory of files to attach to the release, staged on a draft and verified before publishing")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *planFile == "" || *commit == "" || *repository == "" {
+	if *planFile == "" || *commit == "" || *branch == "" || *repository == "" {
 		fs.Usage()
-		return fmt.Errorf("--plan, --commit, and --repository (or GITHUB_REPOSITORY) are required")
+		return fmt.Errorf("--plan, --commit, --branch, and --repository (or GITHUB_REPOSITORY) are required")
 	}
 	token := os.Getenv("GITHUB_TOKEN")
 	if token == "" {
@@ -401,7 +411,7 @@ func cmdPublish(ctx context.Context, args []string, out io.Writer) error {
 	if api == "" {
 		api = "https://api.github.com"
 	}
-	res, err := publish.Publish(ctx, &publish.GitHub{BaseURL: api, Token: token, Repository: *repository}, p, *commit, assets)
+	res, err := publish.Publish(ctx, &publish.GitHub{BaseURL: api, Token: token, Repository: *repository}, p, *commit, *branch, assets)
 	if err != nil {
 		return err
 	}

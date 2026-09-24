@@ -57,9 +57,35 @@ type raw struct {
 	data        []byte
 }
 
+// trusted checks that an absolute URL taken from an API response, such as a pagination
+// link, an upload URL, or an asset URL, belongs to this repository on this GitHub, so the
+// token is never sent anywhere else.
+func (g *GitHub) trusted(target string) error {
+	base, err := url.Parse(g.BaseURL)
+	if err != nil {
+		return err
+	}
+	u, err := url.Parse(target)
+	if err != nil {
+		return err
+	}
+	host := u.Host == base.Host || (base.Host == "api.github.com" && u.Host == "uploads.github.com")
+	repo := "/repos/" + g.Repository + "/"
+	if u.Scheme == base.Scheme && host && u.User == nil {
+		for _, prefix := range []string{strings.TrimRight(base.Path, "/") + repo, repo, "/api/uploads" + repo} {
+			if strings.HasPrefix(u.Path, prefix) && !strings.Contains(u.Path, "/../") {
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("refusing to send the token to %s, which is outside %s on %s", u.Redacted(), g.Repository, base.Host)
+}
+
 func (g *GitHub) do(ctx context.Context, method, target string, body any, out any) (next string, err error) {
 	if !strings.HasPrefix(target, "http") {
 		target = strings.TrimRight(g.BaseURL, "/") + "/repos/" + g.Repository + target
+	} else if err := g.trusted(target); err != nil {
+		return "", err
 	}
 	var reader io.Reader
 	contentType := "application/json"
@@ -222,6 +248,9 @@ func (g *GitHub) AssetDigest(ctx context.Context, a Asset) (string, error) {
 	if strings.HasPrefix(a.Digest, "sha256:") {
 		return a.Digest, nil
 	}
+	if err := g.trusted(a.URL); err != nil {
+		return "", err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.URL, nil)
 	if err != nil {
 		return "", err
@@ -245,6 +274,28 @@ func (g *GitHub) AssetDigest(ctx context.Context, a Asset) (string, error) {
 		return "", err
 	}
 	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// MergedPullRequest returns the number of the pull request into branch that the commit
+// merged, or 0 if the commit isn't a pull request's merge, squash, or rebase result.
+func (g *GitHub) MergedPullRequest(ctx context.Context, commit, branch string) (int, error) {
+	var pulls []struct {
+		Number         int     `json:"number"`
+		MergedAt       *string `json:"merged_at"`
+		MergeCommitSHA string  `json:"merge_commit_sha"`
+		Base           struct {
+			Ref string `json:"ref"`
+		} `json:"base"`
+	}
+	if _, err := g.do(ctx, http.MethodGet, "/commits/"+commit+"/pulls?per_page=100", nil, &pulls); err != nil {
+		return 0, err
+	}
+	for _, p := range pulls {
+		if p.MergedAt != nil && p.MergeCommitSHA == commit && p.Base.Ref == branch {
+			return p.Number, nil
+		}
+	}
+	return 0, nil
 }
 
 // PublishDraft makes an existing draft release public.

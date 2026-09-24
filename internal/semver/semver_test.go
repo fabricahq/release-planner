@@ -20,6 +20,8 @@ func TestParse(t *testing.T) {
 	for tag, ok := range map[string]bool{
 		"v1.2.3": true, "v0.1.0": true, "v1.2.3-rc.1": true, "v1.2.3-0.a-b": true,
 		"1.2.3": false, "v1.2": false, "v01.2.3": false, "v1.2.3+build": false, "v1.2.3-01": false, "v-preview": false,
+		"v999999999.0.0": true, "v1.0.0-rc.999999999": true, "v1.0.0-rc.0999999999x": true,
+		"v1000000000.0.0": false, "v999999999999999999999.0.0": false, "v1.0.0-rc.1000000000": false,
 	} {
 		v, got := Parse(tag)
 		if got != ok {

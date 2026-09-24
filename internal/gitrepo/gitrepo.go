@@ -39,6 +39,12 @@ func (r Repo) IsAncestor(ctx context.Context, ancestor, descendant string) bool 
 	return cmd.Run() == nil
 }
 
+// MergeBase returns the best common ancestor of two commits.
+func (r Repo) MergeBase(ctx context.Context, a, b string) (string, error) {
+	out, err := r.Run(ctx, "merge-base", a, b)
+	return strings.TrimSpace(out), err
+}
+
 // Tags lists tag names starting with v.
 func (r Repo) Tags(ctx context.Context) ([]string, error) {
 	out, err := r.Run(ctx, "tag", "--list", "v*")

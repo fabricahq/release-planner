@@ -2,6 +2,7 @@
 package semver
 
 import (
+	"cmp"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -19,21 +20,46 @@ type Version struct {
 	Prerelease          []string
 }
 
-// Parse accepts a tag such as v1.2.3 or v1.2.3-rc.1.
+// MaxNumber bounds every numeric part of a version, so parts always fit in an int
+// and incrementing one can't overflow.
+const MaxNumber = 999_999_999
+
+// Parse accepts a tag such as v1.2.3 or v1.2.3-rc.1. It rejects a numeric part larger
+// than MaxNumber, including a numeric prerelease identifier.
 func Parse(tag string) (Version, bool) {
 	m := pattern.FindStringSubmatch(tag)
 	if m == nil {
 		return Version{}, false
 	}
 	var v Version
-	// The pattern guarantees these are small decimal integers without leading zeros.
-	v.Major, _ = strconv.Atoi(m[1])
-	v.Minor, _ = strconv.Atoi(m[2])
-	v.Patch, _ = strconv.Atoi(m[3])
+	for i, part := range []*int{&v.Major, &v.Minor, &v.Patch} {
+		n, ok := number(m[i+1])
+		if !ok {
+			return Version{}, false
+		}
+		*part = n
+	}
 	if m[4] != "" {
 		v.Prerelease = strings.Split(m[4], ".")
+		for _, id := range v.Prerelease {
+			if isNumeric(id) {
+				if _, ok := number(id); !ok {
+					return Version{}, false
+				}
+			}
+		}
 	}
 	return v, true
+}
+
+// number parses a decimal part no larger than MaxNumber.
+func number(s string) (int, bool) {
+	n, err := strconv.Atoi(s)
+	return n, err == nil && n <= MaxNumber
+}
+
+func isNumeric(id string) bool {
+	return id != "" && strings.Trim(id, "0123456789") == ""
 }
 
 // MustParse is for literals in tests and templates.
@@ -58,9 +84,9 @@ func (v Version) IsPrerelease() bool { return len(v.Prerelease) > 0 }
 
 // Compare orders versions by SemVer 2.0.0 precedence and returns -1, 0, or 1.
 func Compare(a, b Version) int {
-	for _, d := range []int{a.Major - b.Major, a.Minor - b.Minor, a.Patch - b.Patch} {
-		if d != 0 {
-			return sign(d)
+	for _, c := range []int{cmp.Compare(a.Major, b.Major), cmp.Compare(a.Minor, b.Minor), cmp.Compare(a.Patch, b.Patch)} {
+		if c != 0 {
+			return c
 		}
 	}
 	// A release sorts after all of its prereleases.
@@ -77,32 +103,24 @@ func Compare(a, b Version) int {
 			return c
 		}
 	}
-	return sign(len(a.Prerelease) - len(b.Prerelease))
+	return cmp.Compare(len(a.Prerelease), len(b.Prerelease))
 }
 
-// Numeric identifiers sort before alphanumeric ones and compare numerically.
+// Numeric identifiers sort before alphanumeric ones and compare numerically. Parse
+// bounds numeric identifiers, so they always convert.
 func compareIdentifier(a, b string) int {
-	an, aerr := strconv.Atoi(a)
-	bn, berr := strconv.Atoi(b)
+	an, bn := isNumeric(a), isNumeric(b)
 	switch {
-	case aerr == nil && berr == nil:
-		return sign(an - bn)
-	case aerr == nil:
+	case an && bn:
+		x, _ := strconv.Atoi(a)
+		y, _ := strconv.Atoi(b)
+		return cmp.Compare(x, y)
+	case an:
 		return -1
-	case berr == nil:
+	case bn:
 		return 1
 	}
 	return strings.Compare(a, b)
-}
-
-func sign(d int) int {
-	switch {
-	case d < 0:
-		return -1
-	case d > 0:
-		return 1
-	}
-	return 0
 }
 
 // Candidates returns the next patch, minor, and major versions after a released version.

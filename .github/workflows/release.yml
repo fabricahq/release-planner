@@ -111,6 +111,7 @@ jobs:
     environment: release
     permissions:
       contents: write
+      pull-requests: read # to confirm the commit is a merged pull request
     concurrency:
       group: release-publication
       cancel-in-progress: false
@@ -133,4 +134,4 @@ jobs:
           COMMIT: ${{ needs.plan.outputs.commit }}
         run: |
           chmod +x "$RUNNER_TEMP/bin/release-planner"
-          "$RUNNER_TEMP/bin/release-planner" publish --plan "$RUNNER_TEMP/plan/release-plan.json" --commit "$COMMIT" --assets "$RUNNER_TEMP/release-assets"
+          "$RUNNER_TEMP/bin/release-planner" publish --plan "$RUNNER_TEMP/plan/release-plan.json" --commit "$COMMIT" --branch main --assets "$RUNNER_TEMP/release-assets"

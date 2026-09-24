@@ -37,7 +37,7 @@ Run every command from the repository root, with the pinned version installed. E
 | `inventory [--head <ref>]` | Agent | Prints JSON describing everything since the previous release. |
 | `draft [--repository <owner/name>] <version>` | Agent | Creates the notes file for a version. |
 | `plan --base <ref> [--head <ref>] [--out <file>]` | CI, agent | Validates the release request between two commits and prints the plan as JSON. |
-| `publish --plan <file> --commit <sha> [--assets <dir>]` | CI | Tags the approved commit and publishes the release. With `--assets`, uploads the directory's files to a draft, verifies GitHub's checksums for them, and publishes last. Needs `GITHUB_TOKEN` and `GITHUB_REPOSITORY`. |
+| `publish --plan <file> --commit <sha> --branch <name> [--assets <dir>]` | CI | Tags the approved commit and publishes the release. Refuses unless the commit is a pull request merged into the branch. With `--assets`, uploads the directory's files to a draft, verifies GitHub's checksums for them, and publishes last. Needs `GITHUB_TOKEN` and `GITHUB_REPOSITORY`. |
 | `version` | Anyone | Prints the running version. |
 
 `install` and `check` refuse to run when the running version differs from the version the config pins, because they would render the wrong files.
