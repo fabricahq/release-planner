@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -298,6 +299,53 @@ func (g *GitHub) MergedPullRequest(ctx context.Context, commit, branch string) (
 		}
 	}
 	return 0, nil
+}
+
+// Environment is the part of a deployment environment's settings that Release Planner checks.
+type Environment struct {
+	// DeploymentBranchPolicy is nil when any branch can deploy.
+	DeploymentBranchPolicy *struct {
+		ProtectedBranches    bool `json:"protected_branches"`
+		CustomBranchPolicies bool `json:"custom_branch_policies"`
+	} `json:"deployment_branch_policy"`
+	ProtectionRules []struct {
+		Type string `json:"type"`
+	} `json:"protection_rules"`
+}
+
+// Environment returns a deployment environment's settings, or nil if it doesn't exist.
+func (g *GitHub) Environment(ctx context.Context, name string) (*Environment, error) {
+	var env Environment
+	_, err := g.do(ctx, http.MethodGet, "/environments/"+url.PathEscape(name), nil, &env)
+	if errors.As(err, new(errNotFound)) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &env, nil
+}
+
+// EnvironmentDocs explains how to set up the release environment.
+const EnvironmentDocs = "https://github.com/fabricahq/release-planner/blob/main/docs/src/content/docs/start-here/set-up.md#create-the-release-environment"
+
+// EnvironmentWarnings explains how the release environment differs from the recommended
+// setup: it exists, only the release branch can deploy to it, and the merge is the only
+// approval. The differences are warnings, not errors, because a repository may choose them.
+func EnvironmentWarnings(name string, env *Environment) []string {
+	if env == nil {
+		return []string{fmt.Sprintf("The %s environment doesn't exist. GitHub will create it on the first release with no deployment branch rule, so a workflow on any branch could publish. Create it with a branch rule for your release branch: %s", name, EnvironmentDocs)}
+	}
+	var warnings []string
+	if env.DeploymentBranchPolicy == nil {
+		warnings = append(warnings, fmt.Sprintf("The %s environment has no deployment branch rule, so a workflow on any branch could publish. Add a branch rule for your release branch: %s", name, EnvironmentDocs))
+	}
+	for _, rule := range env.ProtectionRules {
+		if rule.Type == "required_reviewers" {
+			warnings = append(warnings, fmt.Sprintf("The %s environment requires reviewers, so every release waits for a second approval after the merge. Merging the release pull request is the approval; remove the reviewers unless you want both: %s", name, EnvironmentDocs))
+		}
+	}
+	return warnings
 }
 
 // PublishDraft makes an existing draft release public, creating its tag on commit if the

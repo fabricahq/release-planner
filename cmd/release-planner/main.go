@@ -339,6 +339,11 @@ func cmdPlan(ctx context.Context, args []string, out io.Writer) error {
 		if err := appendEnvFile("GITHUB_OUTPUT", fmt.Sprintf("tag=%s\ncommit=%s\n", p.Tag, p.Commit)); err != nil {
 			return err
 		}
+		if p.Tag != "" {
+			if err := warnAboutEnvironment(ctx, out, *outFile != ""); err != nil {
+				return err
+			}
+		}
 	}
 	w := out
 	if *outFile != "" {
@@ -421,6 +426,42 @@ func cmdPublish(ctx context.Context, args []string, out io.Writer) error {
 		fmt.Fprintf(out, "Published %s: %s\n", p.Tag, res.URL)
 	}
 	return appendEnvFile("GITHUB_STEP_SUMMARY", fmt.Sprintf("\nPublished %s\n", res.URL))
+}
+
+// releaseEnvironment is the environment the generated workflow publishes from.
+const releaseEnvironment = "release"
+
+// warnAboutEnvironment reports, without failing, how the release environment differs from
+// the recommended setup. It writes GitHub warning annotations, to standard output only when
+// the plan goes to a file, and adds the warnings to the step summary.
+func warnAboutEnvironment(ctx context.Context, out io.Writer, annotate bool) error {
+	token, repository := os.Getenv("GITHUB_TOKEN"), os.Getenv("GITHUB_REPOSITORY")
+	if token == "" || repository == "" {
+		return nil
+	}
+	api := os.Getenv("GITHUB_API_URL")
+	if api == "" {
+		api = "https://api.github.com"
+	}
+	gh := &publish.GitHub{BaseURL: api, Token: token, Repository: repository}
+	env, err := gh.Environment(ctx, releaseEnvironment)
+	var warnings []string
+	if err != nil {
+		warnings = []string{fmt.Sprintf("Couldn't check the %s environment's settings (%v). Give the plan job actions: read to check them.", releaseEnvironment, err)}
+	} else {
+		warnings = publish.EnvironmentWarnings(releaseEnvironment, env)
+	}
+	if len(warnings) == 0 {
+		return nil
+	}
+	summary := "\nRelease environment\n\n"
+	for _, w := range warnings {
+		if annotate {
+			fmt.Fprintf(out, "::warning title=Release environment::%s\n", w)
+		}
+		summary += "- " + w + "\n"
+	}
+	return appendEnvFile("GITHUB_STEP_SUMMARY", summary)
 }
 
 func cmdVersion(_ context.Context, args []string, out io.Writer) error {

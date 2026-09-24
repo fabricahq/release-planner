@@ -465,3 +465,57 @@ func TestReadAssetsRejectsUnsafeNames(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestEnvironmentWarningsExplainRiskySettings(t *testing.T) {
+	parse := func(body string) *Environment {
+		t.Helper()
+		var env Environment
+		if err := json.Unmarshal([]byte(body), &env); err != nil {
+			t.Fatal(err)
+		}
+		return &env
+	}
+	for name, tc := range map[string]struct {
+		env  *Environment
+		want []string
+	}{
+		"missing":        {nil, []string{"doesn't exist"}},
+		"no branch rule": {parse(`{"deployment_branch_policy":null,"protection_rules":[]}`), []string{"no deployment branch rule"}},
+		"reviewers":      {parse(`{"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true},"protection_rules":[{"type":"required_reviewers"},{"type":"branch_policy"}]}`), []string{"requires reviewers"}},
+		"both":           {parse(`{"deployment_branch_policy":null,"protection_rules":[{"type":"required_reviewers"}]}`), []string{"no deployment branch rule", "requires reviewers"}},
+		"recommended":    {parse(`{"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true},"protection_rules":[{"type":"branch_policy"}]}`), nil},
+		"protected":      {parse(`{"deployment_branch_policy":{"protected_branches":true,"custom_branch_policies":false},"protection_rules":[]}`), nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := EnvironmentWarnings("release", tc.env)
+			if len(got) != len(tc.want) {
+				t.Fatalf("got %q, want %d warnings", got, len(tc.want))
+			}
+			for i, want := range tc.want {
+				if !strings.Contains(got[i], want) || !strings.Contains(got[i], EnvironmentDocs) {
+					t.Errorf("warning %q lacks %q or the docs link", got[i], want)
+				}
+			}
+		})
+	}
+}
+
+func TestEnvironmentReadsSettingsOrReportsMissing(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/fabricahq/example/environments/release":
+			_, _ = w.Write([]byte(`{"deployment_branch_policy":null,"protection_rules":[{"type":"required_reviewers"}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	gh := &GitHub{BaseURL: server.URL, Token: "token", Repository: "fabricahq/example", HTTP: server.Client()}
+	env, err := gh.Environment(context.Background(), "release")
+	if err != nil || env == nil || env.DeploymentBranchPolicy != nil || len(env.ProtectionRules) != 1 {
+		t.Fatalf("%+v %v", env, err)
+	}
+	if env, err := gh.Environment(context.Background(), "staging"); env != nil || err != nil {
+		t.Fatalf("missing environment: %+v %v", env, err)
+	}
+}
