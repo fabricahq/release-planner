@@ -466,6 +466,19 @@ func TestReadAssetsRejectsUnsafeNames(t *testing.T) {
 	}
 }
 
+// Contributor lookups say which repository, pull request, handle, and release they checked.
+func TestContributorLookupErrorsNameWhatTheyChecked(t *testing.T) {
+	server := httptest.NewServer(http.NotFoundHandler())
+	t.Cleanup(server.Close)
+	gh := &GitHub{BaseURL: server.URL, Repository: "fabricahq/example", HTTP: server.Client()}
+	if _, err := gh.PullRequestAuthor(context.Background(), 7); err == nil || !strings.Contains(err.Error(), "get pull request #7 in fabricahq/example: not found") {
+		t.Fatal(err)
+	}
+	if _, err := gh.ContributedBefore(context.Background(), "octocat", "v1.0.0"); err == nil || !strings.Contains(err.Error(), "list commits by @octocat in fabricahq/example at v1.0.0: not found") {
+		t.Fatal(err)
+	}
+}
+
 func TestEnvironmentWarningsExplainRiskySettings(t *testing.T) {
 	env := func(body string, rules []string, protected bool) *Environment {
 		t.Helper()

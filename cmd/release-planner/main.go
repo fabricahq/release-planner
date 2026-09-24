@@ -9,12 +9,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
 
 	"github.com/fabricahq/release-planner/internal/buildinfo"
 	"github.com/fabricahq/release-planner/internal/config"
+	"github.com/fabricahq/release-planner/internal/contributors"
 	"github.com/fabricahq/release-planner/internal/draft"
 	"github.com/fabricahq/release-planner/internal/generate"
 	"github.com/fabricahq/release-planner/internal/gitrepo"
@@ -34,7 +36,7 @@ Set up a repository:
 Prepare a release (agents):
   guide       Print the release procedure to follow
   inventory   List changes since the previous release and the candidate versions
-  draft       Create the release notes file for a version
+  draft       Create the release notes file with its raw material: pull requests, authors, and links
 
 Run in the Release workflow:
   plan        Validate a release request and print what to publish
@@ -238,8 +240,10 @@ func printJSON(out io.Writer, v any) error {
 }
 
 func cmdInventory(ctx context.Context, args []string, out io.Writer) error {
-	fs, dir := flags("inventory", "inventory [--head <ref>]")
+	fs, dir := flags("inventory", "inventory [--head <ref>] [--repository owner/name] [--offline]")
 	head := fs.String("head", "HEAD", "commit the release would tag")
+	repository := fs.String("repository", "", "GitHub repository to look up pull request authors in, as owner/name (default: from the origin remote)")
+	offline := fs.Bool("offline", false, "don't look up pull request authors on GitHub")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -247,17 +251,56 @@ func cmdInventory(ctx context.Context, args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	inv, err := plan.Take(ctx, gitrepo.Repo{Dir: *dir}, plan.Options{NotesDir: c.NotesDir, FirstVersion: c.FirstVersion}, *head)
+	repo := gitrepo.Repo{Dir: *dir}
+	inv, err := plan.Take(ctx, repo, plan.Options{NotesDir: c.NotesDir, FirstVersion: c.FirstVersion}, *head)
 	if err != nil {
 		return err
+	}
+	if !*offline && len(inv.PullRequests) > 0 {
+		if gh, err := githubFor(ctx, repo, *repository); err != nil {
+			inv.Warnings = append(inv.Warnings, fmt.Sprintf("no pull request authors: %v", err))
+		} else {
+			contributors.Add(ctx, gh, &inv)
+		}
 	}
 	return printJSON(out, inv)
 }
 
+// githubFor returns a GitHub API client for looking up pull request authors in the repository,
+// read from the origin remote when not given.
+func githubFor(ctx context.Context, repo gitrepo.Repo, repository string) (*publish.GitHub, error) {
+	if repository == "" {
+		var err error
+		if repository, err = draft.Repository(ctx, repo); err != nil {
+			return nil, err
+		}
+	}
+	api := os.Getenv("GITHUB_API_URL")
+	if api == "" {
+		api = "https://api.github.com"
+	}
+	return &publish.GitHub{BaseURL: api, Token: githubToken(ctx), Repository: repository}, nil
+}
+
+// githubToken finds a token for GitHub API reads: GITHUB_TOKEN, GH_TOKEN, or the GitHub CLI's
+// login. With none, requests are unauthenticated, which works for public repositories.
+func githubToken(ctx context.Context) string {
+	for _, name := range []string{"GITHUB_TOKEN", "GH_TOKEN"} {
+		if token := os.Getenv(name); token != "" {
+			return token
+		}
+	}
+	if out, err := exec.CommandContext(ctx, "gh", "auth", "token").Output(); err == nil {
+		return strings.TrimSpace(string(out))
+	}
+	return ""
+}
+
 func cmdDraft(ctx context.Context, args []string, out io.Writer) error {
-	fs, dir := flags("draft", "draft [--repository owner/name] <version>")
+	fs, dir := flags("draft", "draft [--repository owner/name] [--offline] <version>")
 	head := fs.String("head", "HEAD", "commit the release would tag")
-	repository := fs.String("repository", "", "GitHub repository for links, as owner/name (default: from the origin remote)")
+	repository := fs.String("repository", "", "GitHub repository for links and pull request authors, as owner/name (default: from the origin remote)")
+	offline := fs.Bool("offline", false, "don't look up pull request authors or new contributors on GitHub")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -275,11 +318,23 @@ func cmdDraft(ctx context.Context, args []string, out io.Writer) error {
 			return err
 		}
 	}
-	name, err := draft.Write(ctx, repo, c, *repository, fs.Arg(0), *head)
+	var gh contributors.GitHub
+	if !*offline {
+		client, err := githubFor(ctx, repo, *repository)
+		if err != nil {
+			return err
+		}
+		gh = client
+	}
+	name, warnings, err := draft.Write(ctx, repo, c, *repository, fs.Arg(0), *head, gh)
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "created %s\nWrite the notes, delete empty headings, then run release-planner plan.\n", name)
+	fmt.Fprintf(out, "created %s\n", name)
+	for _, w := range warnings {
+		fmt.Fprintf(out, "warning: %s. Fill in what's missing from the pull request.\n", w)
+	}
+	fmt.Fprintln(out, "Write the notes, delete empty headings, then run release-planner plan.")
 	return nil
 }
 

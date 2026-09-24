@@ -78,9 +78,9 @@ func TestReadValidatesReleaseRequests(t *testing.T) {
 		{"backwards", "v1.0.0", "Notes", "v1.1.0", "newer"},
 		{"prerelease-after-release", "v1.1.0-rc.1", "Notes", "v1.1.0", "newer"},
 		{"reused", "v1.0.0", "Notes", "v1.0.0", "another commit"},
-		{"unfinished draft", "v1.0.0", DraftOpening + "\n\n## What's Changed\n\n- x\n", "", "replace the TODO opening"},
-		{"empty heading", "v1.0.0", "Summary.\n\n## ✨ New Features\n\n## What's Changed\n\n- x\n", "", `"## ✨ New Features" has no content`},
-		{"empty last heading", "v1.0.0", "Summary.\n\n## What's Changed\n\n", "", "has no content"},
+		{"unfinished draft", "v1.0.0", DraftOpening + "\n\n## Pull Requests\n\n- x\n", "", "replace the TODO opening"},
+		{"empty heading", "v1.0.0", "Summary.\n\n## ✨ New Features\n\n## Pull Requests\n\n- x\n", "", `"## ✨ New Features" has no content`},
+		{"empty last heading", "v1.0.0", "Summary.\n\n## Pull Requests\n\n", "", "has no content"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFixture(t)

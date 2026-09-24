@@ -22,7 +22,7 @@ Agents are good at the tedious part: reading every commit and pull request since
 
 1. **You tell your agent "let's release."**
 2. **The agent works out the next release.** It runs `release-planner guide` for the procedure and `release-planner inventory` for every change since the previous release and the candidate versions. Then it applies your release policy and picks the version.
-3. **The agent opens a release PR.** `release-planner draft` creates `releases/v<version>.md` with a linked list of the pull requests. The agent writes the notes in your release notes style and explains its choice of version in the PR.
+3. **The agent opens a release PR.** `release-planner draft` creates `releases/v<version>.md` with the raw material: every pull request with its author, new contributors, and the closing link. The agent writes the notes in your release notes style and explains its choice of version in the PR.
 4. **You edit the notes and merge.** Change anything you like. Saving edits publishes nothing.
 5. **Merging publishes the release.** The generated Release workflow checks the request, runs any release checks you configured, tags the merged commit, and publishes the notes file word for word as the GitHub release.
 
@@ -186,7 +186,7 @@ Or to replace, using [Keep a Changelog](https://keepachangelog.com) headings:
 
 List the same headings, in the order you want, under **Order of the release notes** in your policy.
 
-Whatever the style says, every release keeps the parts `draft` writes: the **What's Changed** list, and the **Full Changelog** link (or, for a first release, a link to the tagged source).
+Whatever the style says, every release keeps the parts `draft` writes: the **Pull Requests** section listing every pull request with its author, grouped as the style says, any **New Contributors**, and the **Full Changelog** link (or, for a first release, a link to the tagged source).
 
 ## Write your release policy
 
@@ -211,8 +211,8 @@ Everyone runs the version your config pins. Agents check `release-planner versio
 | `check` | CI and you | Fails if a generated file is missing, stale, or edited by hand. Changes nothing. |
 | `uninstall [--force]` | You | Deletes the generated files and the `AGENTS.md` section. Leaves `.release-planner/` and your notes. |
 | `guide [--default-style]` | Agent | Prints the release procedure for this version, or only the default release notes style. |
-| `inventory [--head <ref>]` | Agent | Lists the previous release, every commit since it, and the candidate next versions. |
-| `draft <version>` | Agent | Creates the notes file with a linked list of pull requests and the closing link. |
+| `inventory [--head <ref>] [--offline]` | Agent | Lists the previous release, every commit since it with its pull request author's GitHub handle, and the candidate next versions. |
+| `draft <version>` | Agent | Checks the version and creates the notes file with every pull request and its author, new contributors, and the closing link. |
 | `plan --base <ref> [--head <ref>]` | CI and agent | Validates a release request and prints the tag, commit, and notes to publish. In the Release workflow, it also warns, without failing, when the `release` environment isn't set up as recommended. |
 | `publish --plan <file> --commit <sha> --branch <name> [--assets <dir>]` | CI | Tags the approved commit and publishes the approved notes, with optional files staged on a draft and verified first. |
 | `version` | Anyone | Prints the running version. |

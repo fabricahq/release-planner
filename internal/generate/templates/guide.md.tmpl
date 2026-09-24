@@ -22,7 +22,7 @@ Fetch `{{.Branch}}` and tags, then run:
 release-planner inventory --head origin/{{.Branch}}
 ```
 
-It prints the previous release, every commit since it with its pull request number, and the candidate next versions.
+It prints the previous release, every commit since it with its pull request number and its author's GitHub handle, and the candidate next versions. `warnings` lists anything it couldn't look up, such as a handle when GitHub was unreachable.
 
 - If `pendingRequests` is not empty, an earlier release was approved but never published. Show the maintainer and resolve it before preparing another.
 - If `unmergedNewerTags` is not empty, a version tag exists that `{{.Branch}}` does not contain. Stop and ask.
@@ -44,10 +44,17 @@ Create a release branch, then run:
 release-planner draft <version>
 ```
 
-It creates `{{.NotesDir}}/<version>.md` with a TODO opening line, a `## What's Changed` list of the pull requests, and a closing link: the **Full Changelog** comparison, or for a first release, a link to the tagged source. Write the notes in it, following the release notes style below. Whatever the style says:
+`draft` does the mechanical work, so you can spend yours on judgment. It checks the version again, then creates `{{.NotesDir}}/<version>.md` with the raw material for the notes:
+
+- a TODO opening line for you to replace
+- `## Pull Requests`: every pull request merged into `{{.Branch}}` and every direct commit, in merge order, as `- <title> by @<handle> in #<number>`
+- `## New Contributors`, when there are any: authors whose first contribution is in this release
+- the closing link: the **Full Changelog** comparison, or for a first release, a link to the tagged source
+
+It makes no choices about grouping or wording. Organize and write the notes as the release notes style below and the policy say. If `draft` couldn't reach GitHub, it prints warnings, and entries may lack handles: take a missing handle from the pull request, for example `gh pr view <number> --json author --jq .author.login`, and never guess one from the git author name. Whatever the style says:
 
 - Replace the TODO line, and don't leave empty headings. `plan` rejects both.
-- Keep `## What's Changed` and the closing line, removing entries the inventory leaves out. Add `## New Contributors` only for verified first contributions.
+- Keep `## Pull Requests`, listing every pull request and direct commit, and keep `## New Contributors` and the closing line as `draft` wrote them.
 - Use absolute URLs for links to files and pages, because the notes render on the release page. Pull request numbers such as `#7` link automatically.
 
 ### Release notes style
