@@ -6,11 +6,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -330,6 +332,132 @@ func (g *GitHub) ContributedBefore(ctx context.Context, handle, ref string) (boo
 		return false, fmt.Errorf("list commits by @%s in %s at %s: %v", handle, g.Repository, ref, err)
 	}
 	return len(commits) > 0, nil
+}
+
+// Environment is the part of a deployment environment's settings that Release Planner checks.
+type Environment struct {
+	// DeploymentBranchPolicy is nil when any branch can deploy.
+	DeploymentBranchPolicy *struct {
+		ProtectedBranches    bool `json:"protected_branches"`
+		CustomBranchPolicies bool `json:"custom_branch_policies"`
+	} `json:"deployment_branch_policy"`
+	ProtectionRules []struct {
+		Type string `json:"type"`
+	} `json:"protection_rules"`
+
+	// BranchRules are the name patterns of the environment's custom branch rules, when it has any.
+	BranchRules []string `json:"-"`
+	// BranchProtected reports whether the release branch is protected, when the environment
+	// allows only protected branches.
+	BranchProtected bool `json:"-"`
+}
+
+// Environment returns a deployment environment's settings, or nil if it doesn't exist. When
+// the environment restricts which branches can deploy, it also reads what decides whether the
+// release branch can: the custom branch rules, or whether the branch is protected.
+func (g *GitHub) Environment(ctx context.Context, name, branch string) (*Environment, error) {
+	var env Environment
+	_, err := g.do(ctx, http.MethodGet, "/environments/"+url.PathEscape(name), nil, &env)
+	if errors.As(err, new(errNotFound)) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get the %s environment in %s: %v", name, g.Repository, err)
+	}
+	policy := env.DeploymentBranchPolicy
+	if policy != nil && policy.CustomBranchPolicies {
+		target := "/environments/" + url.PathEscape(name) + "/deployment-branch-policies?per_page=100"
+		for target != "" {
+			var page struct {
+				BranchPolicies []struct {
+					Name string `json:"name"`
+					Type string `json:"type"`
+				} `json:"branch_policies"`
+			}
+			if target, err = g.do(ctx, http.MethodGet, target, nil, &page); err != nil {
+				return nil, fmt.Errorf("list the %s environment's branch rules in %s: %v", name, g.Repository, err)
+			}
+			for _, rule := range page.BranchPolicies {
+				// Rules without a type predate tag rules and apply to branches.
+				if rule.Type == "" || rule.Type == "branch" {
+					env.BranchRules = append(env.BranchRules, rule.Name)
+				}
+			}
+		}
+	}
+	if policy != nil && policy.ProtectedBranches {
+		var b struct {
+			Protected bool `json:"protected"`
+		}
+		if _, err := g.do(ctx, http.MethodGet, "/branches/"+url.PathEscape(branch), nil, &b); err != nil {
+			return nil, fmt.Errorf("check whether %s is protected in %s: %v", branch, g.Repository, err)
+		}
+		env.BranchProtected = b.Protected
+	}
+	return &env, nil
+}
+
+// branchRule matches a branch name against a deployment branch rule, which uses fnmatch
+// patterns: * and ? don't match /, ** does, and [...] is a character class.
+func branchRule(pattern, branch string) bool {
+	var re strings.Builder
+	re.WriteString("^")
+	for i := 0; i < len(pattern); i++ {
+		switch c := pattern[i]; {
+		case c == '*' && i+1 < len(pattern) && pattern[i+1] == '*':
+			re.WriteString(".*")
+			i++
+		case c == '*':
+			re.WriteString("[^/]*")
+		case c == '?':
+			re.WriteString("[^/]")
+		case c == '[':
+			end := strings.IndexByte(pattern[i:], ']')
+			if end < 0 {
+				re.WriteString(regexp.QuoteMeta(pattern[i:]))
+				i = len(pattern)
+				continue
+			}
+			class := pattern[i+1 : i+end]
+			if strings.HasPrefix(class, "!") {
+				class = "^" + class[1:]
+			}
+			re.WriteString("[" + class + "]")
+			i += end
+		default:
+			re.WriteString(regexp.QuoteMeta(string(c)))
+		}
+	}
+	re.WriteString("$")
+	matched, err := regexp.MatchString(re.String(), branch)
+	return err == nil && matched
+}
+
+// EnvironmentDocs explains how to set up the release environment.
+const EnvironmentDocs = "https://release-planner.fabricahq.com/start-here/set-up/#create-the-release-environment"
+
+// EnvironmentWarnings explains how the release environment differs from the recommended
+// setup: it exists, only the release branch can deploy to it, and the merge is the only
+// approval. The differences are warnings, not errors, because a repository may choose them.
+func EnvironmentWarnings(name, branch string, env *Environment) []string {
+	if env == nil {
+		return []string{fmt.Sprintf("The %s environment doesn't exist. GitHub will create it on the first release with no deployment branch rule, so a workflow on any branch could publish. Create it with a branch rule for your release branch: %s", name, EnvironmentDocs)}
+	}
+	var warnings []string
+	switch policy := env.DeploymentBranchPolicy; {
+	case policy == nil:
+		warnings = append(warnings, fmt.Sprintf("The %s environment has no deployment branch rule, so a workflow on any branch could publish. Add a branch rule for your release branch: %s", name, EnvironmentDocs))
+	case policy.ProtectedBranches && !env.BranchProtected:
+		warnings = append(warnings, fmt.Sprintf("The %s environment allows only protected branches, and %s isn't protected, so releases can't publish. Protect %s, or add a branch rule for it: %s", name, branch, branch, EnvironmentDocs))
+	case policy.CustomBranchPolicies && !slices.ContainsFunc(env.BranchRules, func(rule string) bool { return branchRule(rule, branch) }):
+		warnings = append(warnings, fmt.Sprintf("The %s environment's branch rules don't include %s, so releases can't publish. Add a branch rule for %s: %s", name, branch, branch, EnvironmentDocs))
+	}
+	for _, rule := range env.ProtectionRules {
+		if rule.Type == "required_reviewers" {
+			warnings = append(warnings, fmt.Sprintf("The %s environment requires reviewers, so every release waits for a second approval after the merge. Merging the release pull request is the approval; remove the reviewers unless you want both: %s", name, EnvironmentDocs))
+		}
+	}
+	return warnings
 }
 
 // PublishDraft makes an existing draft release public, creating its tag on commit if the

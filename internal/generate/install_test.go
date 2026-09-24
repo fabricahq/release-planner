@@ -169,6 +169,8 @@ func TestWorkflowRendersTheConfiguredSettings(t *testing.T) {
 		"go-version: '1.27.x'",
 		"          go install example.com/tool@v1\n          tool check\n",
 		"environment: release",
+		"actions: read # to check the release environment's settings\n",
+		"GITHUB_TOKEN: ${{ github.token }}\n        run: release-planner plan --ci",
 		"${{ needs.plan.outputs.commit }}",
 	} {
 		if !strings.Contains(wf, want) {

@@ -259,3 +259,64 @@ func TestDraftPrintsLookupWarnings(t *testing.T) {
 		t.Fatalf("notes:\n%s", data)
 	}
 }
+
+// A release request warns about a release environment that anyone's branch could publish
+// from, but still plans the release.
+func TestPlanWarnsAboutAnUnprotectedReleaseEnvironment(t *testing.T) {
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/fabricahq/example/environments/release" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"deployment_branch_policy":null,"protection_rules":[]}`))
+	}))
+	t.Cleanup(api.Close)
+	summary := filepath.Join(t.TempDir(), "summary")
+	t.Setenv("GITHUB_API_URL", api.URL)
+	t.Setenv("GITHUB_TOKEN", "token")
+	t.Setenv("GITHUB_REPOSITORY", "fabricahq/example")
+	t.Setenv("GITHUB_STEP_SUMMARY", summary)
+	t.Setenv("GITHUB_OUTPUT", filepath.Join(t.TempDir(), "output"))
+
+	dir := t.TempDir()
+	git := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-c", "commit.gpgsign=false"}, args...)...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	write := func(name, body string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, name)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git("init", "-q", "-b", "main")
+	write(".release-planner/config.yml", "schema-version: 1\nversion: v0.1.0\nfirst-version: v1.0.0\n")
+	git("add", "-A")
+	git("commit", "-q", "-m", "Adopt Release Planner")
+	base := git("rev-parse", "HEAD")
+	write("releases/v1.0.0.md", "The first release.\n")
+	git("add", "-A")
+	git("commit", "-q", "-m", "Release v1.0.0")
+
+	out := filepath.Join(t.TempDir(), "plan.json")
+	code, stdout, errOut := cli(t, "plan", "--dir", dir, "--ci", "--event", "push", "--base", base, "--head", "HEAD", "--out", out)
+	if code != 0 {
+		t.Fatalf("%d %s", code, errOut)
+	}
+	if !strings.Contains(stdout, "::warning title=Release environment::The release environment has no deployment branch rule") {
+		t.Fatalf("no annotation: %q", stdout)
+	}
+	if data, _ := os.ReadFile(summary); !strings.Contains(string(data), "no deployment branch rule") {
+		t.Fatalf("summary: %s", data)
+	}
+}
