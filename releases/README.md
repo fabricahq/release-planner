@@ -1,18 +1,28 @@
-# Release requests
+# Release policy
 
-Each release of Release Planner starts as one `v<semver>.md` file in this directory. Edit the notes in the release PR, then merge the PR to publish. The Release workflow runs the tests on the merged commit, tags it, and publishes the notes verbatim.
+Release Planner's own release policy. The agent reads this file before every release.
 
-The agent procedure is in [the release skill](../skills/release/SKILL.md).
+## What users depend on
 
-## Version policy
+Adopting repositories rely on:
 
-Use [SemVer 2.0.0](https://semver.org/) with tags `vMAJOR.MINOR.PATCH`. The first release is `v0.1.0`.
+- The commands, their flags, exit codes, and JSON output.
+- The keys in `release-planner.yml` and what they mean.
+- The generated files: their paths, their markers, and what the Release workflow does.
+- The checks `plan` and `publish` enforce, which decide whether a release goes out.
 
-The public contract is what consuming repositories rely on: the `plan` and `publish` action inputs and outputs, the `release_planner.py` command-line interface and JSON output, the release-request rules the planner enforces, and the documented workflow template.
+## Choosing a version
 
-- Before `1.0.0`, increment minor for new features or breaking changes, and patch for compatible fixes. Always document breaking changes.
-- From `1.0.0`, increment major for breaking changes, minor for compatible features, and patch for compatible fixes.
+Versions follow [SemVer 2.0.0](https://semver.org/). The first release is v0.1.0.
 
-## Validation
+- Before 1.0.0, increment minor for new features or anything that breaks the list above, and patch for compatible fixes. Always document breaking changes.
+- From 1.0.0, increment major for breaking changes, minor for compatible features, and patch for compatible fixes.
+- A change that makes `check` fail in adopting repositories until they rerun `install` is expected on upgrade and is not breaking by itself. Say so in the notes.
 
-Run `python3 -m unittest discover -s src` from the repository root.
+## Who reads the release notes
+
+Maintainers of repositories that use Release Planner, deciding whether to bump `version`. Lead with anything that changes what they must configure or how releases behave, and show the upgrade command.
+
+## Always and never
+
+Always say whether upgrading changes the generated files. Leave out refactors and test-only changes.

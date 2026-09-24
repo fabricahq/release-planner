@@ -1,15 +1,12 @@
-# Release Planner releases itself with its own actions, referenced from the checkout.
-# Consuming repositories copy docs/release.yml instead.
+# Release Planner releases itself with its own code at the approved commit.
+# Adopting repositories use the workflow that `release-planner install` generates instead.
 name: Release
-# Validate notes while they are in a PR. A notes change on main approves publication,
-# so ordinary changes do not create releases automatically.
 on:
   push:
     branches: [main]
     paths: ['releases/v*.md']
   pull_request:
-    paths: ['releases/**', 'plan/**', 'publish/**', 'src/**', '.github/workflows/release.yml']
-  # Retry a failed publication with both endpoints of the original approved push.
+    paths: ['releases/**', 'release-planner.yml', '.github/workflows/release.yml']
   workflow_dispatch:
     inputs:
       commit:
@@ -17,7 +14,7 @@ on:
         required: true
         type: string
       base:
-        description: 'Base SHA from the original failed run summary (before the approved push)'
+        description: 'Base SHA from the original failed run summary'
         required: true
         type: string
 permissions:
@@ -32,23 +29,26 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # Version ordering and retry validation require the full history and tags.
           fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ inputs.commit || github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - id: plan
-        uses: ./plan
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          base: ${{ inputs.base }}
-          head: ${{ inputs.commit }}
-          first-version: v0.1.0
+          go-version-file: go.mod
+          cache: false
+      - name: Plan the release
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ inputs.base || github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ inputs.commit || github.event.pull_request.head.sha || github.sha }}
+        run: go run ./cmd/release-planner plan --ci --event "$EVENT" --base "$BASE" --head "$HEAD" --out "$RUNNER_TEMP/release-plan.json"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-plan
-          path: ${{ steps.plan.outputs.plan-file }}
+          path: ${{ runner.temp }}/release-plan.json
           if-no-files-found: error
 
-  # Test the exact approved commit.
   validate:
     needs: plan
     if: needs.plan.outputs.tag != ''
@@ -58,9 +58,22 @@ jobs:
         with:
           ref: ${{ needs.plan.outputs.commit }}
           persist-credentials: false
-      - run: python3 -m unittest discover -s src
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - run: test -z "$(gofmt -l .)"
+      - run: go vet ./...
+      - run: go test -race ./...
+      # Build the publisher here, without write credentials, from the approved commit.
+      - run: go build -o "$RUNNER_TEMP/release-planner" ./cmd/release-planner
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-planner
+          path: ${{ runner.temp }}/release-planner
+          if-no-files-found: error
 
-  # Only this job can write. It checks out the approved commit to run its own publish action.
+  # The only job that can write. It runs the binary built from the approved commit and checks out nothing.
   publish:
     needs: [plan, validate]
     if: needs.plan.outputs.tag != '' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
@@ -72,14 +85,18 @@ jobs:
       group: release-publication
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          ref: ${{ needs.plan.outputs.commit }}
-          persist-credentials: false
+          name: release-planner
+          path: ${{ runner.temp }}/bin
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: release-plan
           path: ${{ runner.temp }}/plan
-      - uses: ./publish
-        with:
-          plan-file: ${{ runner.temp }}/plan/release-plan.json
+      - name: Tag the approved commit and publish the approved notes
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          COMMIT: ${{ needs.plan.outputs.commit }}
+        run: |
+          chmod +x "$RUNNER_TEMP/bin/release-planner"
+          "$RUNNER_TEMP/bin/release-planner" publish --plan "$RUNNER_TEMP/plan/release-plan.json" --commit "$COMMIT"

@@ -1,0 +1,6 @@
+# Release Planner releases itself from the approved commit (see .github/workflows/release.yml),
+# so this config drives guide, inventory, draft, and plan, but not install.
+version: v0.1.0
+first-version: v0.1.0
+validate:
+  run: go test ./...

@@ -17,59 +17,193 @@ Agents are good at the tedious part: reading every commit and pull request since
 ## How does it work?
 
 1. **You tell your agent "let's release."**
-2. **The agent works out the next release.** The planner lists the previous release, every commit since it, and the candidate next versions. The agent reads the changes, applies your version policy, and picks the version.
-3. **The agent opens a release PR.** The PR adds one file, `releases/v<version>.md`, containing the drafted notes. The PR description explains the chosen version and lists every change the notes account for.
-4. **You edit the notes and merge.** Change anything you like in the PR. Saving edits publishes nothing.
-5. **Merging publishes the release.** The Release workflow validates the merged commit, tags it with the version, and publishes the notes file verbatim as the GitHub release.
+2. **The agent works out the next release.** It runs `release-planner guide` for the procedure and `release-planner inventory` for every change since the previous release and the candidate versions. Then it applies your release policy and picks the version.
+3. **The agent opens a release PR.** `release-planner draft` creates `releases/v<version>.md` with your headings and a linked list of pull requests. The agent writes the notes and explains its choice of version in the PR.
+4. **You edit the notes and merge.** Change anything you like. Saving edits publishes nothing.
+5. **Merging publishes the release.** The generated Release workflow validates the merged commit, tags it, and publishes the notes file word for word as the GitHub release.
 
-The tag is created only at that final step, on the exact commit you approved, so a version never exists without its approved notes.
+The tag is created only at that last step, on the exact commit you approved, so a version never exists without its approved notes.
 
 ## How do I set it up on a repository?
 
-1. **Add the workflow.** Copy [`docs/release.yml`](docs/release.yml) to `.github/workflows/release.yml`. Then:
-   - Replace both `RELEASE_PLANNER_SHA` placeholders with a full commit SHA from this repository. Pin a SHA rather than a branch, so that release tooling changes only when you review the change.
-   - Set `first-version` to the version your first release should use.
-   - Replace the steps of the `validate` job with your repository's tests or builds. They run on the exact commit being released, before anything is tagged.
+1. **Write `release-planner.yml`** at the repository root:
 
-2. **Describe your release policy.** Create `releases/README.md` with your version policy, what counts as your public contract, your first version, and the command that validates a release. Your agent reads this file before every release. See this repository's [`releases/README.md`](releases/README.md) for an example.
-
-3. **Teach your agent the procedure.** Copy [`skills/release/SKILL.md`](skills/release/SKILL.md) to `.claude/skills/release/SKILL.md` for Claude Code. For other agents, add a line to `AGENTS.md`:
-
-   ```markdown
-   When asked to make a release, draft or revise release notes, or retry a failed release, follow the release skill in `.claude/skills/release/SKILL.md`. The agent prepares the release PR; the maintainer approves publication by merging it.
+   ```yaml
+   # The Release Planner version to use. Bumping it upgrades everything below together.
+   version: v0.1.0
+   # The version your first release must use.
+   first-version: v1.0.0
+   # Your checks, run on the exact commit being released, before anything is tagged.
+   validate:
+     go: '1.27.x'     # optional; also node and python
+     run: make test
    ```
 
-4. **Protect the release.** In your repository settings:
-   - Create an environment named `release` that allows only the `main` branch, with no required reviewers. The merge is the approval.
-   - Require pull requests for changes to `main`, and block force pushes and deletion.
-   - Turn on immutable releases, so that published tags and releases can't be changed.
+2. **Generate the release files.** From the repository root, with [Go](https://go.dev/dl/) installed:
 
-5. **Try it.** Tell your agent "let's release."
+   ```sh
+   go run github.com/fabricahq/release-planner/cmd/release-planner@v0.1.0 install
+   ```
+
+   This writes:
+   - `.github/workflows/release-planner.yml`, the Release workflow.
+   - A **Releases** section in `AGENTS.md`, which any agent that reads `AGENTS.md` follows.
+   - A `release` skill in `.agents/skills/` (read by Codex, Gemini CLI, VS Code, and other agents) and in `.claude/skills/` (read by Claude Code), so "let's release" triggers the procedure automatically.
+   - `releases/README.md`, a starter release policy for you to fill in.
+
+3. **Write your release policy** in `releases/README.md`. See [Write your release policy](#write-your-release-policy).
+
+4. **Protect releases** in your repository settings:
+   - Create an environment named `release` that allows only your release branch, with no required reviewers. The merge is the approval.
+   - Require pull requests for that branch, and block force pushes and deletion.
+   - Turn on immutable releases, so published tags and releases can't be changed.
+
+5. **Commit the files**, then tell your agent "let's release."
+
+## Commands
+
+In CI and in agent instructions, Release Planner runs with `go run github.com/fabricahq/release-planner/cmd/release-planner@<version>`, at the version `release-planner.yml` pins. Nothing needs installing beyond Go.
+
+| Command | Who runs it | What it does |
+| --- | --- | --- |
+| `install [--force]` | You | Writes or updates the generated files from `release-planner.yml`. Safe to run any number of times. |
+| `check` | CI and you | Fails if a generated file is missing, stale, or edited by hand. Changes nothing. |
+| `uninstall [--force]` | You | Deletes the generated files and the `AGENTS.md` section. Leaves your policy and notes. |
+| `guide` | Agent | Prints the release procedure for this version. |
+| `inventory [--head <ref>]` | Agent | Lists the previous release, every commit since it, and the candidate next versions. |
+| `draft <version>` | Agent | Creates the notes file with your headings, a linked list of pull requests, and the comparison link. |
+| `plan --base <ref> [--head <ref>]` | CI and agent | Validates a release request and prints the tag, commit, and notes to publish. |
+| `publish --plan <file> --commit <sha>` | CI | Tags the approved commit and publishes the approved notes. |
+| `version` | Anyone | Prints the running version. |
+
+## Upgrading
+
+Change `version` in `release-planner.yml`, then run `install` at the new version and commit the result:
+
+```sh
+go run github.com/fabricahq/release-planner/cmd/release-planner@v0.2.0 install
+```
+
+`check` runs in the Release workflow on every release PR, so a version bump without a reinstall, or a hand edit to a generated file, fails CI instead of drifting.
+
+## Customizing
+
+### Release note headings
+
+By default, notes use four headings: ✨ New Features, ⬆️ Improvements, 🐛 Squashed Bugs, and ⛓️‍💥 Breaking Changes. To use your own, list them in `release-planner.yml`. Your list replaces the defaults:
+
+```yaml
+notes:
+  sections:
+    - heading: "🚀 Features"
+      include: What users can do that they couldn't before.
+    - heading: "🔒 Security"
+      include: Vulnerabilities fixed, with their CVE IDs.
+      summarize-first: true   # also mention these in the opening sentences
+    - heading: "🐛 Fixes"
+      include: The trigger, the previous wrong behavior, and the corrected result.
+```
+
+`draft` writes these headings, and `guide` tells the agent what belongs under each. Every release ends with the same footer: **What's Changed**, the **Full Changelog** link, and **New Contributors** when there are any.
+
+### Other settings
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `notes-dir` | `releases` | Where release requests and your policy live. |
+| `branch` | `main` | The branch whose notes changes publish releases. |
+| `validate.go`, `validate.node`, `validate.python` | none | Toolchain versions to set up before `validate.run`. |
+
+### Generated files
+
+Don't edit generated files; change `release-planner.yml` and run `install`. Your own text in `AGENTS.md` is safe: `install` finds its section by the `<!-- release-planner:begin -->` and `<!-- release-planner:end -->` markers and never touches anything outside them. Each generated file and section records a digest of its content, so `install` can tell an unedited older version, which it upgrades, from a hand edit, which it refuses to overwrite without `--force`.
+
+## Write your release policy
+
+`releases/README.md` is where you tell the agent how your repository releases. `install` creates a starter with four prompts. Until you replace them, the agent stops and asks instead of guessing a version.
+
+- **What users depend on.** What must stay compatible: commands and flags, configuration, APIs, file formats, and identifiers other projects reference.
+- **Choosing a version.** What makes a release major, minor, or patch, in terms of that list.
+- **Who reads the release notes.** Who they are and what they need first.
+- **Always and never.** Anything the notes must always include or leave out.
+
+Example policies:
+
+<details>
+<summary>A library of rules that other projects import</summary>
+
+```markdown
+## What users depend on
+Group IDs and rule IDs. Projects list group IDs to import and rule IDs to exclude or replace, and an unknown ID is an error.
+
+## Choosing a version
+- Major: removing or renaming a group or rule, or reversing what a rule requires.
+- Minor: new rules or groups, or extending a rule to new situations.
+- Patch: corrections, clearer wording, and better examples.
+
+## Who reads the release notes
+Engineers deciding whether to adopt the new version. Name every rule ID that was added, renamed, or removed.
+```
+
+</details>
+
+<details>
+<summary>A command-line tool</summary>
+
+```markdown
+## What users depend on
+Command names, flags, exit codes, configuration keys, and JSON output.
+
+## Choosing a version
+- Major: removing or renaming a command, flag, or key, or changing output that scripts parse.
+- Minor: new commands, flags, or keys.
+- Patch: bug fixes and help-text changes.
+
+## Who reads the release notes
+Developers upgrading the tool. Lead with anything that requires them to change configuration or scripts.
+
+## Always and never
+Always show the upgrade command. Leave out dependency updates unless they fix a security issue.
+```
+
+</details>
+
+<details>
+<summary>A service with an HTTP API</summary>
+
+```markdown
+## What users depend on
+The public API: endpoints, request and response fields, status codes, and authentication.
+
+## Choosing a version
+- Major: removing an endpoint or field, or changing its meaning.
+- Minor: new endpoints or optional fields.
+- Patch: fixes and performance work with no API change.
+
+## Who reads the release notes
+API consumers and our support team. Link every change to its API reference page.
+```
+
+</details>
 
 ## FAQs
 
-### How does the agent choose the version?
+### What does the planner check before publishing?
 
-It runs `release_planner.py inventory`, which reports the previous release and the next patch, minor, and major versions. The agent reads every change since the previous release and applies the version policy in your `releases/README.md`. It explains its choice in the PR, so you can change the version by renaming the notes file.
+- Exactly one new or edited notes file per change.
+- A SemVer 2.0.0 version with no build metadata, newer than every existing tag.
+- Your configured first version, if the repository has no releases yet.
+- Notes with no leftover draft prompt and no empty headings.
 
-### What does the planner check?
-
-Before anything is published, the planner requires:
-
-- exactly one new or edited notes file per change
-- a SemVer 2.0.0 version with no build metadata
-- a version newer than every existing tag, with the previous release reachable from the approved commit
-- your configured first version, if the repository has no releases yet
-
-It also refuses to edit notes that are already tagged, and it won't let a new request skip an earlier one that never published. The publish step refuses to run if version tags changed after planning or if the previous release is still a draft. After publishing, it verifies that the tag points to the approved commit.
+It also refuses to edit notes that are already tagged, and it won't let a new request skip an earlier one that never published. The publish step refuses to run if version tags changed after planning or if the previous release is still a draft, and afterward it verifies that the tag points to the approved commit.
 
 ### What if publication fails?
 
-Nothing is tagged until validation passes. Re-run the failed workflow run, or start the Release workflow by hand with the **Base SHA** and **Approved head SHA** from the failed run's summary. A retry after a successful publication makes no changes. Published tags never move: fix problems in a new release.
+Nothing is tagged until validation passes. Re-run the failed workflow run, or start the Release workflow by hand with the **Base SHA** and **Approved head SHA** from the failed run's summary. A retry after a successful publication makes no changes. Published tags never move; fix problems in a new release.
 
 ### Can I publish binaries or other assets?
 
-Not with the `publish` action yet: it publishes notes only. Immutable releases freeze a release's assets when it is published, so assets must be uploaded to a draft first. To ship assets today, use the `plan` action with your own publisher that stages assets on a draft, verifies them, and then publishes, as [Code Rules](https://github.com/fabricahq/code-rules) does for its signed binaries.
+Not yet. Release Planner publishes notes only. Immutable releases freeze a release's assets when it is published, so assets need a publisher that uploads to a draft first. [Code Rules](https://github.com/fabricahq/code-rules) has one for its signed binaries, and it is a candidate to move here.
 
 ### Why not release-please or semantic-release?
 
@@ -77,14 +211,12 @@ Those tools derive versions and notes from commit message conventions. Release P
 
 ## How do I contribute?
 
-Open a pull request! Run the tests from the repository root before you push:
+Open a pull request! Run the checks from the repository root before you push:
 
 ```sh
-python3 -m unittest discover -s src
+gofmt -l . && go vet ./... && go test ./...
 ```
-
-The planner and publisher use only the Python standard library, Bash, `jq`, and the GitHub CLI, all of which GitHub-hosted runners provide.
 
 ## License
 
-Release Planner is [MIT licensed](LICENSE.md), with copyright attributed to Fabrica Systems LLC. The planner is adapted from the release tooling in [Code Rules](https://github.com/fabricahq/code-rules).
+Release Planner is [MIT licensed](LICENSE.md), with copyright attributed to Fabrica Systems LLC. The planner and publisher are adapted from the release tooling in [Code Rules](https://github.com/fabricahq/code-rules).

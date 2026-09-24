@@ -1,0 +1,113 @@
+name: Release
+# Notes changes in a PR are validated; a notes change on {{.Branch}} approves publication,
+# so ordinary changes never create releases.
+on:
+  push:
+    branches: [{{.Branch}}]
+    paths: ['{{.NotesDir}}/v*.md']
+  pull_request:
+    paths: ['{{.NotesDir}}/**', 'release-planner.yml', '.github/workflows/release-planner.yml']
+  # Retry a failed publication with both endpoints of the original approved push.
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: 'Approved head SHA from the original failed run summary'
+        required: true
+        type: string
+      base:
+        description: 'Base SHA from the original failed run summary'
+        required: true
+        type: string
+permissions:
+  contents: read
+env:
+  RELEASE_PLANNER: {{.Module}}@{{.Version}}
+jobs:
+  # Check the generated files, then bind the notes change to one version and commit.
+  plan:
+    if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/{{.Branch}}'
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{"{{"}} steps.plan.outputs.tag {{"}}"}}
+      commit: ${{"{{"}} steps.plan.outputs.commit {{"}}"}}
+    steps:
+      - uses: {{.Actions.Checkout}}
+        with:
+          # Version ordering and retries need the full history and tags.
+          fetch-depth: 0
+          ref: ${{"{{"}} inputs.commit || github.event.pull_request.head.sha || github.sha {{"}}"}}
+          persist-credentials: false
+      - uses: {{.Actions.SetupGo}}
+        with:
+          go-version: stable
+          cache: false
+      - name: Check the generated release files
+        run: go run "$RELEASE_PLANNER" check
+      - name: Plan the release
+        id: plan
+        env:
+          EVENT: ${{"{{"}} github.event_name {{"}}"}}
+          BASE: ${{"{{"}} inputs.base || github.event.pull_request.base.sha || github.event.before {{"}}"}}
+          HEAD: ${{"{{"}} inputs.commit || github.event.pull_request.head.sha || github.sha {{"}}"}}
+        run: go run "$RELEASE_PLANNER" plan --ci --event "$EVENT" --base "$BASE" --head "$HEAD" --out "$RUNNER_TEMP/release-plan.json"
+      - uses: {{.Actions.UploadArtifact}}
+        with:
+          name: release-plan
+          path: ${{"{{"}} runner.temp {{"}}"}}/release-plan.json
+          if-no-files-found: error
+
+  # Run this repository's checks on the exact commit being released.
+  validate:
+    needs: plan
+    if: needs.plan.outputs.tag != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: {{.Actions.Checkout}}
+        with:
+          ref: ${{"{{"}} needs.plan.outputs.commit {{"}}"}}
+          persist-credentials: false
+{{- if .Validate.Go}}
+      - uses: {{.Actions.SetupGo}}
+        with:
+          go-version: '{{.Validate.Go}}'
+{{- end}}
+{{- if .Validate.Node}}
+      - uses: {{.Actions.SetupNode}}
+        with:
+          node-version: '{{.Validate.Node}}'
+{{- end}}
+{{- if .Validate.Python}}
+      - uses: {{.Actions.SetupPython}}
+        with:
+          python-version: '{{.Validate.Python}}'
+{{- end}}
+      - name: Validate the release
+        run: |
+{{.ValidateRun}}
+
+  # The only job that can write. It runs Release Planner at the pinned version and no repository code.
+  publish:
+    needs: [plan, validate]
+    if: needs.plan.outputs.tag != '' && github.event_name != 'pull_request' && github.ref == 'refs/heads/{{.Branch}}'
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+    # Serialize publication so competing releases cannot race.
+    concurrency:
+      group: release-publication
+      cancel-in-progress: false
+    steps:
+      - uses: {{.Actions.SetupGo}}
+        with:
+          go-version: stable
+          cache: false
+      - uses: {{.Actions.DownloadArtifact}}
+        with:
+          name: release-plan
+          path: ${{"{{"}} runner.temp {{"}}"}}/plan
+      - name: Tag the approved commit and publish the approved notes
+        env:
+          GITHUB_TOKEN: ${{"{{"}} github.token {{"}}"}}
+          COMMIT: ${{"{{"}} needs.plan.outputs.commit {{"}}"}}
+        run: go run "$RELEASE_PLANNER" publish --plan "$RUNNER_TEMP/plan/release-plan.json" --commit "$COMMIT"
