@@ -7,6 +7,8 @@ Release Planner makes it easy for your GitHub repository to publish releases peo
 
 ## What making a release looks like
 
+With Release Planner set up, here's how a new release happens:
+
 1. **You ask for a release.** Tell your agent "let's release."
 2. **Your agent opens a pull request.** A few minutes later, you have a pull request titled **Release v1.1.0**. It contains the drafted release notes and explains why the agent chose that version.
 3. **You edit and merge.** Read the notes, change anything you like, and merge the pull request.
