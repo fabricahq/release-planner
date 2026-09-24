@@ -9,13 +9,14 @@ Release Planner makes it easy for your GitHub repository to publish releases peo
 
 With Release Planner set up, here's how a new release happens:
 
-1. **You ask for a release.** Tell your agent "let's release."
-2. **Your agent drafts the release.** Release Planner gathers every commit and pull request merged since your last release and hands that list to your agent. The agent reads through the changes, works out what they mean for your users, and drafts the notes.
-3. **Your agent opens a pull request.** A few minutes later, you have a pull request titled **Release v1.1.0**. It contains the drafted release notes and explains why the agent chose that version.
-4. **You edit and merge.** Read the notes, change anything you like, and merge the pull request.
-5. **The release is live.** Your new version is tagged and published on your repository's **Releases** page, with exactly the notes you approved.
+1. **You:** Ask for a release. Tell your agent "let's release."
+2. **Automated:** Release Planner gathers every commit and pull request merged since your last release and hands that list to your agent. The agent reads through the changes, works out what they mean for your users, and drafts the notes.
+3. **Automated:** Your agent opens a pull request titled **Release v1.1.0**. It contains the drafted release notes and explains why the agent chose that version.
+4. **You:** Review the notes and change anything you like. Nothing is published while the pull request is open.
+5. **You:** Merge the pull request. Merging is what approves and starts the release.
+6. **Automated:** A GitHub Actions workflow tags the commit you merged and publishes your new version on the repository's **Releases** page, with exactly the notes you approved.
 
-That's the whole process. There's no changelog to maintain, no commit message conventions to follow, and no release checklist to remember.
+You do three things: ask, review, and merge. There's no changelog to maintain, no commit message conventions to follow, and no release checklist to remember.
 
 ## What the release notes look like
 
