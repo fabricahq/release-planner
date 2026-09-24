@@ -10,6 +10,8 @@ The full documentation is in [`docs/`](docs/), a site you can run locally.
 
 Release Planner is an open source release process for GitHub repositories where an agent drafts the release and a human approves it. Your agent proposes the version and writes the notes, you edit them in a pull request, and merging that pull request tags and publishes the release.
 
+Release Planner works with GitHub only for now. It publishes GitHub releases, and it runs on GitHub Actions.
+
 ## Why use it?
 
 Release notes are worth reading only when someone writes them for readers. Tools that generate notes from commit messages produce a changelog, not an explanation, and writing good notes by hand for every release is tedious.

@@ -3,7 +3,10 @@ title: Set up a repository
 description: Add Release Planner to a GitHub repository.
 ---
 
-You need [Go](https://go.dev/dl/) installed. Nothing else needs installing: every command runs with `go run` at a pinned version.
+You need:
+
+- **A repository on GitHub, with GitHub Actions enabled.** Release Planner works with GitHub only for now.
+- **[Go](https://go.dev/dl/) installed.** Nothing else needs installing: every command runs with `go run` at a pinned version.
 
 Run these commands from the repository root.
 
