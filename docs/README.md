@@ -18,7 +18,11 @@ bun run check
 bun run build
 ```
 
-The output is `dist/`. Hosting is not configured, and these commands do not publish the site.
+The output is `dist/`. These commands do not publish the site.
+
+## Publishing
+
+The Documentation workflow publishes the site to GitHub Pages at <https://release-planner.fabricahq.com> after each push to `main`. Pull requests only check and build it. The site is served at the domain root, so page links are root-relative. The Pages settings, custom domain, and DNS record are managed in Fabrica's infrastructure repository, not here.
 
 ## Maintain the docs
 
