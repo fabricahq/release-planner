@@ -146,3 +146,30 @@ h1[data-page-title] { color: var(--cr-ink); font-weight: 500; letter-spacing: -.
   fill: var(--cr-muted);
   opacity: .75;
 }
+
+/* An example release, framed like a GitHub release page. */
+.sl-markdown-content .release-example {
+  border: 1px solid var(--cr-border);
+  border-radius: var(--cr-radius-card);
+  background: var(--cr-surface);
+  padding: 0 1.25rem 1.25rem;
+  overflow: hidden;
+}
+.sl-markdown-content .release-example-header {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  margin: 0 -1.25rem 1rem;
+  padding: .75rem 1.25rem;
+  border-bottom: 1px solid var(--cr-border);
+  background: var(--cr-surface-header);
+}
+.sl-markdown-content .release-example-header strong { font-size: 1.1rem; }
+.sl-markdown-content .release-example-header span {
+  border: 1px solid var(--cr-border-strong);
+  border-radius: 999px;
+  padding: 0 .55rem;
+  font-size: .75rem;
+  color: var(--cr-muted);
+}
+.sl-markdown-content .release-example h4 { margin-top: 1.25rem; }
