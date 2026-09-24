@@ -173,30 +173,3 @@ h1[data-page-title] { color: var(--cr-ink); font-weight: 500; letter-spacing: -.
   color: var(--cr-muted);
 }
 .sl-markdown-content .release-example h4 { margin-top: 1.25rem; }
-
-/* Marks who acts in a list of steps: a filled badge for people, an outlined one for automation. */
-.sl-markdown-content .step-badge {
-  display: inline-block;
-  margin-inline-end: .35rem;
-  padding: 0 .5rem;
-  border: 1px solid var(--cr-border);
-  border-radius: 999px;
-  color: var(--cr-muted);
-  font-size: .72rem;
-  font-weight: 500;
-  line-height: 1.6;
-  letter-spacing: .02em;
-  vertical-align: .1em;
-}
-.sl-markdown-content .step-badge.human {
-  border-color: var(--cr-ink);
-  background: var(--cr-ink);
-  color: var(--cr-paper);
-}
-
-/* The release steps table: keep the step and badge columns tight and top-aligned. */
-.sl-markdown-content .release-steps table { display: table; width: 100%; font-size: var(--cr-text-body); }
-.sl-markdown-content .release-steps :is(th, td) { vertical-align: top; }
-.sl-markdown-content .release-steps :is(th, td):is(:first-child, :nth-child(2)) { width: 1%; white-space: nowrap; }
-.sl-markdown-content .release-steps td:first-child { color: var(--cr-muted); font-variant-numeric: tabular-nums; }
-.sl-markdown-content .release-steps .step-badge { margin: 0; }
