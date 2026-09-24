@@ -3,32 +3,58 @@ title: Configuration
 description: Every setting in .release-planner/config.yml, and how to upgrade.
 ---
 
-Release Planner reads `.release-planner/config.yml`. After changing it, run `release-planner install` and commit the result.
+Release Planner reads its settings from `.release-planner/config.yml`. After changing it, run `release-planner install` and commit the result.
 
-## Settings
+## The minimum
 
-| Key | Default | Meaning |
-| --- | --- | --- |
-| `schema-version` | required | The format of the file. Currently `1`. |
-| `version` | required | The Release Planner version to use: a release tag such as `v0.1.0`. A full commit SHA also works; your workflow then builds Release Planner from source with Go instead of downloading a release. |
-| `first-version` | `v0.1.0` | The version your first release must use. |
-| `validate` | none | Optional [release checks](/customize/release-checks/). |
-| `release-notes-style` | none | Your own release notes style: `file`, the markdown file that holds it, and `mode`, `append` or `replace`. See [Release notes style](/customize/release-notes-style/). |
-| `notes-dir` | `releases` | Where the release notes files live. |
-| `branch` | `main` | The branch that releases are published from. |
-
-A complete example:
+Only two settings are required:
 
 ```yaml
+schema-version: 1   # the format of this file; always 1 for now
+version: v0.1.0     # the Release Planner version this repository uses
+```
+
+Everything else has a sensible default, so many repositories never add more.
+
+## Every setting
+
+This example sets everything. The comments say what each setting does and what you get if you leave it out.
+
+```yaml
+# Required. The format of this file. Always 1 for now.
 schema-version: 1
+
+# Required. The Release Planner version to use, as a release tag.
+# A full commit SHA also works; your workflow then builds Release Planner
+# from source with Go instead of downloading a release.
 version: v0.1.0
+
+# The version your first release must use.
+# Default: v0.1.0
 first-version: v1.0.0
+
+# Where the release notes files live, one per release.
+# Default: releases
+notes-dir: releases
+
+# The branch releases are published from.
+# Default: main
+branch: main
+
+# Your own release notes style: the markdown file that holds it, and whether
+# it adds to the default style (append) or replaces it (replace).
+# Default: none; the agent uses the default style.
 release-notes-style:
   file: .release-planner/release-notes-style.md
   mode: append
+
+# Checks to run on the exact commit being released, before it's tagged.
+# Default: none.
 validate:
   run: make smoke-test
 ```
+
+For the details of the last two, see [Release notes style](/customize/release-notes-style/) and [Release checks](/customize/release-checks/).
 
 ## Upgrade Release Planner
 
