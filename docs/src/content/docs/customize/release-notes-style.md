@@ -18,6 +18,7 @@ Unless you change it, the agent:
 - gives significant changes their own subheading, and uses bullets for small ones
 - ends every entry with the pull requests it covers, such as (#7) or (#7, #9)
 - groups related commits into one entry
+- lists every pull request under **Pull Requests** as `<title> by @<handle> in #<number>`, grouped under ✨ Features, 🐛 Bug Fixes, 📖 Documentation, 🤖 CI, and 🧹 Chores
 
 To see the exact text the agent follows, run:
 
@@ -83,4 +84,4 @@ release-planner guide --default-style > .release-planner/release-notes-style.md
 
 ## What every release keeps
 
-Whatever your style says, the notes end with a **Pull Requests** section listing every pull request with its author, grouped into Features, Bug Fixes, Documentation, CI, and Chores, followed by a **Full Changelog** link (or, for a first release, a link to the released source). The release workflow also rejects notes that still contain the draft's placeholder line or have empty headings.
+Whatever your style says, the notes end with a **Pull Requests** section listing every pull request, followed by a **Full Changelog** link (or, for a first release, a link to the released source). Your style decides how that section is grouped and formatted. The release workflow also rejects notes that still contain the draft's placeholder line or have empty headings.

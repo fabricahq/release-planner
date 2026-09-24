@@ -47,11 +47,11 @@ func TestGuideAppendsOrReplacesTheReleaseNotesStyle(t *testing.T) {
 	}
 
 	replaced := guideFor(t, custom, "replace")
-	if !strings.Contains(replaced, "### Release notes style\n\n"+custom+"\n\n## 6.") || strings.Contains(replaced, "New Features") {
+	if !strings.Contains(replaced, "### Release notes style\n\n"+custom+"\n\n## 6.") || strings.Contains(replaced, "New Features") || strings.Contains(replaced, "### 🧹 Chores") {
 		t.Errorf("replace:\n%s", replaced)
 	}
 	// The fixed rules around the style apply whatever the style says.
-	if !strings.Contains(replaced, "Keep `## Pull Requests` and the closing line") {
+	if !strings.Contains(replaced, "Keep `## Pull Requests`, listing every pull request") {
 		t.Error("replace dropped the fixed rules")
 	}
 }
