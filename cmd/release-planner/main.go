@@ -340,7 +340,7 @@ func cmdPlan(ctx context.Context, args []string, out io.Writer) error {
 			return err
 		}
 		if p.Tag != "" {
-			if err := warnAboutEnvironment(ctx, out, *outFile != ""); err != nil {
+			if err := warnAboutEnvironment(ctx, out, c.Branch, *outFile != ""); err != nil {
 				return err
 			}
 		}
@@ -434,7 +434,7 @@ const releaseEnvironment = "release"
 // warnAboutEnvironment reports, without failing, how the release environment differs from
 // the recommended setup. It writes GitHub warning annotations, to standard output only when
 // the plan goes to a file, and adds the warnings to the step summary.
-func warnAboutEnvironment(ctx context.Context, out io.Writer, annotate bool) error {
+func warnAboutEnvironment(ctx context.Context, out io.Writer, branch string, annotate bool) error {
 	token, repository := os.Getenv("GITHUB_TOKEN"), os.Getenv("GITHUB_REPOSITORY")
 	if token == "" || repository == "" {
 		return nil
@@ -444,12 +444,12 @@ func warnAboutEnvironment(ctx context.Context, out io.Writer, annotate bool) err
 		api = "https://api.github.com"
 	}
 	gh := &publish.GitHub{BaseURL: api, Token: token, Repository: repository}
-	env, err := gh.Environment(ctx, releaseEnvironment)
+	env, err := gh.Environment(ctx, releaseEnvironment, branch)
 	var warnings []string
 	if err != nil {
-		warnings = []string{fmt.Sprintf("Couldn't check the %s environment's settings (%v). Give the plan job actions: read to check them.", releaseEnvironment, err)}
+		warnings = []string{fmt.Sprintf("Couldn't check the %s environment's settings: %v. Give the plan job actions: read to check them.", releaseEnvironment, err)}
 	} else {
-		warnings = publish.EnvironmentWarnings(releaseEnvironment, env)
+		warnings = publish.EnvironmentWarnings(releaseEnvironment, branch, env)
 	}
 	if len(warnings) == 0 {
 		return nil

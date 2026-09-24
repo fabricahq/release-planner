@@ -467,27 +467,34 @@ func TestReadAssetsRejectsUnsafeNames(t *testing.T) {
 }
 
 func TestEnvironmentWarningsExplainRiskySettings(t *testing.T) {
-	parse := func(body string) *Environment {
+	env := func(body string, rules []string, protected bool) *Environment {
 		t.Helper()
-		var env Environment
-		if err := json.Unmarshal([]byte(body), &env); err != nil {
+		var e Environment
+		if err := json.Unmarshal([]byte(body), &e); err != nil {
 			t.Fatal(err)
 		}
-		return &env
+		e.BranchRules, e.BranchProtected = rules, protected
+		return &e
 	}
+	const custom = `{"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true},"protection_rules":[{"type":"branch_policy"}]}`
+	const protectedOnly = `{"deployment_branch_policy":{"protected_branches":true,"custom_branch_policies":false},"protection_rules":[]}`
 	for name, tc := range map[string]struct {
 		env  *Environment
 		want []string
 	}{
-		"missing":        {nil, []string{"doesn't exist"}},
-		"no branch rule": {parse(`{"deployment_branch_policy":null,"protection_rules":[]}`), []string{"no deployment branch rule"}},
-		"reviewers":      {parse(`{"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true},"protection_rules":[{"type":"required_reviewers"},{"type":"branch_policy"}]}`), []string{"requires reviewers"}},
-		"both":           {parse(`{"deployment_branch_policy":null,"protection_rules":[{"type":"required_reviewers"}]}`), []string{"no deployment branch rule", "requires reviewers"}},
-		"recommended":    {parse(`{"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true},"protection_rules":[{"type":"branch_policy"}]}`), nil},
-		"protected":      {parse(`{"deployment_branch_policy":{"protected_branches":true,"custom_branch_policies":false},"protection_rules":[]}`), nil},
+		"missing":                 {nil, []string{"doesn't exist"}},
+		"no branch rule":          {env(`{"deployment_branch_policy":null,"protection_rules":[]}`, nil, false), []string{"no deployment branch rule"}},
+		"reviewers":               {env(`{"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true},"protection_rules":[{"type":"required_reviewers"},{"type":"branch_policy"}]}`, []string{"main"}, false), []string{"requires reviewers"}},
+		"both":                    {env(`{"deployment_branch_policy":null,"protection_rules":[{"type":"required_reviewers"}]}`, nil, false), []string{"no deployment branch rule", "requires reviewers"}},
+		"recommended":             {env(custom, []string{"main"}, false), nil},
+		"pattern includes branch": {env(custom, []string{"develop", "ma*"}, false), nil},
+		"rules exclude branch":    {env(custom, []string{"develop"}, false), []string{"branch rules don't include main"}},
+		"no rules yet":            {env(custom, nil, false), []string{"branch rules don't include main"}},
+		"protected":               {env(protectedOnly, nil, true), nil},
+		"unprotected":             {env(protectedOnly, nil, false), []string{"main isn't protected"}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			got := EnvironmentWarnings("release", tc.env)
+			got := EnvironmentWarnings("release", "main", tc.env)
 			if len(got) != len(tc.want) {
 				t.Fatalf("got %q, want %d warnings", got, len(tc.want))
 			}
@@ -500,22 +507,52 @@ func TestEnvironmentWarningsExplainRiskySettings(t *testing.T) {
 	}
 }
 
+func TestBranchRulesUseFnmatchPatterns(t *testing.T) {
+	for _, tc := range []struct {
+		pattern, branch string
+		want            bool
+	}{
+		{"main", "main", true},
+		{"main", "maint", false},
+		{"release/*", "release/v1", true},
+		{"release/*", "release/v1/fix", false},
+		{"release/**", "release/v1/fix", true},
+		{"v?", "v1", true},
+		{"[mt]ain", "tain", true},
+		{"[!m]ain", "main", false},
+		{"a.b", "axb", false},
+	} {
+		if got := branchRule(tc.pattern, tc.branch); got != tc.want {
+			t.Errorf("branchRule(%q, %q) = %v, want %v", tc.pattern, tc.branch, got, tc.want)
+		}
+	}
+}
+
 func TestEnvironmentReadsSettingsOrReportsMissing(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/repos/fabricahq/example/environments/release":
-			_, _ = w.Write([]byte(`{"deployment_branch_policy":null,"protection_rules":[{"type":"required_reviewers"}]}`))
+			_, _ = w.Write([]byte(`{"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true},"protection_rules":[{"type":"required_reviewers"}]}`))
+		case "/repos/fabricahq/example/environments/release/deployment-branch-policies":
+			_, _ = w.Write([]byte(`{"branch_policies":[{"name":"main","type":"branch"},{"name":"v*","type":"tag"}]}`))
+		case "/repos/fabricahq/example/environments/protected":
+			_, _ = w.Write([]byte(`{"deployment_branch_policy":{"protected_branches":true,"custom_branch_policies":false},"protection_rules":[]}`))
+		case "/repos/fabricahq/example/branches/main":
+			_, _ = w.Write([]byte(`{"name":"main","protected":true}`))
 		default:
 			http.NotFound(w, r)
 		}
 	}))
 	t.Cleanup(server.Close)
 	gh := &GitHub{BaseURL: server.URL, Token: "token", Repository: "fabricahq/example", HTTP: server.Client()}
-	env, err := gh.Environment(context.Background(), "release")
-	if err != nil || env == nil || env.DeploymentBranchPolicy != nil || len(env.ProtectionRules) != 1 {
+	env, err := gh.Environment(context.Background(), "release", "main")
+	if err != nil || env == nil || len(env.ProtectionRules) != 1 || !slices.Equal(env.BranchRules, []string{"main"}) {
 		t.Fatalf("%+v %v", env, err)
 	}
-	if env, err := gh.Environment(context.Background(), "staging"); env != nil || err != nil {
+	if env, err := gh.Environment(context.Background(), "protected", "main"); err != nil || !env.BranchProtected {
+		t.Fatalf("protected: %+v %v", env, err)
+	}
+	if env, err := gh.Environment(context.Background(), "staging", "main"); env != nil || err != nil {
 		t.Fatalf("missing environment: %+v %v", env, err)
 	}
 }

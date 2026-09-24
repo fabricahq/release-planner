@@ -64,7 +64,7 @@ From the repository root:
 5. **Protect releases** in your repository settings:
    - Require pull requests for your release branch, with your CI as required status checks, and require branches to be up to date before merging (or use a merge queue). This is what guarantees that the commit you release was tested.
    - Block force pushes to and deletion of that branch.
-   - Create an environment named `release` (Settings → Environments). Under **Deployment branches and tags**, add a branch rule for your release branch only. Leave **Required reviewers** off: the merge is the approval, and reviewers would make every release wait for a second approval in the Actions tab.
+   - Create an environment named `release` (Settings → Environments). Under **Deployment branches and tags**, add a branch rule for your release branch only. Leave **Required reviewers** off: the merge is the approval, and reviewers would make every release wait for a second approval in the Actions tab. The Release workflow warns on each release pull request if the environment is missing, doesn't allow your release branch, allows any branch, or requires reviewers.
    - Turn on immutable releases, so published tags and releases can't be changed.
 
 6. **Commit the files**, then tell your agent "let's release."
@@ -213,7 +213,7 @@ Everyone runs the version your config pins. Agents check `release-planner versio
 | `guide [--default-style]` | Agent | Prints the release procedure for this version, or only the default release notes style. |
 | `inventory [--head <ref>]` | Agent | Lists the previous release, every commit since it, and the candidate next versions. |
 | `draft <version>` | Agent | Creates the notes file with a linked list of pull requests and the closing link. |
-| `plan --base <ref> [--head <ref>]` | CI and agent | Validates a release request and prints the tag, commit, and notes to publish. |
+| `plan --base <ref> [--head <ref>]` | CI and agent | Validates a release request and prints the tag, commit, and notes to publish. In the Release workflow, it also warns, without failing, when the `release` environment isn't set up as recommended. |
 | `publish --plan <file> --commit <sha> --branch <name> [--assets <dir>]` | CI | Tags the approved commit and publishes the approved notes, with optional files staged on a draft and verified first. |
 | `version` | Anyone | Prints the running version. |
 
