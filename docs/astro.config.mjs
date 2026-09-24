@@ -8,6 +8,8 @@ import accessibleAsideTitles from './src/plugins/accessible-aside-titles.mjs';
 
 // The look, theme menu, and callout handling follow the Code Rules documentation site.
 export default defineConfig({
+  // Served at the domain root; page links are root-relative.
+  site: 'https://release-planner.fabricahq.com',
   devToolbar: { enabled: false },
   // Keep native bindings outside the SSR bundle: https://vite.dev/config/ssr-options.html#ssr-external
   vite: { plugins: [tailwindcss()], ssr: { external: ['satteri'] } },
