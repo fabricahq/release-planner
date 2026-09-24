@@ -17,7 +17,7 @@ func cli(t *testing.T, args ...string) (int, string, string) {
 	return code, stdout.String(), stderr.String()
 }
 
-func TestUsage(t *testing.T) {
+func TestUsageListsCommandsAndRejectsUnknownOnes(t *testing.T) {
 	if code, out, _ := cli(t); code != 0 || !strings.Contains(out, "inventory") {
 		t.Fatalf("%d %s", code, out)
 	}
@@ -26,7 +26,7 @@ func TestUsage(t *testing.T) {
 	}
 }
 
-func TestInstallCheckGuide(t *testing.T) {
+func TestInstallThenCheckAndGuideSucceed(t *testing.T) {
 	dir := t.TempDir()
 	config := "schema-version: 1\nversion: v0.1.0\nfirst-version: v1.0.0\nvalidate:\n  run: make test\n"
 	if err := os.MkdirAll(filepath.Join(dir, ".release-planner"), 0o755); err != nil {
@@ -60,7 +60,7 @@ func TestInstallCheckGuide(t *testing.T) {
 	}
 }
 
-func TestInit(t *testing.T) {
+func TestInitCreatesAnInstallableConfigOnce(t *testing.T) {
 	dir := t.TempDir()
 	code, out, errOut := cli(t, "init", "--dir", dir, "--version", "v0.1.0", "--first-version", "v1.0.0")
 	if code != 0 || !strings.Contains(out, "created   .release-planner/config.yml\ncreated   .release-planner/policy.md\n") {
@@ -81,7 +81,7 @@ func TestInit(t *testing.T) {
 	}
 }
 
-func TestMissingConfig(t *testing.T) {
+func TestMissingConfigPointsToInit(t *testing.T) {
 	if code, _, errOut := cli(t, "install", "--dir", t.TempDir()); code != 1 || !strings.Contains(errOut, ".release-planner/config.yml not found; run release-planner init") {
 		t.Fatalf("%d %s", code, errOut)
 	}

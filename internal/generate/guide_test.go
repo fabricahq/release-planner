@@ -20,7 +20,7 @@ func guideFor(t *testing.T, style, mode string) string {
 	return Guide(c)
 }
 
-func TestGuide(t *testing.T) {
+func TestGuideRendersTheConfiguredSettings(t *testing.T) {
 	guide := guideFor(t, "", "")
 	for _, want := range []string{
 		"# Prepare a release (Release Planner v0.2.0)",
@@ -38,7 +38,7 @@ func TestGuide(t *testing.T) {
 	}
 }
 
-func TestReleaseNotesStyle(t *testing.T) {
+func TestGuideAppendsOrReplacesTheReleaseNotesStyle(t *testing.T) {
 	custom := "- Use only `## Added`, `## Changed`, and `## Fixed`."
 
 	appended := guideFor(t, custom, "append")

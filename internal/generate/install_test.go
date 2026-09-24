@@ -154,7 +154,7 @@ func TestWorkflowQuotesNotesDirectory(t *testing.T) {
 	}
 }
 
-func TestWorkflowContent(t *testing.T) {
+func TestWorkflowRendersTheConfiguredSettings(t *testing.T) {
 	root := t.TempDir()
 	if _, err := Install(root, cfg(t, "v0.2.0"), false); err != nil {
 		t.Fatal(err)
@@ -333,7 +333,7 @@ func TestUninstall(t *testing.T) {
 	}
 }
 
-func TestValidateForms(t *testing.T) {
+func TestValidateAcceptsOnlyCallableWorkflows(t *testing.T) {
 	parse := func(yaml string) config.Config {
 		c, err := config.Parse([]byte("schema-version: 1\nversion: v0.2.0\n"+yaml), "")
 		if err != nil {

@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -222,14 +223,14 @@ func TestCreatesTagAndRelease(t *testing.T) {
 	}
 }
 
-func TestFirstRelease(t *testing.T) {
+func TestPublishesAFirstRelease(t *testing.T) {
 	f := newFake()
 	if _, err := run(t, f, plan.Plan{Tags: []string{}, Tag: "v1.0.0", Commit: approved, Notes: "First"}); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestPrerelease(t *testing.T) {
+func TestMarksPrereleases(t *testing.T) {
 	f := withPrevious()
 	p := minor()
 	p.Tag, p.Prerelease = "v1.1.0-rc.1", true
@@ -274,7 +275,7 @@ func TestAcceptsAnnotatedTagOnApprovedCommit(t *testing.T) {
 	}
 }
 
-func TestRefusals(t *testing.T) {
+func TestRefusesUnsafePublication(t *testing.T) {
 	for name, tc := range map[string]struct {
 		setup func(*fakeGitHub)
 		plan  func(*plan.Plan)
@@ -341,9 +342,13 @@ func TestPublishesAssetsThroughADraft(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"draft v1.1.0", "upload SHA256SUMS", "upload tool_linux_amd64.tar.gz", "publish draft"}
-	if strings.Join(f.writes, ",") != strings.Join(want, ",") {
-		t.Fatalf("writes %v, want %v", f.writes, want)
+	// The draft comes first and publication last; the uploads between may run in any order.
+	if n := len(f.writes); n != 4 || f.writes[0] != "draft v1.1.0" || f.writes[n-1] != "publish draft" {
+		t.Fatalf("writes %v", f.writes)
+	}
+	uploads := slices.Sorted(slices.Values(f.writes[1:3]))
+	if want := []string{"upload SHA256SUMS", "upload tool_linux_amd64.tar.gz"}; !slices.Equal(uploads, want) {
+		t.Fatalf("uploads %v, want %v", uploads, want)
 	}
 	if f.tags["v1.1.0"].sha != approved || f.releases[1].Draft || len(f.releases[1].Assets) != 2 || res.AlreadyPublished {
 		t.Fatalf("%+v %+v", f.releases[1], res)

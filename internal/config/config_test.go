@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestDefaults(t *testing.T) {
+func TestParseFillsDefaults(t *testing.T) {
 	c, err := Parse([]byte("schema-version: 1\nversion: v0.2.0\nvalidate:\n  run: make test\n"), "")
 	if err != nil {
 		t.Fatal(err)
@@ -28,7 +28,7 @@ func TestValidateIsOptional(t *testing.T) {
 	}
 }
 
-func TestFullConfig(t *testing.T) {
+func TestParseReadsEverySetting(t *testing.T) {
 	c, err := Parse([]byte(`schema-version: 1
 version: 0123456789abcdef0123456789abcdef01234567
 first-version: v1.0.0
@@ -52,7 +52,7 @@ validate:
 	}
 }
 
-func TestLoad(t *testing.T) {
+func TestLoadReadsOnlyTheNamedStyleFile(t *testing.T) {
 	root := t.TempDir()
 	if _, err := Load(root); err == nil || !strings.Contains(err.Error(), "run release-planner init") {
 		t.Fatal(err)
@@ -89,7 +89,7 @@ func TestLoad(t *testing.T) {
 	}
 }
 
-func TestRejections(t *testing.T) {
+func TestParseRejectsInvalidSettings(t *testing.T) {
 	for name, tc := range map[string]struct{ yaml, want string }{
 		"missing version":   {"schema-version: 1\nvalidate:\n  run: x\n", "version:"},
 		"missing schema":    {"version: v0.2.0\nvalidate:\n  run: x\n", "reads schema-version 1, not 0"},

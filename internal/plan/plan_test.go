@@ -63,7 +63,7 @@ func (f *fixture) plan(base, head string) (Plan, error) {
 	return Read(context.Background(), f.repo, opts, base, head)
 }
 
-func TestReleaseRequests(t *testing.T) {
+func TestReadValidatesReleaseRequests(t *testing.T) {
 	for _, tc := range []struct{ name, tag, notes, existing, want string }{
 		{"first", "v1.0.0", "## ✨ New Features\nFirst release.\n", "", ""},
 		{"wrong-first", "v0.1.0", "Notes", "", "first release"},
@@ -111,7 +111,7 @@ func TestReleaseRequests(t *testing.T) {
 	}
 }
 
-func TestNoRequest(t *testing.T) {
+func TestReadWithoutNotesRequestsNoRelease(t *testing.T) {
 	f := newFixture(t)
 	f.write("practices/rule.md", "Rule")
 	p, err := f.plan(f.initial, f.commit("Rule"))
@@ -120,7 +120,7 @@ func TestNoRequest(t *testing.T) {
 	}
 }
 
-func TestNotesOwnership(t *testing.T) {
+func TestReadRejectsEditsToTaggedNotes(t *testing.T) {
 	f := newFixture(t)
 	f.write("releases/v1.0.0.md", "Original notes")
 	first := f.commit("Notes")
@@ -210,7 +210,7 @@ func TestPendingRequestCannotBeSkipped(t *testing.T) {
 	}
 }
 
-func TestCustomNotesDirectory(t *testing.T) {
+func TestReadUsesTheConfiguredNotesDirectory(t *testing.T) {
 	f := newFixture(t)
 	f.write("docs/releases/v1.0.0.md", "Notes")
 	f.write("releases/v9.0.0.md", "Outside the configured directory")
@@ -221,7 +221,7 @@ func TestCustomNotesDirectory(t *testing.T) {
 	}
 }
 
-func TestInventory(t *testing.T) {
+func TestInventoryListsChangesSinceThePreviousRelease(t *testing.T) {
 	f := newFixture(t)
 	f.write("a.md", "a")
 	f.commit("Add a (#1)")

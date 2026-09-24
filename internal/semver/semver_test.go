@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestPrecedence(t *testing.T) {
+func TestCompareFollowsSemVerPrecedence(t *testing.T) {
 	ordered := []string{"v1.0.0-alpha", "v1.0.0-alpha.1", "v1.0.0-alpha.beta", "v1.0.0-beta",
 		"v1.0.0-beta.2", "v1.0.0-beta.11", "v1.0.0-rc.1", "v1.0.0", "v1.0.1", "v1.10.0", "v2.0.0"}
 	shuffled := slices.Clone(ordered)
@@ -16,7 +16,7 @@ func TestPrecedence(t *testing.T) {
 	}
 }
 
-func TestParse(t *testing.T) {
+func TestParseAcceptsOnlyBoundedReleaseTags(t *testing.T) {
 	for tag, ok := range map[string]bool{
 		"v1.2.3": true, "v0.1.0": true, "v1.2.3-rc.1": true, "v1.2.3-0.a-b": true,
 		"1.2.3": false, "v1.2": false, "v01.2.3": false, "v1.2.3+build": false, "v1.2.3-01": false, "v-preview": false,
@@ -33,7 +33,7 @@ func TestParse(t *testing.T) {
 	}
 }
 
-func TestCandidates(t *testing.T) {
+func TestCandidatesFollowThePreviousVersion(t *testing.T) {
 	for prev, want := range map[string][3]string{
 		"v1.0.0":      {"v1.0.1", "v1.1.0", "v2.0.0"},
 		"v1.1.0-rc.1": {"v1.1.0", "v1.1.0", "v2.0.0"},

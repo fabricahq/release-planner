@@ -2,7 +2,7 @@ package buildinfo
 
 import "testing"
 
-func TestMatches(t *testing.T) {
+func TestMatchesOnlyThePinnedVersion(t *testing.T) {
 	sha := "1734f464f8ba0123456789abcdef0123456789ab"
 	for _, tc := range []struct {
 		pin, running string
@@ -20,7 +20,7 @@ func TestMatches(t *testing.T) {
 	}
 }
 
-func TestStamped(t *testing.T) {
+func TestStampedBuildReportsItsVersion(t *testing.T) {
 	stamped = "v0.1.0"
 	t.Cleanup(func() { stamped = "" })
 	if Version() != "v0.1.0" || Local() {

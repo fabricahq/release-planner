@@ -40,7 +40,7 @@ func TestArchiveIsReproducible(t *testing.T) {
 	}
 }
 
-func TestChecksums(t *testing.T) {
+func TestChecksumsAndArchiveNamesAreStable(t *testing.T) {
 	got := Checksums(map[string][]byte{"b": []byte("b"), "a": []byte("a")})
 	want := "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb  a\n3e23e8160039594a33894f6564e1b1348bbd7a0088d42c4acb73eeaed59c009d  b\n"
 	if got != want {
@@ -52,7 +52,7 @@ func TestChecksums(t *testing.T) {
 }
 
 // Building every target compiles four binaries, so it is skipped with -short.
-func TestBuild(t *testing.T) {
+func TestBuildArchivesEveryTargetWithTheStampedVersion(t *testing.T) {
 	if testing.Short() {
 		t.Skip("cross-compiles every target")
 	}

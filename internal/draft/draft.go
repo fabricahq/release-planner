@@ -74,9 +74,18 @@ func Write(ctx context.Context, repo gitrepo.Repo, c config.Config, ownerName, v
 		return "", err
 	}
 
+	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+		return "", err
+	}
+	return name, os.WriteFile(file, []byte(Render(inv, ownerName, version)), 0o644)
+}
+
+// Render returns a draft's notes for version from the inventory since the previous release,
+// with links into the GitHub repository ownerName. The agent adds headings as the release
+// notes style says; the draft holds only the fixed parts.
+func Render(inv plan.Inventory, ownerName, version string) string {
 	base := "https://github.com/" + ownerName
 	var b strings.Builder
-	// The agent adds headings as the release notes style says; draft writes only the fixed parts.
 	b.WriteString(Opening + "\n")
 	b.WriteString("\n## What's Changed\n\n")
 	listed := 0
@@ -99,9 +108,5 @@ func Write(ctx context.Context, repo gitrepo.Repo, c config.Config, ownerName, v
 	} else {
 		fmt.Fprintf(&b, "\nThis is the first release. Browse the source at [%s](%s/tree/%s).\n", version, base, version)
 	}
-
-	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
-		return "", err
-	}
-	return name, os.WriteFile(file, []byte(b.String()), 0o644)
+	return b.String()
 }
