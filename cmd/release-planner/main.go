@@ -16,6 +16,7 @@ import (
 
 	"github.com/fabricahq/release-planner/internal/buildinfo"
 	"github.com/fabricahq/release-planner/internal/config"
+	"github.com/fabricahq/release-planner/internal/contributors"
 	"github.com/fabricahq/release-planner/internal/draft"
 	"github.com/fabricahq/release-planner/internal/generate"
 	"github.com/fabricahq/release-planner/internal/gitrepo"
@@ -35,7 +36,7 @@ Set up a repository:
 Prepare a release (agents):
   guide       Print the release procedure to follow
   inventory   List changes since the previous release and the candidate versions
-  draft       Create the release notes file for a version
+  draft       Create the release notes file with its raw material: pull requests, authors, and links
 
 Run in the Release workflow:
   plan        Validate a release request and print what to publish
@@ -256,40 +257,29 @@ func cmdInventory(ctx context.Context, args []string, out io.Writer) error {
 		return err
 	}
 	if !*offline && len(inv.PullRequests) > 0 {
-		addAuthorHandles(ctx, repo, *repository, &inv)
+		if gh, err := githubFor(ctx, repo, *repository); err != nil {
+			inv.Warnings = append(inv.Warnings, fmt.Sprintf("no pull request authors: %v", err))
+		} else {
+			contributors.Add(ctx, gh, &inv)
+		}
 	}
 	return printJSON(out, inv)
 }
 
-// addAuthorHandles looks up each pull request's author on GitHub. Git history records only
-// author names, and the notes credit people by handle. A lookup that fails adds a warning
-// instead of failing the inventory, so the agent can look the handle up itself.
-func addAuthorHandles(ctx context.Context, repo gitrepo.Repo, repository string, inv *plan.Inventory) {
-	warn := func(format string, args ...any) { inv.Warnings = append(inv.Warnings, fmt.Sprintf(format, args...)) }
+// githubFor returns a GitHub API client for looking up pull request authors in the repository,
+// read from the origin remote when not given.
+func githubFor(ctx context.Context, repo gitrepo.Repo, repository string) (*publish.GitHub, error) {
 	if repository == "" {
 		var err error
 		if repository, err = draft.Repository(ctx, repo); err != nil {
-			warn("no pull request authors: %v", err)
-			return
+			return nil, err
 		}
 	}
 	api := os.Getenv("GITHUB_API_URL")
 	if api == "" {
 		api = "https://api.github.com"
 	}
-	gh := &publish.GitHub{BaseURL: api, Token: githubToken(ctx), Repository: repository}
-	handles := map[int]string{}
-	for _, number := range inv.PullRequests {
-		handle, err := gh.PullRequestAuthor(ctx, number)
-		if err != nil {
-			warn("no author for pull request #%d: %v", number, err)
-			continue
-		}
-		handles[number] = handle
-	}
-	for i := range inv.Commits {
-		inv.Commits[i].AuthorHandle = handles[inv.Commits[i].PullRequest]
-	}
+	return &publish.GitHub{BaseURL: api, Token: githubToken(ctx), Repository: repository}, nil
 }
 
 // githubToken finds a token for GitHub API reads: GITHUB_TOKEN, GH_TOKEN, or the GitHub CLI's
@@ -307,9 +297,10 @@ func githubToken(ctx context.Context) string {
 }
 
 func cmdDraft(ctx context.Context, args []string, out io.Writer) error {
-	fs, dir := flags("draft", "draft [--repository owner/name] <version>")
+	fs, dir := flags("draft", "draft [--repository owner/name] [--offline] <version>")
 	head := fs.String("head", "HEAD", "commit the release would tag")
-	repository := fs.String("repository", "", "GitHub repository for links, as owner/name (default: from the origin remote)")
+	repository := fs.String("repository", "", "GitHub repository for links and pull request authors, as owner/name (default: from the origin remote)")
+	offline := fs.Bool("offline", false, "don't look up pull request authors or new contributors on GitHub")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -327,7 +318,15 @@ func cmdDraft(ctx context.Context, args []string, out io.Writer) error {
 			return err
 		}
 	}
-	name, err := draft.Write(ctx, repo, c, *repository, fs.Arg(0), *head)
+	var gh contributors.GitHub
+	if !*offline {
+		client, err := githubFor(ctx, repo, *repository)
+		if err != nil {
+			return err
+		}
+		gh = client
+	}
+	name, err := draft.Write(ctx, repo, c, *repository, fs.Arg(0), *head, gh)
 	if err != nil {
 		return err
 	}

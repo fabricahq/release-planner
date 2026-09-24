@@ -28,7 +28,7 @@ func TestGuideRendersTheConfiguredSettings(t *testing.T) {
 		"Read `.release-planner/policy.md`.",
 		"release-planner inventory --head origin/trunk",
 		"With no previous release, use `v1.0.0`.",
-		"It creates `docs/releases/<version>.md` with a TODO opening line",
+		"then creates `docs/releases/<version>.md` with the raw material for the notes",
 		"- Replace the TODO line, and don't leave empty headings. `plan` rejects both.\n",
 		"### Release notes style\n\n" + strings.TrimSpace(DefaultStyle()) + "\n\n## 6. Validate",
 	} {

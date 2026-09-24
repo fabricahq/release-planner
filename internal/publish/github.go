@@ -320,6 +320,18 @@ func (g *GitHub) PullRequestAuthor(ctx context.Context, number int) (string, err
 	return pr.User.Login, nil
 }
 
+// ContributedBefore reports whether the handle authored any commit reachable from ref.
+func (g *GitHub) ContributedBefore(ctx context.Context, handle, ref string) (bool, error) {
+	var commits []struct {
+		SHA string `json:"sha"`
+	}
+	query := url.Values{"sha": {ref}, "author": {handle}, "per_page": {"1"}}
+	if _, err := g.do(ctx, http.MethodGet, "/commits?"+query.Encode(), nil, &commits); err != nil {
+		return false, err
+	}
+	return len(commits) > 0, nil
+}
+
 // PublishDraft makes an existing draft release public, creating its tag on commit if the
 // tag doesn't exist yet.
 func (g *GitHub) PublishDraft(ctx context.Context, id int64, commit string, makeLatest bool) (*Release, error) {

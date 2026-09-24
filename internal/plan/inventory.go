@@ -23,8 +23,16 @@ type Inventory struct {
 	UnmergedNewerTags []string `json:"unmergedNewerTags"`
 	PullRequests      []int    `json:"pullRequests"`
 	Commits           []Commit `json:"commits"`
+	// NewContributors are authors whose first merged pull request is in this release.
+	NewContributors []NewContributor `json:"newContributors"`
 	// Warnings explain information inventory could not gather, such as GitHub handles.
 	Warnings []string `json:"warnings"`
+}
+
+// NewContributor is an author whose first merged pull request is in the release.
+type NewContributor struct {
+	Handle      string `json:"handle"`
+	PullRequest int    `json:"pullRequest"`
 }
 
 // Commit is one commit in the release range.
@@ -55,7 +63,7 @@ func Take(ctx context.Context, repo gitrepo.Repo, opts Options, head string) (In
 	if err != nil {
 		return Inventory{}, err
 	}
-	inv := Inventory{Head: head, PendingRequests: []string{}, UnmergedNewerTags: []string{}, PullRequests: []int{}, Commits: []Commit{}, Warnings: []string{}}
+	inv := Inventory{Head: head, PendingRequests: []string{}, UnmergedNewerTags: []string{}, PullRequests: []int{}, Commits: []Commit{}, NewContributors: []NewContributor{}, Warnings: []string{}}
 	var latest semver.Version
 	for _, t := range tags {
 		v, ok := semver.Parse(t)

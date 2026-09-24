@@ -149,6 +149,13 @@ func TestInventoryAddsAuthorHandles(t *testing.T) {
 		switch r.URL.Path {
 		case "/repos/fabricahq/example/pulls/7":
 			_, _ = w.Write([]byte(`{"user":{"login":"octocat"}}`))
+		case "/repos/fabricahq/example/commits":
+			// octocat has no commits in the previous release.
+			if r.URL.Query().Get("sha") != "v1.0.0" || r.URL.Query().Get("author") != "octocat" {
+				http.Error(w, "unexpected query", http.StatusBadRequest)
+				return
+			}
+			_, _ = w.Write([]byte(`[]`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -176,7 +183,9 @@ func TestInventoryAddsAuthorHandles(t *testing.T) {
 		t.Fatal(err)
 	}
 	git("add", "-A")
-	git("commit", "-q", "-m", "feat: add login (#7)")
+	git("commit", "-q", "-m", "Initial commit")
+	git("tag", "v1.0.0")
+	git("commit", "-q", "--allow-empty", "-m", "feat: add login (#7)")
 	git("commit", "-q", "--allow-empty", "-m", "fix: typo (#8)")
 
 	code, out, errOut := cli(t, "inventory", "--dir", dir)
@@ -189,6 +198,10 @@ func TestInventoryAddsAuthorHandles(t *testing.T) {
 			Author       string `json:"author"`
 			AuthorHandle string `json:"authorHandle"`
 		} `json:"commits"`
+		NewContributors []struct {
+			Handle      string `json:"handle"`
+			PullRequest int    `json:"pullRequest"`
+		} `json:"newContributors"`
 		Warnings []string `json:"warnings"`
 	}
 	if err := json.Unmarshal([]byte(out), &inv); err != nil {
@@ -196,6 +209,9 @@ func TestInventoryAddsAuthorHandles(t *testing.T) {
 	}
 	if len(inv.Commits) != 2 || inv.Commits[0].AuthorHandle != "octocat" || inv.Commits[0].Author != "Mona Lisa" || inv.Commits[1].AuthorHandle != "" {
 		t.Fatalf("%+v", inv.Commits)
+	}
+	if len(inv.NewContributors) != 1 || inv.NewContributors[0].Handle != "octocat" || inv.NewContributors[0].PullRequest != 7 {
+		t.Fatalf("new contributors %+v", inv.NewContributors)
 	}
 	if len(inv.Warnings) != 1 || !strings.Contains(inv.Warnings[0], "no author for pull request #8") {
 		t.Fatalf("warnings %v", inv.Warnings)

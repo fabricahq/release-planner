@@ -2,6 +2,7 @@ package draft
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/fabricahq/release-planner/internal/config"
+	"github.com/fabricahq/release-planner/internal/contributors"
 	"github.com/fabricahq/release-planner/internal/gitrepo"
 	"github.com/fabricahq/release-planner/internal/plan"
 )
@@ -67,10 +69,10 @@ func TestRepositoryReadsOwnerAndNameFromOrigin(t *testing.T) {
 func TestWriteDraftsAFirstRelease(t *testing.T) {
 	repo, c := setup(t)
 	commit(t, repo.Dir, "b", "Add b (#1)")
-	if _, err := Write(context.Background(), repo, c, "fabricahq/example", "v0.1.0", "HEAD"); err == nil || !strings.Contains(err.Error(), "first release must be v1.0.0") {
+	if _, err := Write(context.Background(), repo, c, "fabricahq/example", "v0.1.0", "HEAD", nil); err == nil || !strings.Contains(err.Error(), "first release must be v1.0.0") {
 		t.Fatal(err)
 	}
-	name, err := Write(context.Background(), repo, c, "fabricahq/example", "v1.0.0", "HEAD")
+	name, err := Write(context.Background(), repo, c, "fabricahq/example", "v1.0.0", "HEAD", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +81,7 @@ func TestWriteDraftsAFirstRelease(t *testing.T) {
 	for _, want := range []string{
 		Opening,
 		Opening + "\n\n## Pull Requests\n\n",
-		"- Initial in https://github.com/fabricahq/example/commit/",
+		"- Initial in ",
 		"- Add b in #1\n",
 		"This is the first release. Browse the source at [v1.0.0](https://github.com/fabricahq/example/tree/v1.0.0).",
 	} {
@@ -87,7 +89,7 @@ func TestWriteDraftsAFirstRelease(t *testing.T) {
 			t.Errorf("notes lack %q:\n%s", want, notes)
 		}
 	}
-	if _, err := Write(context.Background(), repo, c, "fabricahq/example", "v1.0.0", "HEAD"); err == nil || !strings.Contains(err.Error(), "already exists") {
+	if _, err := Write(context.Background(), repo, c, "fabricahq/example", "v1.0.0", "HEAD", nil); err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Fatal(err)
 	}
 }
@@ -100,10 +102,10 @@ func TestWriteDraftsALaterRelease(t *testing.T) {
 	git(t, repo.Dir, "checkout", "-q", "main")
 	git(t, repo.Dir, "merge", "-q", "--no-ff", "feature", "-m", "Merge pull request #7 from fabricahq/feature", "-m", "Add a Svelte group")
 
-	if _, err := Write(context.Background(), repo, c, "fabricahq/example", "v1.0.0", "HEAD"); err == nil || !strings.Contains(err.Error(), "newer") {
+	if _, err := Write(context.Background(), repo, c, "fabricahq/example", "v1.0.0", "HEAD", nil); err == nil || !strings.Contains(err.Error(), "newer") {
 		t.Fatal(err)
 	}
-	name, err := Write(context.Background(), repo, c, "fabricahq/example", "v1.1.0", "HEAD")
+	name, err := Write(context.Background(), repo, c, "fabricahq/example", "v1.1.0", "HEAD", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,6 +114,81 @@ func TestWriteDraftsALaterRelease(t *testing.T) {
 	want := Opening + "\n\n## Pull Requests\n\n- Add a Svelte group in #7\n\n**Full Changelog**: https://github.com/fabricahq/example/compare/v1.0.0...v1.1.0\n"
 	if notes != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", notes, want)
+	}
+}
+
+// fakeGitHub answers contributor lookups from maps; a missing entry is a failed lookup.
+type fakeGitHub struct {
+	authors map[int]string
+	before  map[string]bool
+}
+
+func (f fakeGitHub) PullRequestAuthor(_ context.Context, number int) (string, error) {
+	if handle, ok := f.authors[number]; ok {
+		return handle, nil
+	}
+	return "", errors.New("not found")
+}
+
+func (f fakeGitHub) ContributedBefore(_ context.Context, handle, ref string) (bool, error) {
+	if ref != "v1.0.0" {
+		return false, errors.New("unexpected ref " + ref)
+	}
+	if before, ok := f.before[handle]; ok {
+		return before, nil
+	}
+	return false, errors.New("rate limited")
+}
+
+// With GitHub, the draft credits authors by handle and names new contributors. Lookups that
+// fail leave the entry without a handle and add a warning, rather than failing the draft.
+func TestWriteCreditsAuthorsAndNewContributors(t *testing.T) {
+	repo, c := setup(t)
+	git(t, repo.Dir, "tag", "v1.0.0")
+	commit(t, repo.Dir, "b", "feat: add b (#7)")
+	commit(t, repo.Dir, "c", "fix: repair c (#8)")
+	commit(t, repo.Dir, "d", "chore: bump d (#9)")
+	gh := fakeGitHub{
+		authors: map[int]string{7: "octocat", 8: "hubot", 9: "dependabot[bot]"},
+		before:  map[string]bool{"octocat": false, "hubot": true},
+	}
+	name, err := Write(context.Background(), repo, c, "fabricahq/example", "v1.1.0", "HEAD", gh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(filepath.Join(repo.Dir, name))
+	want := Opening + "\n\n## Pull Requests\n\n" +
+		"- feat: add b by @octocat in #7\n" +
+		"- fix: repair c by @hubot in #8\n" +
+		"- chore: bump d by @dependabot[bot] in #9\n" +
+		"\n## New Contributors\n\n- @octocat made their first contribution in #7\n" +
+		"\n**Full Changelog**: https://github.com/fabricahq/example/compare/v1.0.0...v1.1.0\n"
+	if string(data) != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", data, want)
+	}
+
+	// A failed author lookup drops only that handle.
+	inv := plan.Inventory{Previous: "v1.0.0", PullRequests: []int{7, 8}, Commits: []plan.Commit{
+		{SHA: "5ba22db0000000000000000000000000000000000", Title: "feat: add b", PullRequest: 7, OnBranch: true},
+		{SHA: "6c33d1e0000000000000000000000000000000000", Title: "fix: repair c", PullRequest: 8, OnBranch: true},
+	}}
+	contributors.Add(context.Background(), fakeGitHub{authors: map[int]string{7: "octocat"}}, &inv)
+	if inv.Commits[0].AuthorHandle != "octocat" || inv.Commits[1].AuthorHandle != "" || len(inv.Warnings) != 2 {
+		t.Fatalf("%+v %v", inv.Commits, inv.Warnings)
+	}
+}
+
+// In a first release, every author's first pull request here is their first contribution,
+// with no lookup of earlier history.
+func TestFirstReleaseWelcomesEveryAuthor(t *testing.T) {
+	inv := plan.Inventory{PullRequests: []int{1, 2, 3}, Commits: []plan.Commit{
+		{SHA: "1111111000000000000000000000000000000000", Title: "Start", PullRequest: 1, OnBranch: true},
+		{SHA: "2222222000000000000000000000000000000000", Title: "More", PullRequest: 2, OnBranch: true},
+		{SHA: "3333333000000000000000000000000000000000", Title: "Again", PullRequest: 3, OnBranch: true},
+	}}
+	contributors.Add(context.Background(), fakeGitHub{authors: map[int]string{1: "octocat", 2: "hubot", 3: "octocat"}}, &inv)
+	if len(inv.NewContributors) != 2 || inv.NewContributors[0] != (plan.NewContributor{Handle: "octocat", PullRequest: 1}) || inv.NewContributors[1] != (plan.NewContributor{Handle: "hubot", PullRequest: 2}) || len(inv.Warnings) != 0 {
+		t.Fatalf("%+v %v", inv.NewContributors, inv.Warnings)
 	}
 }
 
@@ -128,7 +205,7 @@ func TestRenderListsBranchChangesInOrder(t *testing.T) {
 	want := Opening + "\n\n## Pull Requests\n\n" +
 		"- feat(svelte): add a Svelte group in #7\n" +
 		"- fix!: reject empty rule IDs in #9\n" +
-		"- Fix a typo in https://github.com/fabricahq/example/commit/9c01ab3\n" +
+		"- Fix a typo in 9c01ab3\n" +
 		"\n**Full Changelog**: https://github.com/fabricahq/example/compare/v1.0.0...v1.1.0\n"
 	if got := Render(inv, "fabricahq/example", "v1.1.0"); got != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
