@@ -144,6 +144,8 @@ The release notes style tells the agent how to write the notes: how to open, whi
 - 🐛 Squashed Bugs
 - ⛓️‍💥 Breaking Changes
 
+Each entry ends with the pull requests it covers, such as (#7) or (#7, #9).
+
 To change it, create `.release-planner/release-notes-style.md`:
 
 - With `release-notes-style: append`, the default, the agent follows the default style and then yours. Use it to add rules while keeping improvements to the default style when you upgrade.

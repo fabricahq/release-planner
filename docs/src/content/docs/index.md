@@ -30,22 +30,23 @@ This release adds rules for Svelte and fixes a misleading Zustand example. No ex
 
 **Svelte rules**
 
-A new `techs/svelte` group with six rules for writing Svelte 5 components with runes, including when to use `$derived` instead of `$effect`.
+A new `techs/svelte` group with six rules for writing Svelte 5 components with runes, including when to use `$derived` instead of `$effect`. (#7, #9)
 
 #### 🐛 Squashed Bugs
 
-- `techs/zustand/rehydrate-persisted-stores-after-hydration` no longer shows reading storage during server rendering.
+- `techs/zustand/rehydrate-persisted-stores-after-hydration` no longer shows reading storage during server rendering. (#8)
 
 #### What's Changed
 
 - Add a Svelte group in #7
 - Correct the Zustand hydration example in #8
+- Add Svelte examples for stores and snippets in #9
 
 **Full Changelog**: v1.0.0...v1.1.0
 
 </div>
 
-Release Planner comes with an opinionated release notes style, shown above: open with what the release means for readers, group changes under **New Features**, **Improvements**, **Squashed Bugs**, and **Breaking Changes**, and end with a linked list of every pull request.
+Release Planner comes with an opinionated release notes style, shown above: open with what the release means for readers, group changes under **New Features**, **Improvements**, **Squashed Bugs**, and **Breaking Changes**, end each entry with the pull requests behind it, and finish with a linked list of every pull request.
 
 The style is fully customizable. You can add your own rules on top of it, such as always naming affected API endpoints, or replace it entirely with your own headings and format. See [Release notes style](/customize/release-notes-style/).
 

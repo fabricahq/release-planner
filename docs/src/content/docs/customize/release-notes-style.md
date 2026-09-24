@@ -16,6 +16,7 @@ Unless you change it, the agent:
   - 🐛 Squashed Bugs
   - ⛓️‍💥 Breaking Changes, also mentioned in the opening sentences
 - gives significant changes their own subheading, and uses bullets for small ones
+- ends every entry with the pull requests it covers, such as (#7) or (#7, #9)
 - groups related commits into one entry
 
 To see the exact text the agent follows, run:
