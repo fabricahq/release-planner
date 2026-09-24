@@ -173,3 +173,23 @@ h1[data-page-title] { color: var(--cr-ink); font-weight: 500; letter-spacing: -.
   color: var(--cr-muted);
 }
 .sl-markdown-content .release-example h4 { margin-top: 1.25rem; }
+
+/* Marks who acts in a list of steps: a filled badge for people, an outlined one for automation. */
+.sl-markdown-content .step-badge {
+  display: inline-block;
+  margin-inline-end: .35rem;
+  padding: 0 .5rem;
+  border: 1px solid var(--cr-border);
+  border-radius: 999px;
+  color: var(--cr-muted);
+  font-size: .72rem;
+  font-weight: 500;
+  line-height: 1.6;
+  letter-spacing: .02em;
+  vertical-align: .1em;
+}
+.sl-markdown-content .step-badge.human {
+  border-color: var(--cr-ink);
+  background: var(--cr-ink);
+  color: var(--cr-paper);
+}
