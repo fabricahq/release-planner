@@ -9,6 +9,10 @@ permissions:
   contents: read
 jobs:
   build:
+    # Cancel superseded main builds so an older build can't deploy after a newer one.
+    concurrency:
+      group: docs-build-${{ github.ref }}
+      cancel-in-progress: ${{ github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     defaults:
       run:
