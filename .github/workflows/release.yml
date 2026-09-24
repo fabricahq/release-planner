@@ -1,0 +1,137 @@
+# Release Planner releases itself with its own code at the approved commit.
+# Adopting repositories use the workflow that `release-planner install` generates instead.
+name: Release
+on:
+  push:
+    branches: [main]
+    paths: ['releases/v*.md']
+  pull_request:
+    paths: ['releases/**', '.release-planner/**', '.github/workflows/release.yml']
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: 'Approved head SHA from the original failed run summary'
+        required: true
+        type: string
+      base:
+        description: 'Base SHA from the original failed run summary'
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  plan:
+    if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.plan.outputs.tag }}
+      commit: ${{ steps.plan.outputs.commit }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.commit || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Plan the release
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ inputs.base || github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ inputs.commit || github.event.pull_request.head.sha || github.sha }}
+        run: go run ./cmd/release-planner plan --ci --event "$EVENT" --base "$BASE" --head "$HEAD" --out "$RUNNER_TEMP/release-plan.json"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-plan
+          path: ${{ runner.temp }}/release-plan.json
+          if-no-files-found: error
+
+  # Pull request checks already tested this commit. At release, rescan for advisories
+  # published since merge, then build the release binaries and the publisher without
+  # write credentials.
+  validate:
+    needs: plan
+    if: needs.plan.outputs.tag != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+      - name: Build the release archives
+        env:
+          TAG: ${{ needs.plan.outputs.tag }}
+        run: go run ./cmd/package-binaries --version "$TAG" --output "$RUNNER_TEMP/release-assets"
+      - run: go build -o "$RUNNER_TEMP/publisher/release-planner" ./cmd/release-planner
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-assets
+          path: ${{ runner.temp }}/release-assets/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: publisher
+          path: ${{ runner.temp }}/publisher/release-planner
+          if-no-files-found: error
+
+  # Sign the checksum manifest, so installs can verify the archives came from this workflow.
+  # This job checks out no source and cannot write to the repository.
+  attest:
+    needs: [plan, validate]
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-assets
+          path: ${{ runner.temp }}/release-assets
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/release-assets/SHA256SUMS
+
+  # The only job that can write. It runs the publisher built from the approved commit,
+  # stages the archives on a draft, verifies them, and publishes last.
+  publish:
+    needs: [plan, validate, attest]
+    if: needs.plan.outputs.tag != '' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+      pull-requests: read # to confirm the commit is a merged pull request
+    concurrency:
+      group: release-publication
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: publisher
+          path: ${{ runner.temp }}/bin
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-plan
+          path: ${{ runner.temp }}/plan
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-assets
+          path: ${{ runner.temp }}/release-assets
+      - name: Tag the approved commit and publish the release with its binaries
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          COMMIT: ${{ needs.plan.outputs.commit }}
+        run: |
+          chmod +x "$RUNNER_TEMP/bin/release-planner"
+          "$RUNNER_TEMP/bin/release-planner" publish --plan "$RUNNER_TEMP/plan/release-plan.json" --commit "$COMMIT" --branch main --assets "$RUNNER_TEMP/release-assets"

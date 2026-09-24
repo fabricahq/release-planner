@@ -1,0 +1,35 @@
+/* Starlight owns the reset; utilities follow its theme and component layers. */
+@layer base, starlight, theme, components, utilities;
+@import '@astrojs/starlight-tailwind';
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'tailwindcss/utilities.css' layer(utilities) source('../');
+
+/* Match Starlight's md/lg layout cutoffs and its smaller file-tree cutoff.
+   See @astrojs/starlight/dist/style/util.css and user-components/FileTree.astro. */
+@theme {
+  --breakpoint-*: initial;
+  --breakpoint-sm: 30rem;
+  --breakpoint-md: 50rem;
+  --breakpoint-lg: 72rem;
+}
+
+/* Alias the existing light/dark palette rather than maintaining two themes. */
+@theme inline {
+  --color-paper: var(--cr-paper);
+  --color-surface: var(--cr-surface);
+  --color-surface-header: var(--cr-surface-header);
+  --color-ink: var(--cr-ink);
+  --color-muted: var(--cr-muted);
+  --color-border: var(--cr-border);
+  --color-border-strong: var(--cr-border-strong);
+  --color-border-subtle: var(--cr-border-subtle);
+  --color-primary-action: var(--cr-primary-action);
+  --color-on-primary-action: var(--cr-on-primary-action);
+  --font-sans: var(--sl-font);
+  --font-mono: var(--cr-font-mono);
+  --text-xs--line-height: 1.75;
+  --text-sm--line-height: 1.75;
+  --radius-small: var(--cr-radius-small);
+  --radius-card: var(--cr-radius-card);
+  --radius-panel: var(--cr-radius-panel);
+}

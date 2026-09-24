@@ -1,0 +1,74 @@
+<!--
+To have your agent fill in this policy, give it this prompt:
+
+  Fill in .release-planner/policy.md for this repository. Read the README, the docs,
+  the public interfaces, and the release history to work out what counts as a breaking
+  change and who reads our release notes. Keep the bulleted lists, delete items that
+  don't apply, add ones that do, and remove every TODO line. Ask me about anything you
+  can't tell from the repository.
+
+Delete this comment whenever you like.
+-->
+
+# Release policy
+
+Release Planner's agent reads this file before every release. Until every `TODO:` line is gone, the agent stops and asks you instead of guessing a version.
+
+## Breaking changes
+
+A change is breaking when it changes any of these in a way that forces users to change their code, configuration, or workflow:
+
+- Command names, flags, and exit codes
+- Configuration files and their keys
+- Public APIs: functions, types, endpoints, and request and response fields
+- Output that other tools parse, such as JSON
+- File formats
+- Names other projects reference, such as IDs or package names
+- Supported platforms and runtime versions
+
+TODO: Keep the items that apply to this repository, delete the rest, add your own, then delete this line.
+
+## Choosing a version
+
+Versions follow [SemVer 2.0.0](https://semver.org/). The first release is {{.FirstVersion}}.
+{{- if .StartsBeforeOne}}
+
+Before 1.0.0, SemVer allows anything to change, so this repository shifts each rule down one place:
+
+- Minor: any breaking change or new feature
+- Patch: bug fixes, documentation, and internal changes
+{{- end}}
+
+From 1.0.0:
+
+- Major: any breaking change
+- Minor: new features that existing users can ignore
+- Patch: bug fixes, documentation, and internal changes
+
+TODO: Adjust these rules if they don't fit this repository, then delete this line.
+
+## Who reads the release notes
+
+Readers:
+
+- Developers who use this project
+
+TODO: Describe your readers, then delete this line.
+
+## Order of the release notes
+
+The notes present changes in this order, leaving out any with nothing to say:
+
+1. New features
+2. Improvements
+3. Bug fixes
+4. Breaking changes
+
+TODO: Reorder these to suit your readers, for example by putting breaking changes first, then delete this line.
+
+## Always and never
+
+- Always credit external contributors by GitHub handle.
+- Never mention dependency updates unless they fix a security issue.
+
+TODO: Replace these examples with your own rules, or delete this section, then delete this line.

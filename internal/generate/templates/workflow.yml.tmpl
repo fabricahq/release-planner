@@ -1,0 +1,144 @@
+{{- define "install"}}
+{{- if .IsRelease}}
+      - name: Install Release Planner {{.Version}}
+        env:
+          GH_TOKEN: ${{"{{"}} github.token {{"}}"}}
+        # Verify the build attestation of the checksum manifest, then the archive against it.
+        run: |
+          dir="$RUNNER_TEMP/release-planner"
+          mkdir -p "$dir" && cd "$dir"
+          archive="release-planner_${RELEASE_PLANNER_VERSION#v}_linux_amd64.tar.gz"
+          gh release download "$RELEASE_PLANNER_VERSION" --repo fabricahq/release-planner --pattern SHA256SUMS --pattern "$archive"
+          gh attestation verify SHA256SUMS --repo fabricahq/release-planner
+          sha256sum --check --ignore-missing SHA256SUMS
+          tar -xzf "$archive" release-planner
+          echo "$dir" >> "$GITHUB_PATH"
+{{- else}}
+      - uses: {{.Actions.SetupGo}}
+        with:
+          go-version: stable
+          cache: false
+      - name: Install Release Planner at commit {{.Version}}
+        run: |
+          go install "{{.Module}}@$RELEASE_PLANNER_VERSION"
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+{{- end}}
+{{- end -}}
+name: Release
+# Notes changes in a PR are validated; a notes change on {{.Branch}} approves publication,
+# so ordinary changes never create releases.
+on:
+  push:
+    branches: [{{yamlString .Branch}}]
+    paths: [{{yamlString (printf "%s/v*.md" .NotesDir)}}]
+  pull_request:
+    paths: [{{yamlString (printf "%s/**" .NotesDir)}}, '.release-planner/**', '.github/workflows/release-planner.yml']
+  # Retry a failed publication with both endpoints of the original approved push.
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: 'Approved head SHA from the original failed run summary'
+        required: true
+        type: string
+      base:
+        description: 'Base SHA from the original failed run summary'
+        required: true
+        type: string
+permissions:
+  contents: read
+env:
+  RELEASE_PLANNER_VERSION: {{.Version}}
+jobs:
+  # Check the generated files, then bind the notes change to one version and commit.
+  plan:
+    if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/{{.Branch}}'
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{"{{"}} steps.plan.outputs.tag {{"}}"}}
+      commit: ${{"{{"}} steps.plan.outputs.commit {{"}}"}}
+    steps:
+      - uses: {{.Actions.Checkout}}
+        with:
+          # Version ordering and retries need the full history and tags.
+          fetch-depth: 0
+          ref: ${{"{{"}} inputs.commit || github.event.pull_request.head.sha || github.sha {{"}}"}}
+          persist-credentials: false
+{{- template "install" .}}
+      - name: Check the generated release files
+        run: release-planner check
+      - name: Plan the release
+        id: plan
+        env:
+          EVENT: ${{"{{"}} github.event_name {{"}}"}}
+          BASE: ${{"{{"}} inputs.base || github.event.pull_request.base.sha || github.event.before {{"}}"}}
+          HEAD: ${{"{{"}} inputs.commit || github.event.pull_request.head.sha || github.sha {{"}}"}}
+        run: release-planner plan --ci --event "$EVENT" --base "$BASE" --head "$HEAD" --out "$RUNNER_TEMP/release-plan.json"
+      - uses: {{.Actions.UploadArtifact}}
+        with:
+          name: release-plan
+          path: ${{"{{"}} runner.temp {{"}}"}}/release-plan.json
+          if-no-files-found: error
+{{if .Validate.Workflow}}
+  # Run this repository's release-only checks on the exact commit being released.
+  # The called workflow gets the repository's secrets, but never the release-write token.
+  validate:
+    needs: plan
+    if: needs.plan.outputs.tag != ''
+    uses: ./.github/workflows/{{.Validate.Workflow}}
+    with:
+      ref: ${{"{{"}} needs.plan.outputs.commit {{"}}"}}
+    secrets: inherit
+{{else if .Validate.Run}}
+  # Run this repository's release-only checks on the exact commit being released.
+  validate:
+    needs: plan
+    if: needs.plan.outputs.tag != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: {{.Actions.Checkout}}
+        with:
+          ref: ${{"{{"}} needs.plan.outputs.commit {{"}}"}}
+          persist-credentials: false
+{{- if .Validate.Go}}
+      - uses: {{.Actions.SetupGo}}
+        with:
+          go-version: '{{.Validate.Go}}'
+{{- end}}
+{{- if .Validate.Node}}
+      - uses: {{.Actions.SetupNode}}
+        with:
+          node-version: '{{.Validate.Node}}'
+{{- end}}
+{{- if .Validate.Python}}
+      - uses: {{.Actions.SetupPython}}
+        with:
+          python-version: '{{.Validate.Python}}'
+{{- end}}
+      - name: Run the release checks
+        run: |
+{{.ValidateRun}}
+{{end}}
+  # The only job that can write. It runs the pinned Release Planner release and no repository code.
+  publish:
+    needs: {{if .Validate.Enabled}}[plan, validate]{{else}}[plan]{{end}}
+    if: needs.plan.outputs.tag != '' && github.event_name != 'pull_request' && github.ref == 'refs/heads/{{.Branch}}'
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+      pull-requests: read # to confirm the commit is a merged pull request
+    # Serialize publication so competing releases cannot race.
+    concurrency:
+      group: release-publication
+      cancel-in-progress: false
+    steps:
+{{- template "install" .}}
+      - uses: {{.Actions.DownloadArtifact}}
+        with:
+          name: release-plan
+          path: ${{"{{"}} runner.temp {{"}}"}}/plan
+      - name: Tag the approved commit and publish the approved notes
+        env:
+          GITHUB_TOKEN: ${{"{{"}} github.token {{"}}"}}
+          COMMIT: ${{"{{"}} needs.plan.outputs.commit {{"}}"}}
+        run: release-planner publish --plan "$RUNNER_TEMP/plan/release-plan.json" --commit "$COMMIT" --branch {{.Branch}}

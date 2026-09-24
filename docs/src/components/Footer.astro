@@ -1,0 +1,13 @@
+---
+/** @fileoverview Renders the Starlight footer followed by Fabrica branding and a short sentiment. */
+
+import DefaultFooter from '@astrojs/starlight/components/Footer.astro';
+---
+<DefaultFooter />
+<div class="flex justify-between items-center gap-4 border-t border-border pt-[1.4rem] mt-12 text-muted text-sm [&_a]:text-inherit [&_a]:no-underline [&_a:hover]:text-ink [&_a:hover]:underline [&_a:hover]:underline-offset-3 max-md:flex-col max-md:items-start max-md:gap-3">
+  <div class="flex flex-wrap items-center gap-x-4 gap-y-2 min-w-0 [&_span_span]:px-[.3rem]">
+    <span><a href="https://fabricahq.com">Fabrica</a> <span aria-hidden="true">/</span> Release Planner</span>
+    <span class="inline-flex items-center py-[.2rem] px-[.6rem] border border-border rounded-small bg-surface text-[.7rem] leading-[1.5] whitespace-nowrap">MIT licensed</span>
+  </div>
+  <p class="m-0 text-sm leading-[1.6] text-right max-md:text-left">Designed in California. Built with <a href="https://fabricahq.com">Fabrica</a>.</p>
+</div>
