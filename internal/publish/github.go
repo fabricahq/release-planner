@@ -312,10 +312,10 @@ func (g *GitHub) PullRequestAuthor(ctx context.Context, number int) (string, err
 		} `json:"user"`
 	}
 	if _, err := g.do(ctx, http.MethodGet, fmt.Sprintf("/pulls/%d", number), nil, &pr); err != nil {
-		return "", err
+		return "", fmt.Errorf("get pull request #%d in %s: %v", number, g.Repository, err)
 	}
 	if pr.User.Login == "" {
-		return "", fmt.Errorf("pull request #%d has no author", number)
+		return "", fmt.Errorf("pull request #%d in %s has no author", number, g.Repository)
 	}
 	return pr.User.Login, nil
 }
@@ -327,7 +327,7 @@ func (g *GitHub) ContributedBefore(ctx context.Context, handle, ref string) (boo
 	}
 	query := url.Values{"sha": {ref}, "author": {handle}, "per_page": {"1"}}
 	if _, err := g.do(ctx, http.MethodGet, "/commits?"+query.Encode(), nil, &commits); err != nil {
-		return false, err
+		return false, fmt.Errorf("list commits by @%s in %s at %s: %v", handle, g.Repository, ref, err)
 	}
 	return len(commits) > 0, nil
 }
