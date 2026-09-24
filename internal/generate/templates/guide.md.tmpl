@@ -44,7 +44,7 @@ Create a release branch, then run:
 release-planner draft <version>
 ```
 
-It creates `{{.NotesDir}}/<version>.md` with the standard headings, a linked list of the pull requests, and the comparison link. Write the notes in it:
+It creates `{{.NotesDir}}/<version>.md` with this repository's headings from `release-planner.yml`, a linked list of the pull requests, and a closing link. Write the notes in it:
 
 - Open with one or two sentences on what the release means for its readers.
 - Fill in only the headings that have content, and delete the rest:
@@ -53,7 +53,7 @@ It creates `{{.NotesDir}}/<version>.md` with the standard headings, a linked lis
 {{- end}}
 - Give significant changes a `###` heading and a sentence on why they matter. Use bullets for small changes, code blocks for commands, and before-and-after examples where they help.
 - Group related commits into one entry, and write for the readers the policy names.
-- Keep `## What's Changed` and the **Full Changelog** link that `draft` wrote, removing any entries the inventory leaves out. Add `## New Contributors` only for verified first contributions.
+- Keep `## What's Changed` and the closing line that `draft` wrote, removing any entries the inventory leaves out. The closing line is the **Full Changelog** comparison link, or for a first release, a link to the tagged source. Add `## New Contributors` only for verified first contributions.
 - Use absolute links, because the notes render on the release page.
 
 ## 6. Validate and open the pull request

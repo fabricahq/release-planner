@@ -50,10 +50,10 @@ type Section struct {
 
 // DefaultSections are Release Planner's standard categories, in order.
 var DefaultSections = []Section{
-	{Heading: "✨ New Features", Include: "What users can do that they couldn't before."},
-	{Heading: "⬆️ Improvements", Include: "Better behavior, performance, or usability of something that already existed."},
-	{Heading: "🐛 Squashed Bugs", Include: "The trigger, the previous wrong behavior, and the corrected result."},
-	{Heading: "⛓️‍💥 Breaking Changes", Include: "Who is affected, the old and new behavior, and exact migration steps.", SummarizeFirst: true},
+	{Heading: "✨ New Features", Include: "what users can do that they couldn't before."},
+	{Heading: "⬆️ Improvements", Include: "better behavior, performance, or usability of something that already existed."},
+	{Heading: "🐛 Squashed Bugs", Include: "the trigger, the previous wrong behavior, and the corrected result."},
+	{Heading: "⛓️‍💥 Breaking Changes", Include: "who is affected, the old and new behavior, and exact migration steps.", SummarizeFirst: true},
 }
 
 // Validate describes the repository's checks, run on the exact commit being released.

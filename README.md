@@ -96,15 +96,15 @@ By default, notes use four headings: ✨ New Features, ⬆️ Improvements, 🐛
 notes:
   sections:
     - heading: "🚀 Features"
-      include: What users can do that they couldn't before.
+      include: what users can do that they couldn't before.
     - heading: "🔒 Security"
-      include: Vulnerabilities fixed, with their CVE IDs.
+      include: vulnerabilities fixed, with their CVE IDs.
       summarize-first: true   # also mention these in the opening sentences
     - heading: "🐛 Fixes"
-      include: The trigger, the previous wrong behavior, and the corrected result.
+      include: the trigger, the previous wrong behavior, and the corrected result.
 ```
 
-`draft` writes these headings, and `guide` tells the agent what belongs under each. Every release ends with the same footer: **What's Changed**, the **Full Changelog** link, and **New Contributors** when there are any.
+`draft` writes these headings, and `guide` lists each one followed by its `include` text, so write `include` to read naturally after a colon. Every release ends with the same footer: **What's Changed**, the **Full Changelog** link (or, for a first release, a link to the tagged source), and **New Contributors** when there are any.
 
 ### Other settings
 
