@@ -20,8 +20,8 @@ Versions follow [SemVer 2.0.0](https://semver.org/). The first release is v0.1.0
 
 Before 1.0.0:
 
-- Minor: any breaking change, or a significant new feature
-- Patch: everything else
+- Minor: any breaking change or new feature
+- Patch: bug fixes, documentation, and internal changes
 
 From 1.0.0:
 

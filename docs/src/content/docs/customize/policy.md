@@ -10,7 +10,7 @@ Your release policy lives in `.release-planner/policy.md`. The agent reads it be
 The starter has five sections, each a short list for you to edit:
 
 - **Breaking changes.** A list of common things users depend on, such as commands, configuration keys, and APIs. Keep the ones that apply, delete the rest, and add your own.
-- **Choosing a version.** What makes a release major, minor, or patch. If your first release is before 1.0.0, it also covers 0.x releases: SemVer lets anything change before 1.0, so the starter uses the common convention of a minor bump for breaking changes and a patch bump for everything else.
+- **Choosing a version.** What makes a release major, minor, or patch. If your first release is before 1.0.0, it also covers 0.x releases: SemVer lets anything change before 1.0, so the starter shifts each rule down one place: a minor bump for breaking changes and new features, and a patch bump for everything else.
 - **Who reads the release notes.** Your readers, which default to developers. The agent writes for them.
 - **Order of the release notes.** The order changes appear in: new features, then improvements, then bug fixes, then breaking changes. Reorder it to taste; some projects put breaking changes first.
 - **Always and never.** Anything the notes must always include or leave out.
