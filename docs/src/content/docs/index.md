@@ -10,9 +10,10 @@ Release Planner makes it easy for your GitHub repository to publish releases peo
 With Release Planner set up, here's how a new release happens:
 
 1. **You ask for a release.** Tell your agent "let's release."
-2. **Your agent opens a pull request.** A few minutes later, you have a pull request titled **Release v1.1.0**. It contains the drafted release notes and explains why the agent chose that version.
-3. **You edit and merge.** Read the notes, change anything you like, and merge the pull request.
-4. **The release is live.** Your new version is tagged and published on your repository's **Releases** page, with exactly the notes you approved.
+2. **Your agent drafts the release.** Release Planner gathers every commit and pull request merged since your last release and hands that list to your agent. The agent reads through the changes, works out what they mean for your users, and drafts the notes.
+3. **Your agent opens a pull request.** A few minutes later, you have a pull request titled **Release v1.1.0**. It contains the drafted release notes and explains why the agent chose that version.
+4. **You edit and merge.** Read the notes, change anything you like, and merge the pull request.
+5. **The release is live.** Your new version is tagged and published on your repository's **Releases** page, with exactly the notes you approved.
 
 That's the whole process. There's no changelog to maintain, no commit message conventions to follow, and no release checklist to remember.
 
@@ -50,7 +51,7 @@ The notes open with what the release means for readers, group changes under clea
 
 Behind the scenes:
 
-- **Your agent follows a written procedure.** It reads every commit and pull request since your last release, applies your [release policy](/customize/policy/) to choose the version, and writes the notes in your [release notes style](/customize/release-notes-style/).
+- **Release Planner does the bookkeeping; your agent does the writing.** Release Planner finds your last release, lists everything merged since, and suggests the possible next versions. Your agent follows a written procedure: it reads those changes, applies your [release policy](/customize/policy/) to choose the version, and writes the notes in your [release notes style](/customize/release-notes-style/).
 - **The release notes are a file in your repository.** The release pull request adds one file, `releases/v<version>.md`. Editing that file is how you edit the release.
 - **Merging is the approval.** A GitHub Actions workflow checks the request, runs any [release checks](/customize/release-checks/) you set up, then tags the commit you merged and publishes the notes word for word. The tag is created only then, so a version never exists without the notes you approved.
 
