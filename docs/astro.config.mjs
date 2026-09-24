@@ -26,6 +26,7 @@ export default defineConfig({
     sidebar: [
       { label: 'Start here', items: [
         { label: 'What is Release Planner?', slug: 'index' },
+        { label: 'How it works', slug: 'start-here/how-it-works' },
         { label: 'Set up a repository', slug: 'start-here/set-up' },
         { label: 'Make a release', slug: 'start-here/release' },
       ] },
