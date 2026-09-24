@@ -91,10 +91,10 @@ If `policy.md` is missing or still contains `TODO:` prompts, stop and ask the ma
 `draft <version>` creates `releases/<version>.md` containing:
 
 1. A placeholder opening line starting `TODO: Open with one or two sentences`.
-2. `## Pull Requests`, listing each pull request merged into the release branch, and each direct commit. As a starting point, entries are grouped by the conventional-commit type in their titles: ✨ Features (`feat`), 🐛 Bug Fixes (`fix`), 📖 Documentation (`docs`), 🤖 CI (`ci`), and 🧹 Chores (`chore`, `refactor`, `test`, `build`, `perf`, `style`, `revert`, `deps`). Titles without a type go under Other Changes. The release notes style decides the final grouping and format.
+2. `## Pull Requests`, a plain list of each pull request merged into the release branch and each direct commit, in merge order, as `- <title> in #<number>`. `draft` doesn't group or format the list; the release notes style decides that.
 3. A closing line: `**Full Changelog**: <compare link>`, or for a first release, a link to the tagged source.
 
-The agent replaces the placeholder, adds headings and entries following the release notes style, arranges the Pull Requests entries as the style says, and removes entries the inventory leaves out. Every pull request stays listed. The default style sorts Other Changes into the groups and writes each entry as `- <title> by @<handle> in #<number>`, with the handle taken from the pull request, never guessed. `draft` refuses a version that isn't newer than every tag, a first release that doesn't match `first-version`, an existing file, or an unpublished earlier request. It reads the GitHub repository from the `origin` remote unless given `--repository`.
+The agent replaces the placeholder, adds headings and entries following the release notes style, arranges the Pull Requests entries as the style says, and removes entries the inventory leaves out. Every pull request stays listed. The default style groups the entries by conventional-commit type and writes each as `- <title> by @<handle> in #<number>`, with the handle taken from the pull request, never guessed. `draft` refuses a version that isn't newer than every tag, a first release that doesn't match `first-version`, an existing file, or an unpublished earlier request. It reads the GitHub repository from the `origin` remote unless given `--repository`.
 
 ## What `plan` checks
 

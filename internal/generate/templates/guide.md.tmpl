@@ -44,7 +44,7 @@ Create a release branch, then run:
 release-planner draft <version>
 ```
 
-It creates `{{.NotesDir}}/<version>.md` with a TODO opening line, a `## Pull Requests` section listing every pull request merged into `{{.Branch}}` and every direct commit, and a closing link: the **Full Changelog** comparison, or for a first release, a link to the tagged source. As a starting point, `draft` groups the Pull Requests entries by the conventional-commit type in their titles, and puts titles without a type under Other Changes. Arrange and format them as the release notes style below and the policy say. Write the notes in it, following the style. Whatever the style says:
+It creates `{{.NotesDir}}/<version>.md` with a TODO opening line, a `## Pull Requests` section listing every pull request merged into `{{.Branch}}` and every direct commit, and a closing link: the **Full Changelog** comparison, or for a first release, a link to the tagged source. The list is plain, one line per entry in merge order, so that you can organize and format it as the release notes style below and the policy say. Write the notes in it, following the style. Whatever the style says:
 
 - Replace the TODO line, and don't leave empty headings. `plan` rejects both.
 - Keep `## Pull Requests`, listing every pull request and direct commit the inventory includes, and keep the closing line.
