@@ -10,7 +10,7 @@ Release Planner reads `.release-planner/config.yml`. After changing it, run `rel
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `schema-version` | required | The format of the file. Currently `1`. |
-| `version` | required | The Release Planner version to use: a release tag such as `v0.1.0`, or a full commit SHA. |
+| `version` | required | The Release Planner version to use: a release tag such as `v0.1.0`. A full commit SHA also works; your workflow then builds Release Planner from source with Go instead of downloading a release. |
 | `first-version` | `v0.1.0` | The version your first release must use. |
 | `validate` | none | Optional [release checks](/customize/release-checks/). |
 | `release-notes-style` | `append` | How `.release-planner/release-notes-style.md` applies, if it exists. See [Release notes style](/customize/release-notes-style/). |
@@ -30,10 +30,11 @@ validate:
 
 ## Upgrade Release Planner
 
-Change `version`, then run `install` at the new version:
+Install the new version, change `version` in `config.yml` to match, then regenerate your files:
 
 ```sh
-go run github.com/fabricahq/release-planner/cmd/release-planner@v0.2.0 install
+curl -fsSL https://raw.githubusercontent.com/fabricahq/release-planner/main/install.sh | sh -s -- --version v0.2.0
+release-planner install
 ```
 
 One version pin covers everything: the workflow, the agent's instructions, and the release checks change together.

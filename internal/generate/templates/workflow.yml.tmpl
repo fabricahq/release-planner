@@ -1,3 +1,29 @@
+{{- define "install"}}
+{{- if .IsRelease}}
+      - name: Install Release Planner {{.Version}}
+        env:
+          GH_TOKEN: ${{"{{"}} github.token {{"}}"}}
+        # Verify the build attestation of the checksum manifest, then the archive against it.
+        run: |
+          dir="$RUNNER_TEMP/release-planner"
+          mkdir -p "$dir" && cd "$dir"
+          archive="release-planner_${RELEASE_PLANNER_VERSION#v}_linux_amd64.tar.gz"
+          gh release download "$RELEASE_PLANNER_VERSION" --repo fabricahq/release-planner --pattern SHA256SUMS --pattern "$archive"
+          gh attestation verify SHA256SUMS --repo fabricahq/release-planner
+          sha256sum --check --ignore-missing SHA256SUMS
+          tar -xzf "$archive" release-planner
+          echo "$dir" >> "$GITHUB_PATH"
+{{- else}}
+      - uses: {{.Actions.SetupGo}}
+        with:
+          go-version: stable
+          cache: false
+      - name: Install Release Planner at commit {{.Version}}
+        run: |
+          go install "{{.Module}}@$RELEASE_PLANNER_VERSION"
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+{{- end}}
+{{- end -}}
 name: Release
 # Notes changes in a PR are validated; a notes change on {{.Branch}} approves publication,
 # so ordinary changes never create releases.
@@ -21,7 +47,7 @@ on:
 permissions:
   contents: read
 env:
-  RELEASE_PLANNER: {{.Module}}@{{.Version}}
+  RELEASE_PLANNER_VERSION: {{.Version}}
 jobs:
   # Check the generated files, then bind the notes change to one version and commit.
   plan:
@@ -37,19 +63,16 @@ jobs:
           fetch-depth: 0
           ref: ${{"{{"}} inputs.commit || github.event.pull_request.head.sha || github.sha {{"}}"}}
           persist-credentials: false
-      - uses: {{.Actions.SetupGo}}
-        with:
-          go-version: stable
-          cache: false
+{{- template "install" .}}
       - name: Check the generated release files
-        run: go run "$RELEASE_PLANNER" check
+        run: release-planner check
       - name: Plan the release
         id: plan
         env:
           EVENT: ${{"{{"}} github.event_name {{"}}"}}
           BASE: ${{"{{"}} inputs.base || github.event.pull_request.base.sha || github.event.before {{"}}"}}
           HEAD: ${{"{{"}} inputs.commit || github.event.pull_request.head.sha || github.sha {{"}}"}}
-        run: go run "$RELEASE_PLANNER" plan --ci --event "$EVENT" --base "$BASE" --head "$HEAD" --out "$RUNNER_TEMP/release-plan.json"
+        run: release-planner plan --ci --event "$EVENT" --base "$BASE" --head "$HEAD" --out "$RUNNER_TEMP/release-plan.json"
       - uses: {{.Actions.UploadArtifact}}
         with:
           name: release-plan
@@ -95,7 +118,7 @@ jobs:
         run: |
 {{.ValidateRun}}
 {{end}}
-  # The only job that can write. It runs Release Planner at the pinned version and no repository code.
+  # The only job that can write. It runs the pinned Release Planner release and no repository code.
   publish:
     needs: {{if .Validate.Enabled}}[plan, validate]{{else}}[plan]{{end}}
     if: needs.plan.outputs.tag != '' && github.event_name != 'pull_request' && github.ref == 'refs/heads/{{.Branch}}'
@@ -108,10 +131,7 @@ jobs:
       group: release-publication
       cancel-in-progress: false
     steps:
-      - uses: {{.Actions.SetupGo}}
-        with:
-          go-version: stable
-          cache: false
+{{- template "install" .}}
       - uses: {{.Actions.DownloadArtifact}}
         with:
           name: release-plan
@@ -120,4 +140,4 @@ jobs:
         env:
           GITHUB_TOKEN: ${{"{{"}} github.token {{"}}"}}
           COMMIT: ${{"{{"}} needs.plan.outputs.commit {{"}}"}}
-        run: go run "$RELEASE_PLANNER" publish --plan "$RUNNER_TEMP/plan/release-plan.json" --commit "$COMMIT"
+        run: release-planner publish --plan "$RUNNER_TEMP/plan/release-plan.json" --commit "$COMMIT"

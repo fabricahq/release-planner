@@ -22,7 +22,7 @@ Unless you change it, the agent:
 To see the exact text the agent follows, run:
 
 ```sh
-go run github.com/fabricahq/release-planner/cmd/release-planner@v0.1.0 guide --default-style
+release-planner guide --default-style
 ```
 
 ## Change the style
@@ -61,7 +61,7 @@ Use [Keep a Changelog](https://keepachangelog.com) headings instead of the defau
 To start a replacement from the default text:
 
 ```sh
-go run github.com/fabricahq/release-planner/cmd/release-planner@v0.1.0 guide --default-style > .release-planner/release-notes-style.md
+release-planner guide --default-style > .release-planner/release-notes-style.md
 ```
 
 ## What every release keeps

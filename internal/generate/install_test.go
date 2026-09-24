@@ -134,7 +134,9 @@ func TestWorkflowContent(t *testing.T) {
 	wf := read(t, root, WorkflowPath)
 	for _, want := range []string{
 		"# release-planner:generated v0.2.0 sha256:",
-		"RELEASE_PLANNER: github.com/fabricahq/release-planner/cmd/release-planner@v0.2.0",
+		"RELEASE_PLANNER_VERSION: v0.2.0\n",
+		"gh attestation verify SHA256SUMS --repo fabricahq/release-planner\n",
+		"run: release-planner check\n",
 		"paths: ['releases/v*.md']",
 		"go-version: '1.27.x'",
 		"          go install example.com/tool@v1\n          tool check\n",
@@ -149,7 +151,7 @@ func TestWorkflowContent(t *testing.T) {
 		t.Error("workflow sets up tools the config did not ask for")
 	}
 	skill := read(t, root, AgentsSkillPath)
-	if !strings.HasPrefix(skill, "---\nname: release\n") || !strings.Contains(skill, "cmd/release-planner@v0.2.0 guide") {
+	if !strings.HasPrefix(skill, "---\nname: release\n") || !strings.Contains(skill, "release-planner/v0.2.0/install.sh | sh -s -- --version v0.2.0") {
 		t.Errorf("skill:\n%s", skill)
 	}
 	if skill != read(t, root, ClaudeSkillPath) {
@@ -346,5 +348,20 @@ func TestValidateForms(t *testing.T) {
 	}
 	if err := Check(root, withCI); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCommitPinBuildsFromSource(t *testing.T) {
+	root := t.TempDir()
+	sha := "0123456789abcdef0123456789abcdef01234567"
+	if _, err := Install(root, cfg(t, sha), false); err != nil {
+		t.Fatal(err)
+	}
+	wf := read(t, root, WorkflowPath)
+	if !strings.Contains(wf, `go install "github.com/fabricahq/release-planner/cmd/release-planner@$RELEASE_PLANNER_VERSION"`) || strings.Contains(wf, "gh release download") {
+		t.Errorf("commit pin workflow:\n%s", wf)
+	}
+	if !strings.Contains(read(t, root, AgentsPath), "go install github.com/fabricahq/release-planner/cmd/release-planner@"+sha) {
+		t.Error("AGENTS.md lacks the source install command")
 	}
 }

@@ -2,10 +2,15 @@ package publish
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -22,16 +27,20 @@ type ref struct{ typ, sha string }
 
 // fakeGitHub stores tags and releases in memory and serves the endpoints the publisher uses.
 type fakeGitHub struct {
-	mu        sync.Mutex
-	tags      map[string]ref
-	annotated map[string]string
-	releases  []Release
-	writes    []string
-	pageSize  int
+	mu          sync.Mutex
+	tags        map[string]ref
+	annotated   map[string]string
+	releases    []Release
+	targets     map[int64]string
+	writes      []string
+	pageSize    int
+	host        string
+	hideDigests bool
+	content     map[int64][]byte
 }
 
 func newFake() *fakeGitHub {
-	return &fakeGitHub{tags: map[string]ref{}, annotated: map[string]string{}, pageSize: 100}
+	return &fakeGitHub{tags: map[string]ref{}, annotated: map[string]string{}, targets: map[int64]string{}, content: map[int64][]byte{}, pageSize: 100}
 }
 
 func (f *fakeGitHub) release(tag string, draft bool, body string) {
@@ -46,8 +55,30 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	path := strings.TrimPrefix(r.URL.Path, "/repos/fabricahq/example")
+	f.host = r.Host
 	send := func(v any) { _ = json.NewEncoder(w).Encode(v) }
 	switch {
+	case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/uploads/"):
+		var id int64
+		fmt.Sscanf(strings.TrimPrefix(r.URL.Path, "/uploads/"), "%d", &id)
+		data, _ := io.ReadAll(r.Body)
+		name := r.URL.Query().Get("name")
+		f.writes = append(f.writes, "upload "+name)
+		sum := sha256.Sum256(data)
+		assetID := int64(1000 + len(f.content))
+		f.content[assetID] = data
+		asset := Asset{ID: assetID, Name: name, Size: int64(len(data)), Digest: "sha256:" + hex.EncodeToString(sum[:]),
+			URL: fmt.Sprintf("http://%s/assets/%d", r.Host, assetID)}
+		f.releases[id-1].Assets = append(f.releases[id-1].Assets, asset)
+		send(asset)
+	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/assets/"):
+		var id int64
+		fmt.Sscanf(strings.TrimPrefix(r.URL.Path, "/assets/"), "%d", &id)
+		_, _ = w.Write(f.content[id])
+	case r.Method == http.MethodGet && strings.HasPrefix(path, "/releases/"):
+		var id int64
+		fmt.Sscanf(strings.TrimPrefix(path, "/releases/"), "%d", &id)
+		send(f.view(f.releases[id-1]))
 	case r.Method == http.MethodGet && path == "/git/matching-refs/tags/v":
 		var refs []map[string]string
 		for t := range f.tags {
@@ -79,41 +110,65 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			send([]Release{})
 			return
 		}
-		send([]Release{f.releases[page-1]})
+		send([]Release{f.view(f.releases[page-1])})
 	case r.Method == http.MethodPost && path == "/releases":
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		tag := body["tag_name"].(string)
-		f.writes = append(f.writes, "create "+tag)
-		if _, ok := f.tags[tag]; !ok {
-			f.tags[tag] = ref{"commit", body["target_commitish"].(string)}
+		draft := body["draft"].(bool)
+		f.writes = append(f.writes, map[bool]string{true: "draft ", false: "create "}[draft]+tag)
+		id := int64(len(f.releases) + 1)
+		f.targets[id] = body["target_commitish"].(string)
+		// Like GitHub, a draft creates no tag until it is published.
+		if _, ok := f.tags[tag]; !ok && !draft {
+			f.tags[tag] = ref{"commit", f.targets[id]}
 		}
-		rel := Release{ID: int64(len(f.releases) + 1), TagName: tag, Name: body["name"].(string), Body: body["body"].(string),
-			Prerelease: body["prerelease"].(bool), HTMLURL: "https://github.com/fabricahq/example/releases/tag/" + tag}
+		rel := Release{ID: id, TagName: tag, Name: body["name"].(string), Body: body["body"].(string), Draft: draft,
+			Prerelease: body["prerelease"].(bool), HTMLURL: "https://github.com/fabricahq/example/releases/tag/" + tag,
+			UploadURL: fmt.Sprintf("http://%s/uploads/%d/assets{?name,label}", r.Host, id)}
 		f.releases = append(f.releases, rel)
-		send(rel)
+		send(f.view(rel))
 	case r.Method == http.MethodPatch && strings.HasPrefix(path, "/releases/"):
 		var id int64
 		fmt.Sscanf(strings.TrimPrefix(path, "/releases/"), "%d", &id)
 		f.writes = append(f.writes, "publish draft")
 		rel := &f.releases[id-1]
 		rel.Draft = false
+		target := f.targets[id]
+		if target == "" {
+			target = approved
+		}
 		if _, ok := f.tags[rel.TagName]; !ok {
-			f.tags[rel.TagName] = ref{"commit", approved}
+			f.tags[rel.TagName] = ref{"commit", target}
 		}
 		rel.HTMLURL = "https://github.com/fabricahq/example/releases/tag/" + rel.TagName
-		send(rel)
+		send(f.view(*rel))
 	default:
 		http.Error(w, "unexpected "+r.Method+" "+path, http.StatusTeapot)
 	}
 }
 
+// view returns a release as the API would, optionally without GitHub's asset digests.
+func (f *fakeGitHub) view(r Release) Release {
+	if f.hideDigests {
+		r.Assets = append([]Asset(nil), r.Assets...)
+		for i := range r.Assets {
+			r.Assets[i].Digest = ""
+		}
+	}
+	return r
+}
+
 func run(t *testing.T, f *fakeGitHub, p plan.Plan) (Result, error) {
+	return runWith(t, f, p, nil)
+}
+
+func runWith(t *testing.T, f *fakeGitHub, p plan.Plan, assets []File) (Result, error) {
 	t.Helper()
 	server := httptest.NewServer(f)
 	t.Cleanup(server.Close)
 	gh := &GitHub{BaseURL: server.URL, Token: "token", Repository: "fabricahq/example", HTTP: server.Client()}
-	return Publish(context.Background(), gh, p, approved)
+	return Publish(context.Background(), gh, p, approved, assets)
 }
 
 func minor() plan.Plan {
@@ -227,5 +282,101 @@ func TestRefusals(t *testing.T) {
 				t.Fatalf("a refused publication wrote: %v", f.writes)
 			}
 		})
+	}
+}
+
+func files(t *testing.T, contents map[string]string) []File {
+	t.Helper()
+	dir := t.TempDir()
+	for name, body := range contents {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	assets, err := ReadAssets(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return assets
+}
+
+func TestPublishesAssetsThroughADraft(t *testing.T) {
+	f := withPrevious()
+	assets := files(t, map[string]string{"tool_linux_amd64.tar.gz": "binary", "SHA256SUMS": "sums"})
+	res, err := runWith(t, f, minor(), assets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"draft v1.1.0", "upload SHA256SUMS", "upload tool_linux_amd64.tar.gz", "publish draft"}
+	if strings.Join(f.writes, ",") != strings.Join(want, ",") {
+		t.Fatalf("writes %v, want %v", f.writes, want)
+	}
+	if f.tags["v1.1.0"].sha != approved || f.releases[1].Draft || len(f.releases[1].Assets) != 2 || res.AlreadyPublished {
+		t.Fatalf("%+v %+v", f.releases[1], res)
+	}
+
+	// A retry after success changes nothing.
+	f.writes = nil
+	res, err = runWith(t, f, minor(), assets)
+	if err != nil || !res.AlreadyPublished || len(f.writes) != 0 {
+		t.Fatalf("retry: %+v %v %v", res, err, f.writes)
+	}
+	// A published release with different assets is never accepted.
+	other := files(t, map[string]string{"tool_linux_amd64.tar.gz": "binarz", "SHA256SUMS": "sums"})
+	if _, err := runWith(t, f, minor(), other); err == nil || !strings.Contains(err.Error(), "checksum") {
+		t.Fatal(err)
+	}
+}
+
+func TestResumesAnInterruptedDraft(t *testing.T) {
+	f := withPrevious()
+	assets := files(t, map[string]string{"a.tar.gz": "a", "b.tar.gz": "b"})
+	// A previous run created the draft and uploaded one asset before failing.
+	if _, err := runWith(t, f, minor(), assets[:1]); err != nil {
+		t.Fatal(err)
+	}
+	f.releases[1].Draft = true
+	delete(f.tags, "v1.1.0")
+	f.writes = nil
+	if _, err := runWith(t, f, minor(), assets); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(f.writes, ",") != "upload b.tar.gz,publish draft" {
+		t.Fatalf("writes %v", f.writes)
+	}
+}
+
+func TestRefusesAConflictingDraftAsset(t *testing.T) {
+	f := withPrevious()
+	if _, err := runWith(t, f, minor(), files(t, map[string]string{"a.tar.gz": "old"})); err != nil {
+		t.Fatal(err)
+	}
+	f.releases[1].Draft = true
+	delete(f.tags, "v1.1.0")
+	f.writes = nil
+	_, err := runWith(t, f, minor(), files(t, map[string]string{"a.tar.gz": "new"}))
+	if err == nil || !strings.Contains(err.Error(), "already has a different a.tar.gz") || len(f.writes) != 0 {
+		t.Fatalf("%v %v", err, f.writes)
+	}
+}
+
+func TestVerifiesAssetsWithoutGitHubDigests(t *testing.T) {
+	f := withPrevious()
+	f.hideDigests = true
+	if _, err := runWith(t, f, minor(), files(t, map[string]string{"a.tar.gz": "a"})); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReadAssetsRejectsUnsafeNames(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "has space.tar.gz"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadAssets(dir); err == nil {
+		t.Fatal("accepted an unsafe name")
+	}
+	if _, err := ReadAssets(t.TempDir()); err == nil || !strings.Contains(err.Error(), "no files") {
+		t.Fatal(err)
 	}
 }

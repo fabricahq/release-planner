@@ -10,16 +10,22 @@ This page is the reference for agents working in a repository that uses Release 
 When asked to make a release, draft or revise release notes, or retry a failed release, print the release procedure for the repository's pinned version and follow it:
 
 ```sh
-go run github.com/fabricahq/release-planner/cmd/release-planner@<version> guide
+release-planner guide
 ```
 
-`<version>` is `version` in `.release-planner/config.yml`. The `AGENTS.md` section and the `release` skill that `install` generates say exactly this. The guide includes the repository's release notes style and settings, so it is the complete set of instructions. The rest of this page explains what the commands do.
+First check that `release-planner version` prints the `version` in `.release-planner/config.yml`. If it doesn't, install that version:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/fabricahq/release-planner/<version>/install.sh | sh -s -- --version <version>
+```
+
+For a commit SHA pin, use `go install github.com/fabricahq/release-planner/cmd/release-planner@<sha>` instead. The `AGENTS.md` section and the `release` skill that `install` generates say exactly this. The guide includes the repository's release notes style and settings, so it is the complete set of instructions. The rest of this page explains what the commands do.
 
 Never tag, publish, or merge a release pull request. The maintainer approves a release by merging.
 
 ## Commands
 
-Run every command from the repository root with `go run github.com/fabricahq/release-planner/cmd/release-planner@<version>`. Each accepts `--dir` to run against another directory.
+Run every command from the repository root, with the pinned version installed. Each accepts `--dir` to run against another directory.
 
 | Command | Used by | What it does |
 | --- | --- | --- |
@@ -31,7 +37,7 @@ Run every command from the repository root with `go run github.com/fabricahq/rel
 | `inventory [--head <ref>]` | Agent | Prints JSON describing everything since the previous release. |
 | `draft [--repository <owner/name>] <version>` | Agent | Creates the notes file for a version. |
 | `plan --base <ref> [--head <ref>] [--out <file>]` | CI, agent | Validates the release request between two commits and prints the plan as JSON. |
-| `publish --plan <file> --commit <sha>` | CI | Tags the approved commit and publishes the release. Needs `GITHUB_TOKEN` and `GITHUB_REPOSITORY`. |
+| `publish --plan <file> --commit <sha> [--assets <dir>]` | CI | Tags the approved commit and publishes the release. With `--assets`, uploads the directory's files to a draft, verifies GitHub's checksums for them, and publishes last. Needs `GITHUB_TOKEN` and `GITHUB_REPOSITORY`. |
 | `version` | Anyone | Prints the running version. |
 
 `install` and `check` refuse to run when the running version differs from the version the config pins, because they would render the wrong files.
@@ -110,7 +116,7 @@ A range with no notes change produces a plan with an empty `tag`, meaning no rel
 
 The generated workflow runs when a pull request changes `releases/`, `.release-planner/`, or the workflow itself, and when a notes file lands on the release branch.
 
-1. **plan** (read-only): checks out the head with full history, runs `check`, then `plan`. On a pull request, this is the whole run: it validates the request without publishing.
+1. **plan** (read-only): installs the pinned Release Planner, checks out the head with full history, runs `check`, then `plan`. For a release tag pin, installing downloads the release, verifies the build attestation of its `SHA256SUMS`, and checks the archive against it; a commit SHA pin is built from source with Go. On a pull request, this is the whole run: it validates the request without publishing.
 2. **validate** (optional): runs the repository's [release checks](/customize/release-checks/) on the planned commit.
 3. **publish**: the only job with permission to write. It runs Release Planner at the pinned version and none of the repository's code. Before writing, it confirms that the version tags haven't changed since planning, that the previous release is published, and that any existing tag or release matches the plan. It then creates the tag and release, and afterward verifies that the tag points to the approved commit. If a matching release is already published, it changes nothing.
 

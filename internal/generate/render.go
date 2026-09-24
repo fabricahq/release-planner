@@ -10,6 +10,7 @@ import (
 	"text/template"
 
 	"github.com/fabricahq/release-planner/internal/config"
+	"github.com/fabricahq/release-planner/internal/semver"
 )
 
 // Module is the command every generated file runs, at the version the config pins.
@@ -40,6 +41,11 @@ type data struct {
 	ValidateRun string
 	PolicyPath  string
 	StyleText   string
+	// IsRelease is true when the config pins a release tag, which ships binaries;
+	// a commit pin is built from source with Go.
+	IsRelease bool
+	// Install is the command that installs the pinned version on a developer's machine.
+	Install string
 }
 
 func render(name string, c config.Config, marker string) string {
@@ -55,12 +61,26 @@ func render(name string, c config.Config, marker string) string {
 		}
 	}
 	d := data{Config: c, Module: Module, Actions: Actions, Marker: marker, ValidateRun: run.String(),
-		PolicyPath: config.Policy, StyleText: style(c)}
+		PolicyPath: config.Policy, StyleText: style(c), IsRelease: IsRelease(c.Version), Install: InstallCommand(c.Version)}
 	if err := parsed.ExecuteTemplate(&b, name, d); err != nil {
 		// Templates are embedded and the config is validated, so this is a programming error.
 		panic(err)
 	}
 	return b.String()
+}
+
+// IsRelease reports whether a pinned version is a release tag, which has published binaries.
+func IsRelease(version string) bool {
+	_, ok := semver.Parse(version)
+	return ok
+}
+
+// InstallCommand installs a pinned version: the release binary, or a build from source for a commit.
+func InstallCommand(version string) string {
+	if IsRelease(version) {
+		return "curl -fsSL https://raw.githubusercontent.com/fabricahq/release-planner/" + version + "/install.sh | sh -s -- --version " + version
+	}
+	return "go install " + Module + "@" + version
 }
 
 // DefaultStyle is Release Planner's release notes style, which a repository can append to or replace.

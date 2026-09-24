@@ -19,3 +19,11 @@ func TestMatches(t *testing.T) {
 		}
 	}
 }
+
+func TestStamped(t *testing.T) {
+	stamped = "v0.1.0"
+	t.Cleanup(func() { stamped = "" })
+	if Version() != "v0.1.0" || Local() {
+		t.Fatalf("stamped build: %s local=%v", Version(), Local())
+	}
+}

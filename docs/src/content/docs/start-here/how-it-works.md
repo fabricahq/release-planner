@@ -32,7 +32,7 @@ When your agent prepares a release, its pull request adds the next file, such as
 
 ## The `release-planner` command
 
-Release Planner itself is a small command-line program. Nothing needs installing: it runs with [Go](https://go.dev/dl/), at the exact version your `config.yml` pins, so everyone who uses it, including your CI, runs the same version.
+Release Planner itself is a small command-line program for macOS and Linux. Your `config.yml` pins its version, and everyone uses exactly that version: your agent checks it before preparing a release, and your release workflow downloads that release and verifies its signature before running it.
 
 The command does three jobs:
 

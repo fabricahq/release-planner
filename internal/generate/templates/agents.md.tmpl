@@ -3,7 +3,13 @@
 This repository publishes releases with [Release Planner](https://github.com/fabricahq/release-planner) {{.Version}}. When asked to make a release, draft or revise release notes, or retry a failed release, print the release procedure and follow it:
 
 ```sh
-go run {{.Module}}@{{.Version}} guide
+release-planner guide
+```
+
+First check that `release-planner version` prints `{{.Version}}`. If it doesn't, or `release-planner` isn't installed, install that version:
+
+```sh
+{{.Install}}
 ```
 
 Read `{{.PolicyPath}}` first for this repository's release policy. You prepare the release pull request; the maintainer approves the release by merging it. Never tag, publish, or merge.

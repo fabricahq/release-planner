@@ -24,7 +24,7 @@ func TestGuide(t *testing.T) {
 	guide := guideFor(t, "", "")
 	for _, want := range []string{
 		"# Prepare a release (Release Planner v0.2.0)",
-		"go run github.com/fabricahq/release-planner/cmd/release-planner@v0.2.0\n",
+		"curl -fsSL https://raw.githubusercontent.com/fabricahq/release-planner/v0.2.0/install.sh | sh -s -- --version v0.2.0\n",
 		"Read `.release-planner/policy.md`.",
 		"release-planner inventory --head origin/trunk",
 		"With no previous release, use `v1.0.0`.",

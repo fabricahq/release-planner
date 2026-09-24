@@ -3,31 +3,38 @@ title: Set up a repository
 description: Add Release Planner to a GitHub repository.
 ---
 
-You need:
-
-- **A repository on GitHub, with GitHub Actions enabled.** Release Planner works with GitHub only for now.
-- **[Go](https://go.dev/dl/) installed.** Nothing else needs installing: every command runs with `go run` at a pinned version.
+You need a repository on GitHub, with GitHub Actions enabled. Release Planner works with GitHub only for now.
 
 Run these commands from the repository root.
 
-## 1. Create the configuration
+## 1. Install Release Planner
+
+Release Planner is a single command, `release-planner`, for macOS and Linux:
 
 ```sh
-go run github.com/fabricahq/release-planner/cmd/release-planner@v0.1.0 init --first-version v1.0.0
+curl -fsSL https://raw.githubusercontent.com/fabricahq/release-planner/main/install.sh | sh
 ```
 
-This creates `.release-planner/config.yml` and a starter release policy, `.release-planner/policy.md`. Set `--first-version` to the version your first release should have.
+This installs the latest release into `~/.local/bin` after verifying its checksum. To install a specific version, add `-s -- --version v0.1.0` after `sh`. If you have [Go](https://go.dev/dl/), `go install github.com/fabricahq/release-planner/cmd/release-planner@v0.1.0` works too.
 
-## 2. Write your release policy
+## 2. Create the configuration
+
+```sh
+release-planner init --first-version v1.0.0
+```
+
+This creates `.release-planner/config.yml` and a starter release policy, `.release-planner/policy.md`. The config pins the Release Planner version you just installed. Set `--first-version` to the version your first release should have.
+
+## 3. Write your release policy
 
 Open `.release-planner/policy.md` and replace each `TODO:` prompt. The policy tells the agent what your users depend on and how you choose versions. Until you fill it in, the agent stops and asks instead of guessing.
 
 See [Release policy](/customize/policy/) for examples.
 
-## 3. Generate the release files
+## 4. Generate the release files
 
 ```sh
-go run github.com/fabricahq/release-planner/cmd/release-planner@v0.1.0 install
+release-planner install
 ```
 
 This writes:
@@ -36,7 +43,7 @@ This writes:
 - A **Releases** section in `AGENTS.md`, which tells any agent how to release.
 - A `release` skill in `.agents/skills/` and `.claude/skills/`, so agents recognize "let's release" automatically.
 
-## 4. Protect your releases
+## 5. Protect your releases
 
 In your repository settings on GitHub:
 
@@ -45,6 +52,6 @@ In your repository settings on GitHub:
 - **Create an environment named `release`** that allows only the main branch, with no required reviewers. Merging the release pull request is the approval.
 - **Turn on immutable releases**, so published releases and their tags can't be changed.
 
-## 5. Commit and release
+## 6. Commit and release
 
 Commit the new files. Then tell your agent "let's release." See [Make a release](/start-here/release/).

@@ -100,7 +100,7 @@ func loadPinned(dir string) (config.Config, error) {
 	}
 	// A build from a checkout is development work on Release Planner itself.
 	if running := buildinfo.Version(); !buildinfo.Local() && !buildinfo.Matches(c.Version, running) {
-		return c, fmt.Errorf("%s pins %s, but this is %s; run: go run %s@%s", config.File, c.Version, running, generate.Module, c.Version)
+		return c, fmt.Errorf("%s pins %s, but this is %s; install the pinned version:\n  %s", config.File, c.Version, running, generate.InstallCommand(c.Version))
 	}
 	return c, nil
 }
@@ -367,10 +367,11 @@ func appendEnvFile(name, content string) error {
 }
 
 func cmdPublish(ctx context.Context, args []string, out io.Writer) error {
-	fs, _ := flags("publish", "publish --plan <file> --commit <sha> [--repository owner/name]")
+	fs, _ := flags("publish", "publish --plan <file> --commit <sha> [--assets <dir>] [--repository owner/name]")
 	planFile := fs.String("plan", "", "plan written by release-planner plan")
 	commit := fs.String("commit", "", "approved commit from the plan job")
 	repository := fs.String("repository", os.Getenv("GITHUB_REPOSITORY"), "GitHub repository, as owner/name")
+	assetsDir := fs.String("assets", "", "directory of files to attach to the release, staged on a draft and verified before publishing")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -390,11 +391,17 @@ func cmdPublish(ctx context.Context, args []string, out io.Writer) error {
 	if err := json.Unmarshal(data, &p); err != nil {
 		return fmt.Errorf("read %s: %w", *planFile, err)
 	}
+	var assets []publish.File
+	if *assetsDir != "" {
+		if assets, err = publish.ReadAssets(*assetsDir); err != nil {
+			return err
+		}
+	}
 	api := os.Getenv("GITHUB_API_URL")
 	if api == "" {
 		api = "https://api.github.com"
 	}
-	res, err := publish.Publish(ctx, &publish.GitHub{BaseURL: api, Token: token, Repository: *repository}, p, *commit)
+	res, err := publish.Publish(ctx, &publish.GitHub{BaseURL: api, Token: token, Repository: *repository}, p, *commit, assets)
 	if err != nil {
 		return err
 	}

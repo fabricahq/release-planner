@@ -30,22 +30,30 @@ The tag is created only at that last step, on the exact commit you approved, so 
 
 ## How do I set it up on a repository?
 
-With [Go](https://go.dev/dl/) installed, from the repository root:
+From the repository root:
 
-1. **Create the configuration:**
+1. **Install Release Planner**, a single command for macOS and Linux:
 
    ```sh
-   go run github.com/fabricahq/release-planner/cmd/release-planner@v0.1.0 init --first-version v1.0.0
+   curl -fsSL https://raw.githubusercontent.com/fabricahq/release-planner/main/install.sh | sh
    ```
 
-   This creates `.release-planner/config.yml` and a starter release policy, `.release-planner/policy.md`. The config explains each setting in comments.
+   It installs the latest release into `~/.local/bin` after verifying its checksum. Add `-s -- --version v0.1.0` after `sh` for a specific version. With Go, `go install github.com/fabricahq/release-planner/cmd/release-planner@v0.1.0` also works.
 
-2. **Write your release policy** in `.release-planner/policy.md`. See [Write your release policy](#write-your-release-policy).
-
-3. **Generate the release files:**
+2. **Create the configuration:**
 
    ```sh
-   go run github.com/fabricahq/release-planner/cmd/release-planner@v0.1.0 install
+   release-planner init --first-version v1.0.0
+   ```
+
+   This creates `.release-planner/config.yml`, pinned to the version you installed, and a starter release policy, `.release-planner/policy.md`. The config explains each setting in comments.
+
+3. **Write your release policy** in `.release-planner/policy.md`. See [Write your release policy](#write-your-release-policy).
+
+4. **Generate the release files:**
+
+   ```sh
+   release-planner install
    ```
 
    This writes:
@@ -53,13 +61,13 @@ With [Go](https://go.dev/dl/) installed, from the repository root:
    - A **Releases** section in `AGENTS.md`, which any agent that reads `AGENTS.md` follows.
    - A `release` skill in `.agents/skills/` (read by Codex, Gemini CLI, VS Code, and other agents) and in `.claude/skills/` (read by Claude Code), so "let's release" triggers the procedure automatically.
 
-4. **Protect releases** in your repository settings:
+5. **Protect releases** in your repository settings:
    - Require pull requests for your release branch, with your CI as required status checks, and require branches to be up to date before merging (or use a merge queue). This is what guarantees that the commit you release was tested.
    - Block force pushes to and deletion of that branch.
    - Create an environment named `release` that allows only your release branch, with no required reviewers. The merge is the approval.
    - Turn on immutable releases, so published tags and releases can't be changed.
 
-5. **Commit the files**, then tell your agent "let's release."
+6. **Commit the files**, then tell your agent "let's release."
 
 ## What goes where
 
@@ -240,7 +248,7 @@ API consumers and our support team. Link every change to its API reference page.
 
 ## Commands
 
-Release Planner runs with `go run github.com/fabricahq/release-planner/cmd/release-planner@<version>`, at the version your config pins. Nothing needs installing beyond Go.
+Everyone runs the version your config pins. Agents check `release-planner version` before a release, and the generated workflow downloads that release and verifies its build attestation and checksums before running it.
 
 | Command | Who runs it | What it does |
 | --- | --- | --- |
@@ -252,15 +260,16 @@ Release Planner runs with `go run github.com/fabricahq/release-planner/cmd/relea
 | `inventory [--head <ref>]` | Agent | Lists the previous release, every commit since it, and the candidate next versions. |
 | `draft <version>` | Agent | Creates the notes file with a linked list of pull requests and the closing link. |
 | `plan --base <ref> [--head <ref>]` | CI and agent | Validates a release request and prints the tag, commit, and notes to publish. |
-| `publish --plan <file> --commit <sha>` | CI | Tags the approved commit and publishes the approved notes. |
+| `publish --plan <file> --commit <sha> [--assets <dir>]` | CI | Tags the approved commit and publishes the approved notes, with optional files staged on a draft and verified first. |
 | `version` | Anyone | Prints the running version. |
 
 ## Upgrading
 
-Change `version` in `.release-planner/config.yml`, then run `install` at the new version and commit the result:
+Install the new version, change `version` in `.release-planner/config.yml` to match, then regenerate the files and commit the result:
 
 ```sh
-go run github.com/fabricahq/release-planner/cmd/release-planner@v0.2.0 install
+curl -fsSL https://raw.githubusercontent.com/fabricahq/release-planner/main/install.sh | sh -s -- --version v0.2.0
+release-planner install
 ```
 
 ## FAQs
@@ -280,7 +289,7 @@ Nothing is tagged until the planner and your release checks pass. Re-run the fai
 
 ### Can I publish binaries or other assets?
 
-Not yet. Release Planner publishes notes only. Immutable releases freeze a release's assets when it is published, so assets need a publisher that uploads to a draft first. [Code Rules](https://github.com/fabricahq/code-rules) has one for its signed binaries, and it is a candidate to move here.
+The publisher supports it: `release-planner publish --assets <dir>` uploads the files to a draft release, verifies GitHub's checksums for them, and publishes last, because immutable releases freeze a release's files once it is published. Release Planner ships its own binaries this way. The generated workflow doesn't attach files yet; that's planned.
 
 ### Why not release-please or semantic-release?
 

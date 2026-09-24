@@ -3,6 +3,8 @@ package publish
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -22,13 +24,24 @@ type GitHub struct {
 
 // Release is a GitHub release, draft or published.
 type Release struct {
-	ID         int64  `json:"id"`
-	TagName    string `json:"tag_name"`
-	Name       string `json:"name"`
-	Body       string `json:"body"`
-	Draft      bool   `json:"draft"`
-	Prerelease bool   `json:"prerelease"`
-	HTMLURL    string `json:"html_url"`
+	ID         int64   `json:"id"`
+	TagName    string  `json:"tag_name"`
+	Name       string  `json:"name"`
+	Body       string  `json:"body"`
+	Draft      bool    `json:"draft"`
+	Prerelease bool    `json:"prerelease"`
+	HTMLURL    string  `json:"html_url"`
+	UploadURL  string  `json:"upload_url"`
+	Assets     []Asset `json:"assets"`
+}
+
+// Asset is a file attached to a release.
+type Asset struct {
+	ID     int64  `json:"id"`
+	Name   string `json:"name"`
+	Size   int64  `json:"size"`
+	Digest string `json:"digest"` // sha256:<hex>, computed by GitHub
+	URL    string `json:"url"`
 }
 
 var nextLink = regexp.MustCompile(`<([^>]+)>;\s*rel="next"`)
@@ -38,12 +51,23 @@ type errNotFound struct{}
 
 func (errNotFound) Error() string { return "not found" }
 
+// raw is a request body sent as-is rather than encoded as JSON.
+type raw struct {
+	contentType string
+	data        []byte
+}
+
 func (g *GitHub) do(ctx context.Context, method, target string, body any, out any) (next string, err error) {
 	if !strings.HasPrefix(target, "http") {
 		target = strings.TrimRight(g.BaseURL, "/") + "/repos/" + g.Repository + target
 	}
 	var reader io.Reader
-	if body != nil {
+	contentType := "application/json"
+	switch b := body.(type) {
+	case nil:
+	case raw:
+		reader, contentType = bytes.NewReader(b.data), b.contentType
+	default:
 		data, err := json.Marshal(body)
 		if err != nil {
 			return "", err
@@ -58,7 +82,7 @@ func (g *GitHub) do(ctx context.Context, method, target string, body any, out an
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 	req.Header.Set("Authorization", "Bearer "+g.Token)
 	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Content-Type", contentType)
 	}
 	client := g.HTTP
 	if client == nil {
@@ -160,14 +184,67 @@ func latest(yes bool) string {
 	return "false"
 }
 
-// CreateRelease publishes a release, creating the tag on commit if it does not exist yet.
-func (g *GitHub) CreateRelease(ctx context.Context, tag, commit, notes string, prerelease bool) (*Release, error) {
+// Release reads one release by ID.
+func (g *GitHub) Release(ctx context.Context, id int64) (*Release, error) {
 	var r Release
-	_, err := g.do(ctx, http.MethodPost, "/releases", map[string]any{
-		"tag_name": tag, "target_commitish": commit, "name": tag, "body": notes,
-		"draft": false, "prerelease": prerelease, "make_latest": latest(!prerelease),
-	}, &r)
+	_, err := g.do(ctx, http.MethodGet, fmt.Sprintf("/releases/%d", id), nil, &r)
 	return &r, err
+}
+
+// CreateRelease creates a release that makes the tag on commit when published. A draft
+// creates no tag until it is published.
+func (g *GitHub) CreateRelease(ctx context.Context, tag, commit, notes string, prerelease, draft bool) (*Release, error) {
+	var r Release
+	body := map[string]any{
+		"tag_name": tag, "target_commitish": commit, "name": tag, "body": notes,
+		"draft": draft, "prerelease": prerelease,
+	}
+	if !draft {
+		body["make_latest"] = latest(!prerelease)
+	}
+	_, err := g.do(ctx, http.MethodPost, "/releases", body, &r)
+	return &r, err
+}
+
+// UploadAsset attaches a file to a draft release.
+func (g *GitHub) UploadAsset(ctx context.Context, draft *Release, name string, data []byte) error {
+	base, _, _ := strings.Cut(draft.UploadURL, "{")
+	if base == "" {
+		return fmt.Errorf("the %s draft has no upload URL", draft.TagName)
+	}
+	_, err := g.do(ctx, http.MethodPost, base+"?name="+url.QueryEscape(name), raw{"application/octet-stream", data}, nil)
+	return err
+}
+
+// AssetDigest returns GitHub's stored sha256 for an asset, downloading it only when
+// GitHub did not report one.
+func (g *GitHub) AssetDigest(ctx context.Context, a Asset) (string, error) {
+	if strings.HasPrefix(a.Digest, "sha256:") {
+		return a.Digest, nil
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.URL, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Accept", "application/octet-stream")
+	req.Header.Set("Authorization", "Bearer "+g.Token)
+	client := g.HTTP
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		return "", fmt.Errorf("download %s: %s", a.Name, resp.Status)
+	}
+	h := sha256.New()
+	if _, err := io.Copy(h, resp.Body); err != nil {
+		return "", err
+	}
+	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // PublishDraft makes an existing draft release public.

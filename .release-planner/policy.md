@@ -7,7 +7,7 @@ Release Planner's own release policy. The agent reads this file before every rel
 Adopting repositories rely on:
 
 - The commands, their flags, exit codes, and JSON output.
-- The keys in `release-planner.yml` and what they mean.
+- The keys in `.release-planner/config.yml` and what they mean.
 - The generated files: their paths, their markers, and what the Release workflow does.
 - The checks `plan` and `publish` enforce, which decide whether a release goes out.
 

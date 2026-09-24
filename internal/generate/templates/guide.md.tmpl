@@ -2,10 +2,10 @@
 
 The maintainer approves a release by merging a pull request that adds `{{.NotesDir}}/v<version>.md`. On merge, the Release workflow checks the request, runs any release checks the repository configured, tags that commit, and publishes the file word for word as the GitHub release. Your job is to open that pull request with accurate notes. You never tag, publish, or merge.
 
-In this guide, `release-planner` means:
+Run every `release-planner` command in this guide with version {{.Version}}. If `release-planner version` prints anything else, install it:
 
 ```sh
-go run {{.Module}}@{{.Version}}
+{{.Install}}
 ```
 
 ## 1. Read the release policy
