@@ -378,7 +378,7 @@ func cmdValidate(ctx context.Context, args []string, out io.Writer) error {
 		return fmt.Errorf("the retry range contains no release request")
 	}
 	if *ci {
-		if err := appendEnvFile("GITHUB_OUTPUT", fmt.Sprintf("tag=%s\ncommit=%s\n", p.Tag, p.Commit)); err != nil {
+		if err := appendEnvFile("GITHUB_OUTPUT", fmt.Sprintf("tag=%s\nversion=%s\ncommit=%s\n", p.Tag, p.Version, p.Commit)); err != nil {
 			return err
 		}
 		if err := warnAboutNotes(out, p, *outFile != ""); err != nil {

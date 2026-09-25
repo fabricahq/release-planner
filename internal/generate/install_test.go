@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -403,5 +404,142 @@ func TestCommitPinBuildsFromSource(t *testing.T) {
 	}
 	if !strings.Contains(read(t, root, AgentsPath), "go install github.com/fabricahq/release-planner/cmd/release-planner@"+sha) {
 		t.Error("AGENTS.md lacks the source install command")
+	}
+}
+
+// buildWorkflow is a release-assets workflow that satisfies the contract.
+const buildWorkflow = "on:\n  workflow_call:\n    inputs:\n      ref:\n        type: string\n      tag:\n        type: string\n      version:\n        type: string\n        required: true\n"
+
+type workflowJob struct {
+	Needs       any
+	If          string
+	Environment string
+	Permissions map[string]string
+	Uses        string
+	With        map[string]string
+	Secrets     string
+	Steps       []struct{ Uses, Run string }
+}
+
+// pin is an action reference as YAML reads it, without its version comment.
+func pin(action string) string { return strings.Fields(action)[0] }
+
+func workflowJobs(t *testing.T, root string) map[string]workflowJob {
+	t.Helper()
+	var wf struct {
+		Jobs map[string]workflowJob
+	}
+	if err := yaml.Unmarshal([]byte(read(t, root, WorkflowPath)), &wf); err != nil {
+		t.Fatal(err)
+	}
+	return wf.Jobs
+}
+
+func TestReleaseAssetsAreBuiltAttestedAndPublished(t *testing.T) {
+	const publishIf = "needs.validate.outputs.tag != '' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'"
+	for name, tc := range map[string]struct {
+		checks      string
+		assetsNeeds any
+	}{
+		"alone":           {"", "validate"},
+		"after a script":  {"release-checks:\n  run: make smoke\n", []any{"validate", "release-checks"}},
+		"after workflows": {"release-checks:\n  workflow: ci.yml\n", []any{"validate", "release-checks"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c, err := config.Parse([]byte("schema-version: 1\nversion: v0.2.0\n"+tc.checks+"release-assets:\n  workflow: build-release.yml\n"), "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			root := t.TempDir()
+			put(t, root, ".github/workflows/ci.yml", "on:\n  workflow_call:\n    inputs:\n      ref:\n        type: string\n")
+			put(t, root, ".github/workflows/build-release.yml", buildWorkflow)
+			if _, err := Install(root, c, false); err != nil {
+				t.Fatal(err)
+			}
+			if err := Check(root, c); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(read(t, root, WorkflowPath), "      version: ${{ steps.validate.outputs.version }}\n") {
+				t.Error("validate has no version output")
+			}
+			jobs := workflowJobs(t, root)
+
+			// The build runs repository code, so it gets read access and no secrets.
+			assets := jobs["release-assets"]
+			if !reflect.DeepEqual(assets.Needs, tc.assetsNeeds) || assets.If != publishIf || assets.Uses != "./.github/workflows/build-release.yml" ||
+				!reflect.DeepEqual(assets.Permissions, map[string]string{"contents": "read"}) || assets.Secrets != "" || assets.Environment != "" ||
+				!reflect.DeepEqual(assets.With, map[string]string{
+					"ref": "${{ needs.validate.outputs.commit }}", "tag": "${{ needs.validate.outputs.tag }}", "version": "${{ needs.validate.outputs.version }}",
+				}) {
+				t.Errorf("release-assets: %+v", assets)
+			}
+
+			attest := jobs["attest"]
+			if !reflect.DeepEqual(attest.Needs, []any{"validate", "release-assets"}) || attest.If != publishIf || attest.Environment != "release" ||
+				!reflect.DeepEqual(attest.Permissions, map[string]string{"contents": "read", "id-token": "write", "attestations": "write"}) ||
+				len(attest.Steps) != 2 || attest.Steps[0].Uses != pin(Actions.DownloadArtifact) || attest.Steps[1].Uses != pin(Actions.AttestBuildProvenance) {
+				t.Errorf("attest: %+v", attest)
+			}
+
+			// Publish still runs no repository code: no checkout, only the pinned publisher.
+			publish := jobs["publish"]
+			needs := []any{"validate"}
+			if tc.checks != "" {
+				needs = append(needs, "release-checks")
+			}
+			if !reflect.DeepEqual(publish.Needs, append(needs, "release-assets", "attest")) ||
+				!strings.HasSuffix(publish.Steps[len(publish.Steps)-1].Run, ` --branch main --assets "$RUNNER_TEMP/release-assets"`) {
+				t.Errorf("publish: %+v", publish)
+			}
+			for _, step := range publish.Steps {
+				if step.Uses == pin(Actions.Checkout) {
+					t.Error("publish checks out repository code")
+				}
+			}
+		})
+	}
+}
+
+func TestNoReleaseAssetsLeavesTheWorkflowAlone(t *testing.T) {
+	for _, checks := range []string{"", "release-checks:\n  run: make smoke\n"} {
+		c, err := config.Parse([]byte("schema-version: 1\nversion: v0.2.0\n"+checks), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		root := t.TempDir()
+		if _, err := Install(root, c, false); err != nil {
+			t.Fatal(err)
+		}
+		wf := read(t, root, WorkflowPath)
+		for _, unwanted := range []string{"release-assets", "attest:", "attest-build-provenance", "version: ${{", "--assets"} {
+			if strings.Contains(wf, unwanted) {
+				t.Errorf("workflow without release-assets has %q", unwanted)
+			}
+		}
+	}
+}
+
+func TestReleaseAssetsAcceptOnlyCallableWorkflows(t *testing.T) {
+	c, err := config.Parse([]byte("schema-version: 1\nversion: v0.2.0\nrelease-assets:\n  workflow: build-release.yml\n"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const file = ".github/workflows/build-release.yml"
+	root := t.TempDir()
+	_, err = Install(root, c, false)
+	problemFor(t, err, file, "missing; release-assets.workflow")
+	put(t, root, file, "on:\n  push:\n")
+	_, err = Install(root, c, false)
+	problemFor(t, err, file, "string inputs named ref, tag, and version, check out ref, and upload the files as one artifact named release-assets")
+
+	for body, want := range map[string]string{
+		"on:\n  push:\n": "cannot be called",
+		"on:\n  workflow_call:\n    inputs:\n      ref:\n        type: string\n      tag:\n        type: string\n":                                       "has no version input",
+		"on:\n  workflow_call:\n    inputs:\n      ref:\n        type: string\n      tag:\n        type: string\n      version:\n        type: number\n": "declares version without type: string",
+		strings.Replace(buildWorkflow, "    inputs:\n", "    inputs:\n      target:\n        type: string\n        required: true\n", 1):                 "can't supply (target)",
+	} {
+		put(t, root, file, body)
+		_, err = Install(root, c, false)
+		problemFor(t, err, file, want)
 	}
 }

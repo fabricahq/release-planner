@@ -52,6 +52,7 @@ Merging the release pull request is what starts the release. The workflow then:
 
 1. validates the request: one notes file and a version newer than every existing release
 2. runs any [release checks](/customize/release-checks/) you set up
-3. tags the commit you merged and publishes the notes as the GitHub release
+3. builds and attests any [release assets](/customize/release-assets/) you set up
+4. tags the commit you merged and publishes the notes, and any assets, as the GitHub release
 
 The tag is created only at the last step, so a version never exists without the notes you approved. If anything fails, nothing is published.

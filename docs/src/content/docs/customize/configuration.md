@@ -55,13 +55,18 @@ release-notes-style:
 release-checks:
   run: make smoke-test
 
+# Your workflow that builds files to attach to each release, such as binaries.
+# Default: none; releases have only the notes.
+release-assets:
+  workflow: build-release.yml
+
 # Release notes rules to turn off, by ID. List them with: release-planner validate --rules
 # Default: every rule is on.
 release-notes-rules:
   no-long-heading: off
 ```
 
-For the details of the last three, see [Release notes style](/customize/release-notes-style/), [Release checks](/customize/release-checks/), and [Release notes rules](/customize/release-notes-style/#release-notes-rules).
+For the details of the last four, see [Release notes style](/customize/release-notes-style/), [Release checks](/customize/release-checks/), [Release assets](/customize/release-assets/), and [Release notes rules](/customize/release-notes-style/#release-notes-rules).
 
 ## Upgrade Release Planner
 

@@ -53,6 +53,7 @@ type Config struct {
 	// Branch is the release branch: release pull requests merge into it, and releases publish from it.
 	Branch            string            `yaml:"release-branch"`
 	ReleaseChecks     ReleaseChecks     `yaml:"release-checks"`
+	ReleaseAssets     ReleaseAssets     `yaml:"release-assets"`
 	ReleaseNotesStyle ReleaseNotesStyle `yaml:"release-notes-style"`
 	// ReleaseNotesRules sets release notes rules by ID. The only setting is RuleOff, which
 	// turns a rule off.
@@ -107,6 +108,18 @@ type ReleaseChecks struct {
 
 // Enabled reports whether the repository has release-only checks.
 func (v ReleaseChecks) Enabled() bool { return v.Run != "" || v.Workflow != "" }
+
+// ReleaseAssets names the workflow that builds files to attach to each release. The workflow
+// is attested, staged on a draft, verified, and published last.
+type ReleaseAssets struct {
+	// Workflow names a workflow in .github/workflows that accepts workflow_call with `ref`,
+	// `tag`, and `version` inputs and uploads one artifact named release-assets. It runs
+	// with read access and no secrets.
+	Workflow string `yaml:"workflow"`
+}
+
+// Enabled reports whether the repository attaches files to its releases.
+func (a ReleaseAssets) Enabled() bool { return a.Workflow != "" }
 
 var (
 	commitSHA    = regexp.MustCompile(`^[0-9a-f]{40}$`)
@@ -191,6 +204,12 @@ func decode(data []byte) (Config, error) {
 	return c, nil
 }
 
+// callable reports whether name can be a workflow file in .github/workflows other than the
+// generated one.
+func callable(name string) bool {
+	return workflowFile.MatchString(name) && name != "release-planner.yml"
+}
+
 // validStylePath reports whether name is a markdown file inside the repository.
 func validStylePath(name string) bool {
 	clean := path.Clean(name)
@@ -229,10 +248,13 @@ func (c Config) check() error {
 		add("release-checks: set run or workflow, not both")
 	case v.Workflow != "" && (v.Go != "" || v.Node != "" || v.Python != ""):
 		add("release-checks: go, node, and python apply to run; set up toolchains in %s instead", v.Workflow)
-	case v.Workflow != "" && (!workflowFile.MatchString(v.Workflow) || v.Workflow == "release-planner.yml"):
+	case v.Workflow != "" && !callable(v.Workflow):
 		add("release-checks.workflow: name a workflow file in .github/workflows, such as ci.yml")
 	case v.Run == "" && v.Workflow == "" && (v.Go != "" || v.Node != "" || v.Python != ""):
 		add("release-checks: toolchains are set but there is no run script")
+	}
+	if w := c.ReleaseAssets.Workflow; w != "" && !callable(w) {
+		add("release-assets.workflow: name a workflow file in .github/workflows, such as build-release.yml")
 	}
 	for _, id := range slices.Sorted(maps.Keys(c.ReleaseNotesRules)) {
 		switch {

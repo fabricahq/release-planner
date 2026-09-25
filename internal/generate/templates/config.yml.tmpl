@@ -28,6 +28,15 @@ first-version: {{.FirstVersion}}
 # release-checks:
 #   workflow: release-checks.yml
 
+# Optional files to attach to each release, such as binaries and their checksums: one of your
+# workflows, called with the commit to build, read access, and none of your repository's secrets.
+# It needs a workflow_call trigger with string inputs named ref, tag, and version (the tag
+# without its leading v); it must check out ref, run whatever checks the release needs, and
+# upload the files, flat, as one artifact named release-assets. The release workflow attests
+# them, stages them on a draft release, verifies them, and publishes last.
+# release-assets:
+#   workflow: build-release.yml
+
 # Release notes rules to turn off. release-planner validate checks the notes against every rule;
 # list them with: release-planner validate --rules
 # release-notes-rules:

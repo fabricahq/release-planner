@@ -354,7 +354,8 @@ func TestValidateFailsLocallyAndWarnsInCI(t *testing.T) {
 	summary := filepath.Join(t.TempDir(), "summary")
 	t.Setenv("GITHUB_REPOSITORY", "o/r")
 	t.Setenv("GITHUB_STEP_SUMMARY", summary)
-	t.Setenv("GITHUB_OUTPUT", filepath.Join(t.TempDir(), "output"))
+	output := filepath.Join(t.TempDir(), "output")
+	t.Setenv("GITHUB_OUTPUT", output)
 	planFile := filepath.Join(t.TempDir(), "plan.json")
 	code, out, errOut = cli(t, "validate", "--dir", dir, "--ci", "--event", "push", "--base", base, "--head", "HEAD", "--out", planFile)
 	if code != 0 || !strings.Contains(out, "::warning file=_releases/v1.0.0.md,line=1,title=no-empty-heading::") || !strings.Contains(out, "Validated v1.0.0") {
@@ -365,6 +366,9 @@ func TestValidateFailsLocallyAndWarnsInCI(t *testing.T) {
 	}
 	if data, _ := os.ReadFile(planFile); !strings.Contains(string(data), `"tag": "v1.0.0"`) {
 		t.Fatalf("plan: %s", data)
+	}
+	if data, _ := os.ReadFile(output); !strings.HasPrefix(string(data), "tag=v1.0.0\nversion=1.0.0\ncommit=") {
+		t.Fatalf("output: %s", data)
 	}
 
 	// Rules turned off are skipped.

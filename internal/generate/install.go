@@ -259,11 +259,20 @@ func planInstall(root string, c config.Config, force bool) ([]write, Problems, e
 		writes = append(writes, write{change: change, content: content})
 	}
 
-	if c.ReleaseChecks.Workflow != "" {
-		if problem, err := callableWorkflow(root, c.ReleaseChecks.Workflow); err != nil {
+	for _, w := range []struct {
+		key, name, need string
+		inputs          []string
+	}{
+		{"release-checks.workflow", c.ReleaseChecks.Workflow, "add a workflow_call trigger with a string input named ref, and check out that ref", []string{"ref"}},
+		{"release-assets.workflow", c.ReleaseAssets.Workflow, "add a workflow_call trigger with string inputs named ref, tag, and version, check out ref, and upload the files as one artifact named release-assets", []string{"ref", "tag", "version"}},
+	} {
+		if w.name == "" {
+			continue
+		}
+		if problem, err := callableWorkflow(root, w.key, w.name, w.need, w.inputs); err != nil {
 			return nil, nil, err
 		} else if problem != "" {
-			problems = append(problems, Problem{".github/workflows/" + c.ReleaseChecks.Workflow, problem})
+			problems = append(problems, Problem{".github/workflows/" + w.name, problem})
 		}
 	}
 
@@ -277,11 +286,12 @@ func planInstall(root string, c config.Config, force bool) ([]write, Problems, e
 	return writes, problems, nil
 }
 
-// callableWorkflow checks that release-checks.workflow can be called with the commit to check.
-func callableWorkflow(root, name string) (string, error) {
+// callableWorkflow checks that the workflow a config key names can be called with the
+// string inputs the Release workflow passes. need says how to fix it.
+func callableWorkflow(root, key, name, need string, inputs []string) (string, error) {
 	data, ok, err := readFile(root, ".github/workflows/"+name)
 	if err != nil || !ok {
-		return "missing; release-checks.workflow in " + config.File + " names it", err
+		return "missing; " + key + " in " + config.File + " names it", err
 	}
 	var wf struct {
 		On any `yaml:"on"`
@@ -289,25 +299,26 @@ func callableWorkflow(root, name string) (string, error) {
 	if err := yaml.Unmarshal([]byte(data), &wf); err != nil {
 		return "", fmt.Errorf(".github/workflows/%s: %v", name, err)
 	}
-	const need = "add a workflow_call trigger with a string input named ref, and check out that ref"
 	on, _ := wf.On.(map[string]any)
 	call, found := on["workflow_call"]
 	if !found {
 		return "cannot be called by the Release workflow; " + need, nil
 	}
 	callMap, _ := call.(map[string]any)
-	inputs, _ := callMap["inputs"].(map[string]any)
-	ref, ok := inputs["ref"]
-	if !ok {
-		return "has no ref input, so it cannot check the release commit; " + need, nil
-	}
-	if refMap, _ := ref.(map[string]any); refMap["type"] != "string" {
-		return "declares ref without type: string, but the Release workflow passes a commit SHA; " + need, nil
+	declared, _ := callMap["inputs"].(map[string]any)
+	for _, input := range inputs {
+		spec, ok := declared[input]
+		if !ok {
+			return "has no " + input + " input, but the Release workflow passes one; " + need, nil
+		}
+		if specMap, _ := spec.(map[string]any); specMap["type"] != "string" {
+			return "declares " + input + " without type: string, but the Release workflow passes a string; " + need, nil
+		}
 	}
 	var extra []string
-	for name, input := range inputs {
+	for name, input := range declared {
 		spec, _ := input.(map[string]any)
-		if _, hasDefault := spec["default"]; name != "ref" && spec["required"] == true && !hasDefault {
+		if _, hasDefault := spec["default"]; !slices.Contains(inputs, name) && spec["required"] == true && !hasDefault {
 			extra = append(extra, name)
 		}
 	}

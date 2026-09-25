@@ -24,7 +24,7 @@ Agents are good at the tedious part: reading every commit and pull request since
 2. **The agent works out the next release.** It runs `release-planner guide` for the procedure and `release-planner inventory` for every change since the previous release, the candidate versions, and a ready-made line for each pull request with its author. Then it applies your release policy and picks the version.
 3. **The agent opens a release PR.** It writes `_releases/v<version>.md` in your release notes style, checks it with `release-planner validate`, and explains its choice of version in the PR.
 4. **You edit the notes and merge.** Change anything you like. Saving edits publishes nothing.
-5. **Merging publishes the release.** The generated Release workflow validates the request, runs any release checks you configured, tags the merged commit, and publishes the notes file word for word as the GitHub release.
+5. **Merging publishes the release.** The generated Release workflow validates the request, runs any release checks you configured, builds and attests any release assets, tags the merged commit, and publishes the notes file word for word as the GitHub release.
 
 The tag is created only at that last step, on the exact commit you approved, so a version never exists without its approved notes.
 
@@ -96,6 +96,7 @@ Everything in `.release-planner/` belongs to you; Release Planner never rewrites
 | `version` | required | The Release Planner version to use: a release tag, or a full commit SHA. Bumping it upgrades the GitHub Actions workflow (`.github/workflows/release-planner.yml`) and the agent guide together; run `release-planner install` after changing it. |
 | `first-version` | `v0.1.0` | The version your first release must use. |
 | `release-checks` | none | Optional release-only checks. See [Release checks](#release-checks). |
+| `release-assets` | none | Optional files to attach to each release, built by one of your workflows: `workflow`, a file in `.github/workflows`. See [Release assets](#release-assets). |
 | `release-notes-rules` | every rule on | Release notes rules to turn off, by ID, such as `no-long-heading: off`. See [Release notes rules](#release-notes-rules). |
 | `release-notes-style` | none | Your own release notes style: `file`, the markdown file that holds it, and `mode`, `append` or `replace`. See [Release notes style](#release-notes-style). |
 | `release-notes-dir` | `_releases` | Where the release notes files live. |
@@ -145,6 +146,46 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
 ```
+
+### Release assets
+
+To attach files to each release, such as binaries and a checksum manifest, name one of your workflows that builds them:
+
+```yaml
+release-assets:
+  workflow: build-release.yml
+```
+
+The Release workflow calls it with the commit to build, the tag, and the version (the tag without its leading `v`), after any release checks pass. It runs with read access to your repository and none of its secrets, so its jobs can't ask for more permissions than `contents: read`. Your workflow owns what it builds: run whatever checks the release needs, such as tests of the built binaries, before uploading, so `release-checks` is optional when the build already covers them. Then upload the files, flat, as one artifact named `release-assets`. `install` and `check` fail if the workflow can't be called this way:
+
+```yaml
+on:
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+      tag:
+        type: string
+      version:
+        type: string
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+      - run: make dist VERSION="$VERSION" DEST=dist
+        env:
+          VERSION: ${{ inputs.version }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-assets
+          path: dist/
+          if-no-files-found: error
+```
+
+The Release workflow then attests every file with a build provenance attestation, so users can check a download with `gh attestation verify <file> --repo <owner>/<name>`. The publish job uploads the files to a draft release, verifies GitHub's checksums for them, and publishes last, because immutable releases freeze a release's files once it is published. Publication fails, without writing anything, if the artifact is empty or holds anything but files with names made of letters, digits, and `. _ + -`. A retry builds the files again, so keep the build reproducible.
 
 ### Release notes style
 
@@ -264,7 +305,7 @@ Nothing is tagged until `validate` and your release checks pass. Re-run the fail
 
 ### Can I publish binaries or other assets?
 
-The publisher supports it: `release-planner publish --assets <dir>` uploads the files to a draft release, verifies GitHub's checksums for them, and publishes last, because immutable releases freeze a release's files once it is published. Release Planner ships its own binaries this way. The generated workflow doesn't attach files yet; that's planned.
+Yes. Set `release-assets` to a workflow that builds them; see [Release assets](#release-assets). The Release workflow attests the files, uploads them to a draft release, verifies GitHub's checksums for them, and publishes last. Release Planner ships its own binaries the same way.
 
 ### Why not release-please or semantic-release?
 

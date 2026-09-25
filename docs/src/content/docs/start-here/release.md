@@ -30,7 +30,8 @@ Merging the pull request is the approval. The release workflow then:
 
 1. Validates the request: one notes file and a version newer than every existing release. If the notes break a [release notes rule](/customize/release-notes-style/#release-notes-rules), it warns without stopping the release.
 2. Runs your [release checks](/customize/release-checks/), if you configured any.
-3. Tags the merged commit and publishes the notes as the GitHub release.
+3. Builds and attests your [release assets](/customize/release-assets/), if you configured any.
+4. Tags the merged commit and publishes the notes, with any assets, as the GitHub release.
 
 If anything fails, nothing is tagged or published.
 

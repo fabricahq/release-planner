@@ -18,14 +18,15 @@ const Module = "github.com/fabricahq/release-planner/cmd/release-planner"
 
 // Actions pins every third-party action the workflow uses to a reviewed commit.
 var Actions = struct {
-	Checkout, SetupGo, SetupNode, SetupPython, UploadArtifact, DownloadArtifact string
+	Checkout, SetupGo, SetupNode, SetupPython, UploadArtifact, DownloadArtifact, AttestBuildProvenance string
 }{
-	Checkout:         "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1",
-	SetupGo:          "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0",
-	SetupNode:        "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0",
-	SetupPython:      "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0",
-	UploadArtifact:   "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1",
-	DownloadArtifact: "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1",
+	Checkout:              "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1",
+	SetupGo:               "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0",
+	SetupNode:             "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0",
+	SetupPython:           "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0",
+	UploadArtifact:        "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1",
+	DownloadArtifact:      "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1",
+	AttestBuildProvenance: "actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2",
 }
 
 //go:embed templates

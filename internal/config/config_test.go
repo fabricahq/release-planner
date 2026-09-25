@@ -28,6 +28,17 @@ func TestReleaseChecksAreOptional(t *testing.T) {
 	}
 }
 
+func TestReleaseAssetsAreOptional(t *testing.T) {
+	c, err := Parse([]byte("schema-version: 1\nversion: v0.2.0\n"), "")
+	if err != nil || c.ReleaseAssets.Enabled() {
+		t.Fatal(c, err)
+	}
+	c, err = Parse([]byte("schema-version: 1\nversion: v0.2.0\nrelease-assets:\n  workflow: build-release.yml\n"), "")
+	if err != nil || !c.ReleaseAssets.Enabled() || c.ReleaseAssets.Workflow != "build-release.yml" {
+		t.Fatal(c, err)
+	}
+}
+
 func TestParseReadsEverySetting(t *testing.T) {
 	c, err := Parse([]byte(`schema-version: 1
 version: 0123456789abcdef0123456789abcdef01234567
@@ -46,11 +57,13 @@ release-checks:
   run: |
     go install example.com/tool@v1
     tool check
+release-assets:
+  workflow: build-release.yml
 `), "\n- Use Keep a Changelog headings.\n\n")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.ReleaseChecks.Run != "go install example.com/tool@v1\ntool check" || c.ReleaseChecks.Node != "22" || c.Style != "- Use Keep a Changelog headings." ||
+	if c.ReleaseChecks.Run != "go install example.com/tool@v1\ntool check" || c.ReleaseChecks.Node != "22" || c.ReleaseAssets.Workflow != "build-release.yml" || c.Style != "- Use Keep a Changelog headings." ||
 		strings.Join(c.RulesOff(), ",") != "list-every-change,no-long-heading" {
 		t.Fatalf("%+v", c)
 	}
@@ -123,6 +136,12 @@ func TestParseRejectsInvalidSettings(t *testing.T) {
 		"bad rule setting":  {"schema-version: 1\nversion: v0.2.0\nrelease-notes-rules:\n  no-long-heading: 100\n", `release-notes-rules.no-long-heading: use off, not "100"`},
 		"rules as a list":   {"schema-version: 1\nversion: v0.2.0\nrelease-notes-rules: [no-long-heading]\n", "cannot unmarshal"},
 		"style not md":      {"schema-version: 1\nversion: v0.2.0\nrelease-notes-style:\n  file: style.txt\n  mode: append\n", "a .md file"},
+		"assets path":       {"schema-version: 1\nversion: v0.2.0\nrelease-assets:\n  workflow: ../build.yml\n", "release-assets.workflow: name a workflow file"},
+		"assets not yaml":   {"schema-version: 1\nversion: v0.2.0\nrelease-assets:\n  workflow: build.sh\n", "release-assets.workflow: name a workflow file"},
+		"assets generated":  {"schema-version: 1\nversion: v0.2.0\nrelease-assets:\n  workflow: release-planner.yml\n", "release-assets.workflow: name a workflow file"},
+		"assets script":     {"schema-version: 1\nversion: v0.2.0\nrelease-assets:\n  go: '1.27.x'\n  run: make dist\n", "field go not found"},
+		"assets shorthand":  {"schema-version: 1\nversion: v0.2.0\nrelease-assets: build.yml\n", "cannot unmarshal"},
+		"checks generated":  {"schema-version: 1\nversion: v0.2.0\nrelease-checks:\n  workflow: release-planner.yml\n", "release-checks.workflow: name a workflow file"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := Parse([]byte(tc.yaml), ""); err == nil || !strings.Contains(err.Error(), tc.want) {
