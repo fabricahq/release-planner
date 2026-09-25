@@ -21,25 +21,19 @@ Release Planner is a **written release notes** tool, designed agent-first:
 
 ## Release Planner vs. computed release notes tools
 
-Tools like semantic-release and release-please read your commit history, usually written as [Conventional Commits](https://www.conventionalcommits.org/), and compute the next version and a changelog from it. git-cliff and GitHub's generated release notes do the same for the notes alone. Because the notes are computed, nobody has to write them.
+Tools like semantic-release, release-please, and git-cliff compute the version and changelog from your commit messages, so nobody has to write notes. The notes are only as good as the commit messages, though.
 
-Release Planner takes that work away too, but it's agent-first: your coding agent writes the notes, not a template. A computed changelog can only repeat what commit messages say, so it's only as good as everyone's discipline in writing them. With Release Planner, your agent reads the pull requests and their changes, so contributors don't need any convention, and the notes can group related changes, leave out internal ones, and explain what a change means for your users. Because the notes are files in your repository, you can also fix a published release's notes later in a pull request.
-
-Release Planner also separates planning a release from publishing it. The release pull request is the plan: it shows the version and why it was chosen, the notes, the results of your release checks, and the files built for the release. You can review and edit all of it before anything happens. Merging publishes exactly that plan.
+With Release Planner, your agent reads the pull requests themselves, so contributors don't need a commit convention, and the notes can group related changes and explain what they mean for your users. You review the version, the notes, and any built files in one pull request before anything is published.
 
 ## Release Planner vs. other written release notes tools
 
-Written release notes tools like Changesets and towncrier have pull request authors write a short release note with each pull request. The tool later collects them into a release. Because the notes come from the humans who authored the change, they usually read much better than a list of commits.
+Tools like Changesets and towncrier have each pull request author write a short note, and collect the notes into a release.
 
-Release Planner also produces written notes, but your agent writes them, once, at release time. Contributors don't write anything extra in their pull requests. When you ask for a release, your agent reads every pull request merged since the last one, selects the right "next version" based on your [release policy](/customize/policy/), and writes notes for the whole release. Because it sees the whole release at once, the notes read as one release rather than a pile of fragments.
-
-You still have the final say. The notes and the version arrive together in one pull request, where you can change anything. When you merge the pull request, you'll kick off a release using exactly the release notes you approved.
+With Release Planner, contributors write nothing extra. Your agent writes the notes once, at release time, so they read as one release rather than a list of fragments. You still have the final say: change anything in the release pull request before you merge it.
 
 ## Release Planner vs. build and packaging tools
 
-Tools like GoReleaser build and package your software: cross-compiled binaries, archives, checksums, and package manager formulas. Release Planner doesn't replace them. It decides what's in a release and writes the notes, and leaves building to your own workflow.
-
-Run GoReleaser, or any build tool, from your [build workflow](/customize/release-assets/) with its own publishing turned off. Release Planner builds the files on the release pull request, attests them, publishes them with the notes when you merge, and then starts any [downstream workflows](/customize/downstream/), such as a Homebrew tap update.
+Tools like GoReleaser build and package your software, and Release Planner doesn't replace them. Run them from your [build workflow](/customize/release-assets/) with their own publishing turned off, and Release Planner publishes the files with your notes, then starts any [downstream workflows](/customize/downstream/), such as a Homebrew tap update.
 
 ## Who Release Planner is not for
 
