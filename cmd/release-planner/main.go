@@ -347,7 +347,7 @@ func cmdValidate(ctx context.Context, args []string, out io.Writer) error {
 	} else {
 		repository, _ = repo.GitHubRepository(ctx)
 	}
-	p, err := plan.Read(ctx, repo, plan.Options{NotesDir: c.NotesDir, FirstVersion: c.FirstVersion, ExcludeRules: c.ExcludeRules, Repository: repository}, *base, *head)
+	p, err := plan.Read(ctx, repo, plan.Options{NotesDir: c.NotesDir, FirstVersion: c.FirstVersion, RulesOff: c.RulesOff(), Repository: repository}, *base, *head)
 	if err != nil {
 		return err
 	}

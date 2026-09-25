@@ -133,7 +133,7 @@ It then checks the notes against the release notes rules:
 | `list-every-change` | Every pull request and direct commit on the release branch from the previous tag to the head is listed exactly once under `## Pull Requests`, matched by `#N` or `/pull/N` and `/commit/<sha>`, and nothing else is. Uses only git, never the network. |
 | `require-closing-link` | Exactly one closing line: `**Full Changelog**: …/compare/<previous>...<version>`, or for a first release, `This is the first release. Browse the source at [<version>](…)`. |
 
-Without `--ci`, a broken rule fails, listing every finding with its rule, line, and message. With `--ci`, findings are GitHub warning annotations and step summary entries, and don't fail the run or block publishing, because the maintainer may break a rule on purpose. Rules listed in `exclude-rules` are skipped.
+Without `--ci`, a broken rule fails, listing every finding with its rule, line, and message. With `--ci`, findings are GitHub warning annotations and step summary entries, and don't fail the run or block publishing, because the maintainer may break a rule on purpose. Rules turned off in `release-notes-rules` are skipped.
 
 ## The release workflow
 

@@ -96,7 +96,7 @@ Everything in `.release-planner/` belongs to you; Release Planner never rewrites
 | `version` | required | The Release Planner version to use: a release tag, or a full commit SHA. Bumping it upgrades the GitHub Actions workflow (`.github/workflows/release-planner.yml`) and the agent guide together; run `release-planner install` after changing it. |
 | `first-version` | `v0.1.0` | The version your first release must use. |
 | `release-checks` | none | Optional release-only checks. See [Release checks](#release-checks). |
-| `exclude-rules` | none | Release notes rules to skip, by ID, such as `[no-long-heading]`. See [Release notes rules](#release-notes-rules). |
+| `release-notes-rules` | every rule on | Release notes rules to turn off, by ID, such as `no-long-heading: off`. See [Release notes rules](#release-notes-rules). |
 | `release-notes-style` | none | Your own release notes style: `file`, the markdown file that holds it, and `mode`, `append` or `replace`. See [Release notes style](#release-notes-style). |
 | `release-notes-dir` | `_releases` | Where the release notes files live. |
 | `release-branch` | `main` | The branch that release pull requests merge into, and releases are published from. |
@@ -201,10 +201,11 @@ Whatever the style says, every release ends with the parts `inventory` writes: t
 | `list-every-change` | `## Pull Requests` lists every pull request and direct commit since the previous release exactly once, and nothing else. Entries are matched by number or commit, so you can edit their titles. |
 | `require-closing-link` | One closing line: the **Full Changelog** link, or for a first release, the link to its source. |
 
-When your agent runs `validate`, a broken rule fails, so the agent fixes it. In the Release workflow, a broken rule is a warning that doesn't block the release: you may break a rule on purpose. To stop checking a rule, list it in `config.yml`:
+When your agent runs `validate`, a broken rule fails, so the agent fixes it. In the Release workflow, a broken rule is a warning that doesn't block the release: you may break a rule on purpose. To stop checking a rule, turn it off in `config.yml`:
 
 ```yaml
-exclude-rules: [no-long-heading]
+release-notes-rules:
+  no-long-heading: off
 ```
 
 ## Write your release policy

@@ -38,8 +38,8 @@ type Plan struct {
 type Options struct {
 	NotesDir     string
 	FirstVersion string
-	// ExcludeRules are notes rules to skip.
-	ExcludeRules []string
+	// RulesOff are notes rules to skip.
+	RulesOff []string
 	// Repository is the GitHub owner/name, for checking the notes' closing link, or "" to
 	// check it without the repository.
 	Repository string
@@ -244,5 +244,5 @@ func Read(ctx context.Context, repo gitrepo.Repo, opts Options, base, head strin
 	}
 	return Plan{Tags: observed, Tag: tag, Version: strings.TrimPrefix(tag, "v"), Commit: head,
 		Previous: previous, Notes: text, Prerelease: current.IsPrerelease(),
-		File: requested, Findings: notes.Check(text, release, opts.ExcludeRules)}, nil
+		File: requested, Findings: notes.Check(text, release, opts.RulesOff)}, nil
 }

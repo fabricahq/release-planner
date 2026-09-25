@@ -154,7 +154,7 @@ func TestFirstReleaseClosingLine(t *testing.T) {
 	}
 }
 
-func TestExcludedRulesAreSkipped(t *testing.T) {
+func TestRulesTurnedOffAreSkipped(t *testing.T) {
 	notes := strings.Replace(valid, "### Log in from the command line", "### "+strings.Repeat("x", MaxHeadingLength+1), 1)
 	if f := Check(notes, release, []string{"no-long-heading"}); len(f) != 0 {
 		t.Fatal(f)

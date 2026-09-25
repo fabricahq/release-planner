@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -52,8 +54,9 @@ type Config struct {
 	Branch            string            `yaml:"release-branch"`
 	ReleaseChecks     ReleaseChecks     `yaml:"release-checks"`
 	ReleaseNotesStyle ReleaseNotesStyle `yaml:"release-notes-style"`
-	// ExcludeRules are release notes rules that release-planner validate skips.
-	ExcludeRules []string `yaml:"exclude-rules"`
+	// ReleaseNotesRules sets release notes rules by ID. The only setting is RuleOff, which
+	// turns a rule off.
+	ReleaseNotesRules map[string]string `yaml:"release-notes-rules"`
 
 	// Style is the content of ReleaseNotesStyle.File, or "" when the repository has none.
 	Style string `yaml:"-"`
@@ -142,6 +145,21 @@ func Load(root string) (Config, error) {
 // The leading underscore keeps it apart from the repository's own content.
 const DefaultNotesDir = "_releases"
 
+// RuleOff is the release-notes-rules setting that turns a rule off.
+const RuleOff = "off"
+
+// RulesOff returns the IDs of the release notes rules the config turns off.
+func (c *Config) RulesOff() []string {
+	var off []string
+	for id, setting := range c.ReleaseNotesRules {
+		if setting == RuleOff {
+			off = append(off, id)
+		}
+	}
+	slices.Sort(off)
+	return off
+}
+
 // Parse decodes a config, rejecting unknown keys so typos fail loudly, and applies defaults.
 // style is the content of the file release-notes-style names, or "" if it names none.
 func Parse(data []byte, style string) (Config, error) {
@@ -216,9 +234,12 @@ func (c Config) check() error {
 	case v.Run == "" && v.Workflow == "" && (v.Go != "" || v.Node != "" || v.Python != ""):
 		add("release-checks: toolchains are set but there is no run script")
 	}
-	for _, id := range c.ExcludeRules {
-		if !notes.Known(id) {
-			add("exclude-rules: %q is not a release notes rule; run release-planner validate --rules to list them", id)
+	for _, id := range slices.Sorted(maps.Keys(c.ReleaseNotesRules)) {
+		switch {
+		case !notes.Known(id):
+			add("release-notes-rules: %q is not a release notes rule; run release-planner validate --rules to list them", id)
+		case c.ReleaseNotesRules[id] != RuleOff:
+			add("release-notes-rules.%s: use %s, not %q", id, RuleOff, c.ReleaseNotesRules[id])
 		}
 	}
 	if s := c.ReleaseNotesStyle; s.Set() {

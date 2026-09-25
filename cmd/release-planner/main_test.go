@@ -352,10 +352,10 @@ func TestValidateFailsLocallyAndWarnsInCI(t *testing.T) {
 		t.Fatalf("plan: %s", data)
 	}
 
-	// Excluded rules are skipped.
-	write(".release-planner/config.yml", "schema-version: 1\nversion: v0.1.0\nfirst-version: v1.0.0\nexclude-rules: [no-empty-heading, no-duplicate-heading]\n")
+	// Rules turned off are skipped.
+	write(".release-planner/config.yml", "schema-version: 1\nversion: v0.1.0\nfirst-version: v1.0.0\nrelease-notes-rules:\n  no-empty-heading: off\n  no-duplicate-heading: off\n")
 	if code, _, errOut := cli(t, "validate", "--dir", dir, "--base", base); code != 0 {
-		t.Fatalf("excluded: %d %s", code, errOut)
+		t.Fatalf("rules off: %d %s", code, errOut)
 	}
 }
 

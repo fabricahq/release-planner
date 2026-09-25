@@ -97,8 +97,9 @@ Whatever your style says, the notes end with a **Pull Requests** section listing
 | `list-every-change` | **Pull Requests** lists every pull request and direct commit in the release exactly once, and nothing else. You can edit the titles. |
 | `require-closing-link` | One closing line: the **Full Changelog** link, or for a first release, the link to its source. |
 
-When your agent checks its notes, a broken rule stops it until it fixes the notes. When you merge, a broken rule is only a warning in the release workflow's run, so you can break one on purpose. To stop checking a rule, add it to `.release-planner/config.yml`:
+When your agent checks its notes, a broken rule stops it until it fixes the notes. When you merge, a broken rule is only a warning in the release workflow's run, so you can break one on purpose. To stop checking a rule, turn it off in `.release-planner/config.yml`:
 
 ```yaml
-exclude-rules: [no-long-heading]
+release-notes-rules:
+  no-long-heading: off
 ```

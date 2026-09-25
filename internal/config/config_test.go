@@ -34,7 +34,9 @@ version: 0123456789abcdef0123456789abcdef01234567
 first-version: v1.0.0
 release-notes-dir: docs/releases
 release-branch: trunk
-exclude-rules: [no-long-heading, list-every-change]
+release-notes-rules:
+  no-long-heading: off
+  list-every-change: off
 release-notes-style:
   file: docs/release-notes-style.md
   mode: replace
@@ -49,7 +51,7 @@ release-checks:
 		t.Fatal(err)
 	}
 	if c.ReleaseChecks.Run != "go install example.com/tool@v1\ntool check" || c.ReleaseChecks.Node != "22" || c.Style != "- Use Keep a Changelog headings." ||
-		strings.Join(c.ExcludeRules, ",") != "no-long-heading,list-every-change" {
+		strings.Join(c.RulesOff(), ",") != "list-every-change,no-long-heading" {
 		t.Fatalf("%+v", c)
 	}
 }
@@ -117,7 +119,9 @@ func TestParseRejectsInvalidSettings(t *testing.T) {
 		"no style file":     {"schema-version: 1\nversion: v0.2.0\nrelease-notes-style:\n  mode: append\n", "name your style file"},
 		"style outside":     {"schema-version: 1\nversion: v0.2.0\nrelease-notes-style:\n  file: ../s.md\n  mode: append\n", "inside the repository"},
 		"old validate key":  {"schema-version: 1\nversion: v0.2.0\nvalidate:\n  run: x\n", "field validate not found"},
-		"unknown rule":      {"schema-version: 1\nversion: v0.2.0\nexclude-rules: [no-long-heading, no-todo-opening]\n", `exclude-rules: "no-todo-opening" is not a release notes rule; run release-planner validate --rules to list them`},
+		"unknown rule":      {"schema-version: 1\nversion: v0.2.0\nrelease-notes-rules:\n  no-long-heading: off\n  no-todo-opening: off\n", `release-notes-rules: "no-todo-opening" is not a release notes rule; run release-planner validate --rules to list them`},
+		"bad rule setting":  {"schema-version: 1\nversion: v0.2.0\nrelease-notes-rules:\n  no-long-heading: 100\n", `release-notes-rules.no-long-heading: use off, not "100"`},
+		"rules as a list":   {"schema-version: 1\nversion: v0.2.0\nrelease-notes-rules: [no-long-heading]\n", "cannot unmarshal"},
 		"style not md":      {"schema-version: 1\nversion: v0.2.0\nrelease-notes-style:\n  file: style.txt\n  mode: append\n", "a .md file"},
 	} {
 		t.Run(name, func(t *testing.T) {

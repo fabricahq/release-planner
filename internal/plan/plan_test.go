@@ -334,7 +334,7 @@ func TestReadReportsNotesFindings(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v, want %v: %v", got, want, p.Findings)
 	}
-	p, err = Read(context.Background(), f.repo, Options{NotesDir: "releases", FirstVersion: "v1.0.0", ExcludeRules: []string{"no-empty-heading", "require-pull-requests-last", "list-every-change", "require-closing-link"}}, direct, head)
+	p, err = Read(context.Background(), f.repo, Options{NotesDir: "releases", FirstVersion: "v1.0.0", RulesOff: []string{"no-empty-heading", "require-pull-requests-last", "list-every-change", "require-closing-link"}}, direct, head)
 	if err != nil || len(p.Findings) != 0 {
 		t.Fatal(p.Findings, err)
 	}

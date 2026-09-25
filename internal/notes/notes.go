@@ -68,12 +68,12 @@ func Known(id string) bool {
 	return slices.ContainsFunc(Rules, func(r Rule) bool { return r.ID == id })
 }
 
-// Check returns every finding of every rule not in exclude.
-func Check(text string, r Release, exclude []string) []Finding {
+// Check returns every finding of every rule not in off.
+func Check(text string, r Release, off []string) []Finding {
 	doc := parse(text)
 	var findings []Finding
 	for _, rule := range Rules {
-		if slices.Contains(exclude, rule.ID) {
+		if slices.Contains(off, rule.ID) {
 			continue
 		}
 		found := rule.check(doc, r)

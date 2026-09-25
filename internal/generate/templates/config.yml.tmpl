@@ -28,9 +28,10 @@ first-version: {{.FirstVersion}}
 # release-checks:
 #   workflow: release-checks.yml
 
-# Release notes rules to skip. release-planner validate checks the notes against every rule;
+# Release notes rules to turn off. release-planner validate checks the notes against every rule;
 # list them with: release-planner validate --rules
-# exclude-rules: [no-long-heading]
+# release-notes-rules:
+#   no-long-heading: off
 
 # Your own release notes style, if you want one: a markdown file, and how it combines with
 # Release Planner's default style. append adds yours after the default; replace uses only yours.
