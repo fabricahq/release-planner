@@ -4,7 +4,7 @@
   <a href="LICENSE.md"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue"></a>
 </p>
 
-Release Planner is a command-line tool and a generated GitHub Actions workflow that publish GitHub releases your coding agent drafts and you approve. The agent proposes the version and writes the release notes in a pull request, and merging that pull request tags the merged commit and publishes the notes as the GitHub release.
+Release Planner helps you publish GitHub releases with notes people actually want to read. Your coding agent does the tedious part: it reviews everything that changed since your last release, picks the next version, and drafts the notes in a pull request. You edit the notes as much as you like, and when you merge, the release is published exactly as you approved it.
 
 It is for maintainers who already work with a coding agent, such as Claude Code or Codex, and want release notes written for readers. It works only with repositories hosted on GitHub that use GitHub Actions, and the command runs on macOS and Linux.
 
