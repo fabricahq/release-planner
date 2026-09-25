@@ -2,7 +2,7 @@
 
 The maintainer approves a release by merging a pull request that adds `{{.NotesDir}}/v<version>.md` and changes nothing else. The release commit is the newest commit that pull request shares with `{{.Branch}}`: the commit you branch from, unless you later merge `{{.Branch}}` in. The release contains exactly the commits up to it, however `{{.Branch}}` moves on.
 
-On the pull request, the Release workflow validates the request, runs any release checks and builds any release assets on the release commit, and keeps a release status section at the end of the pull request description up to date. Merging tags the release commit and publishes the file word for word as the GitHub release, with the assets the pull request built. Your job is to open that pull request with accurate notes. You never tag, publish, or merge.
+On the pull request, the Release workflow validates the request, runs any release checks and builds any release assets on the release commit, and keeps the release status in the pull request description up to date. Merging tags the release commit and publishes the file word for word as the GitHub release, with the assets the pull request built. Your job is to open that pull request with accurate notes. You never tag, publish, or merge.
 
 Run every `release-planner` command in this guide with version {{.Version}}. If `release-planner version` prints anything else, install it:
 
@@ -65,27 +65,23 @@ It prints the release commit, which must be the commit inventory listed changes 
 
 ## 7. Open the pull request
 
-Open a pull request titled `Release <version>`, with this description and nothing else, such as tool attribution:
+Open a pull request titled `Release <version>`. Its description is one sentence that says why this version, in this form, and nothing else, such as a heading, a summary of the notes, or tool attribution:
 
 ```markdown
-**[✏️ Edit the release notes](https://github.com/<owner>/<repo>/edit/<branch>/{{.NotesDir}}/<version>.md)**
-
-Merging publishes <version> with these notes, and any files this pull request builds. Saving edits publishes nothing.
-
-<Why this version, in one sentence, such as "Minor: adds the --shout flag.">
+Why <version>? <reason>.
 ```
 
-If you left a change out of the notes that a reader might expect to see, add one line after that sentence naming it and saying why.
+For example: `Why v1.3.0? It adds the --shout flag and breaks nothing, so it's a minor release.` If you left a change out of the notes that a reader might expect to see, add one line after that sentence naming it and saying why.
 
-The Release workflow then adds a `### Release status` section at the end of the description, between `<!-- release-planner:status:start -->` and `<!-- release-planner:status:end -->`: the version, release commit, and previous release, rule findings, release checks, and any assets. Never edit between those markers, and when you revise the description, keep that section intact.
+The Release workflow then adds everything else around your sentence, in two blocks between hidden markers: before it, between `<!-- release-planner:summary:start -->` and `<!-- release-planner:summary:end -->`, a link to edit the notes, what merging does, and the version, release commit, and previous release; after it, between `<!-- release-planner:status:start -->` and `<!-- release-planner:status:end -->`, the jobs, rule findings, and any assets. Never edit those blocks or their markers.
 
-Leave the pull request for the maintainer. Do not merge it. If a check or build fails in the release status, tell the maintainer; the fix belongs in a separate pull request.
+Leave the pull request for the maintainer. Do not merge it. If a job fails in the release status, tell the maintainer; the fix belongs in a separate pull request.
 
 ## 8. Revise on request
 
 The Release workflow validates the pull request on every push. The release status in the description shows rule findings as warnings, not failures, because the maintainer may break a rule on purpose.
 
-When asked to revise, fetch the release branch and keep the maintainer's edits. Edit the notes file in place. Never regenerate it, rewrite it from scratch, or paste one copy over another: that loses edits and leaves stale sections behind.
+When asked to revise, fetch the release branch and keep the maintainer's edits. If the version changes, retitle the pull request and edit only your sentence in the description; the Release workflow updates its blocks. Edit the notes file in place. Never regenerate it, rewrite it from scratch, or paste one copy over another: that loses edits and leaves stale sections behind.
 
 You don't need to merge `{{.Branch}}` when it moves on: the release commit stays where the pull request branched. Merge `{{.Branch}}` into the release branch only to include newer changes, such as a fix for a failed release check, or when the maintainer asks. That moves the release commit to the new `{{.Branch}}` tip, so rerun the inventory there, add the new `entry` lines to the right groups, and update the sections above them:
 
@@ -97,11 +93,11 @@ Then validate and read the whole file again. Keep other changes out of the relea
 
 ## Edit published notes
 
-Published notes can be corrected. Open a pull request that edits only `{{.NotesDir}}/<version>.md` of the published version, and validate it the same way. Merging replaces that release's notes on GitHub; its tag and assets never change. If the release status in the description warns that the notes were edited on GitHub since they merged, tell the maintainer that merging replaces those edits. Never delete a published version's notes file.
+Published notes can be corrected. Open a pull request that edits only `{{.NotesDir}}/<version>.md` of the published version, and validate it the same way. Title it `Edit the <version> release notes`, and describe it in one sentence that says what the edit fixes; the Release workflow adds its blocks around that sentence, as for a release. Merging replaces that release's notes on GitHub; its tag and assets never change. If the description warns that the notes were edited on GitHub since they merged, tell the maintainer that merging replaces those edits. Never delete a published version's notes file.
 
 ## Retry a failed release
 
-Read the release status at the end of the release pull request's description, the failed Release run, and any existing tag or release before acting. Prefer **Re-run failed jobs** on that run: it publishes the same release commit and files, and skips what already succeeded. For a manual retry, run the Release workflow on `{{.Branch}}` with **merged-commit** set to the full SHA of the commit the release pull request merged as; never another commit. Published tags and assets never change, so fix problems in a new release. If the run failed before tagging, fix the cause in a normal pull request, then correct the untagged notes in a new release pull request, whose release commit then includes the fix, or withdraw the request by deleting its file.
+Read the release pull request's description, whose summary at the start names the failed job and whose status at the end has every job's result, the failed Release run, and any existing tag or release before acting. Prefer **Re-run failed jobs** on that run: it publishes the same release commit and files, and skips what already succeeded. For a manual retry, run the Release workflow on `{{.Branch}}` with **merged-commit** set to the full SHA of the commit the release pull request merged as; never another commit. Published tags and assets never change, so fix problems in a new release. If the run failed before tagging, fix the cause in a normal pull request, then correct the untagged notes in a new release pull request, whose release commit then includes the fix, or withdraw the request by deleting its file.
 
 ## Release notes style
 

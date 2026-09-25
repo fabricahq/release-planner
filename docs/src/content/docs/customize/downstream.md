@@ -41,7 +41,7 @@ After a new release publishes, the `downstream` job starts the target workflows,
 - notes edits to a published release
 - a release that failed to publish
 
-A failed trigger doesn't affect the published release. The release status in the release pull request's description lists each target with ✅ or ❌ and a link to its workflow's runs. To try again, use **Re-run failed jobs** on the release run: it runs only the targets whose jobs failed, so a target workflow that already started doesn't run twice. Publishing is skipped because it already succeeded.
+A failed trigger doesn't affect the published release. The release status in the release pull request's description lists each target's job with ✅ or ❌ and a link to it. To try again, use **Re-run failed jobs** on the release run: it runs only the targets whose jobs failed, so a target workflow that already started doesn't run twice. Publishing is skipped because it already succeeded.
 
 ## Create the GitHub App
 

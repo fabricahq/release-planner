@@ -17,10 +17,12 @@ import (
 )
 
 func cmdReport(ctx context.Context, args []string, out io.Writer) error {
-	fs, _ := flags("report", "report --needs <json> --branch <name> (--pull-request <number> | --merged <sha>) [--plan <file>] [--assets <dir>] [--downstream <owner/name:workflow.yml>...]")
+	fs, _ := flags("report", "report --needs <json> --branch <name> (--pull-request <number> [--head-ref <branch>] [--head-repository <owner/name>] | --merged <sha>) [--plan <file>] [--assets <dir>] [--downstream <owner/name:workflow.yml>...]")
 	needs := fs.String("needs", "", "the Release workflow's needs context, as JSON")
 	branch := fs.String("branch", "", "release branch")
 	number := fs.String("pull-request", "", "the release pull request, in its own run")
+	headRef := fs.String("head-ref", "", "the pull request's branch, for the link that edits its notes")
+	headRepository := fs.String("head-repository", "", "the repository of the pull request's branch, if it's a fork")
 	merged := fs.String("merged", "", "after the merge: the commit the release pull request merged as")
 	planFile := fs.String("plan", "", "release plan written by release-planner validate, if validate wrote one")
 	assetsDir := fs.String("assets", "", "directory of the built release assets, if any")
@@ -40,7 +42,8 @@ func cmdReport(ctx context.Context, args []string, out io.Writer) error {
 	}
 	s := report.Status{Server: server, Repository: *repository, Merged: *merged != "",
 		RunURL: fmt.Sprintf("%s/%s/actions/runs/%s", server, *repository, os.Getenv("GITHUB_RUN_ID")),
-		RunID:  os.Getenv("GITHUB_RUN_ID"), RunAttempt: os.Getenv("GITHUB_RUN_ATTEMPT")}
+		RunID:  os.Getenv("GITHUB_RUN_ID"), RunAttempt: os.Getenv("GITHUB_RUN_ATTEMPT"),
+		Branch: *branch, HeadRef: *headRef, HeadRepository: *headRepository, BuildsAssets: *assetsDir != ""}
 	if err := json.Unmarshal([]byte(*needs), &s.Jobs); err != nil {
 		return fmt.Errorf("--needs: %v", err)
 	}
@@ -69,21 +72,32 @@ func cmdReport(ctx context.Context, args []string, out io.Writer) error {
 			s.Archive = fmt.Sprintf("%s/%s/actions/runs/%d/artifacts/%d", server, *repository, s.Plan.BuildRun, id)
 		}
 	}
-	s.Downstream = downstream
-	switch s.Jobs["downstream"].Result {
-	case "success":
-		for i := range s.Downstream {
-			s.Downstream[i].Result = "success"
-		}
-	case "failure", "cancelled":
-		// The needs context has one result for the whole matrix, so read each target's job.
+	// Each job links to its page; without the jobs, the report links the run instead.
+	if s.Failed() != "" || (s.Plan != nil && !s.Plan.Empty()) {
 		run, _ := strconv.ParseInt(os.Getenv("GITHUB_RUN_ID"), 10, 64)
-		conclusions, err := gh.JobConclusions(ctx, run)
-		if err != nil {
-			fmt.Fprintf(out, "::warning title=Release status::Couldn't read the downstream jobs' results: %s\n", escapeData(err.Error()))
+		var err error
+		if s.RunJobs, err = gh.Jobs(ctx, run); err != nil {
+			fmt.Fprintf(out, "::warning title=Release status::Couldn't read the jobs of this run: %s\n", escapeData(err.Error()))
 		}
+		if s.Plan != nil && s.Plan.Reused {
+			if s.BuildJobs, err = gh.Jobs(ctx, s.Plan.BuildRun); err != nil {
+				fmt.Fprintf(out, "::warning title=Release status::Couldn't read the jobs of the pull request's run: %s\n", escapeData(err.Error()))
+			}
+		}
+	}
+	s.Downstream = downstream
+	if r := s.Jobs["downstream"].Result; r == "success" || r == "failure" || r == "cancelled" {
+		// The needs context has one result for the whole matrix, so read each target's job.
 		for i, t := range s.Downstream {
-			s.Downstream[i].Result = conclusions[t.Job()]
+			if r == "success" {
+				s.Downstream[i].Result = r
+				continue
+			}
+			for _, j := range s.RunJobs {
+				if j.Name == t.Job() {
+					s.Downstream[i].Result = j.Conclusion
+				}
+			}
 		}
 	}
 	pr, _ := strconv.Atoi(*number)
@@ -99,16 +113,16 @@ func cmdReport(ctx context.Context, args []string, out io.Writer) error {
 		}
 		pr, s.MergedBy = merge.Number, merge.MergedBy
 	}
-	content := report.Render(s)
-	if content != "" {
-		if err := appendEnvFile("GITHUB_STEP_SUMMARY", content); err != nil {
+	blocks := report.Render(s)
+	if blocks != (report.Blocks{}) {
+		if err := appendEnvFile("GITHUB_STEP_SUMMARY", blocks.Summary+"\n"+blocks.Status); err != nil {
 			return err
 		}
 	}
-	// A new section waits for a plan in the pull request, so an ordinary change whose settings
+	// New blocks wait for a plan in the pull request, so an ordinary change whose settings
 	// fail validation isn't taken for a release. After the merge, every failure is reported.
 	create := s.Merged || s.Plan != nil
-	switch changed, err := report.Update(ctx, gh, pr, content, create); {
+	switch changed, err := report.Update(ctx, gh, pr, blocks, create); {
 	case err != nil:
 		// A fork's pull request gets a read-only token; the step summary still has the report.
 		fmt.Fprintf(out, "::warning title=Release status::Couldn't update the release status in the description of #%d: %s\n", pr, escapeData(err.Error()))

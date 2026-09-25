@@ -57,12 +57,12 @@ While the release pull request is open, the release workflow:
 1. validates the request: one notes file, a version newer than every existing release, and no changes other than release notes
 2. runs any [release checks](/customize/release-checks/) you set up on the release commit
 3. builds any [release assets](/customize/release-assets/) from the release commit, and signs their build provenance
-4. reports the release's status in a section at the end of the pull request description: version, release commit, previous release, any broken release notes rules, the checks, and the files with a link to download them
+4. reports the release's status in the pull request description, around the agent's reason for the version: at the top, a link to edit the notes, what merging does, the version, release commit, and previous release; at the bottom, each job, any broken release notes rules, and the files with a link to download them
 
 If anything fails there, nothing happens until it's fixed, and nothing has been published.
 
 ## When you merge
 
-Merging the release pull request is the approval. The workflow then tags the release commit and publishes the notes as the GitHub release, with the files the pull request built, and updates the release status with a link to the release. If the pull request's run can't be reused, for example because you merged before it finished, the workflow checks and builds the release commit again first.
+Merging the release pull request is the approval. The workflow then tags the release commit and publishes the notes as the GitHub release, with the files the pull request built, and updates the description with a link to the release. If the pull request's run can't be reused, for example because you merged before it finished, the workflow checks and builds the release commit again first.
 
 The tag is created only at the last step, so a version never exists without the notes you approved. If anything fails, the release status says what and how to retry, and a comment on the pull request mentions whoever merged it.

@@ -26,7 +26,7 @@
 {{- end -}}
 name: Release
 # A pull request that adds or edits release notes is validated, checked, and built before it
-# merges, and a section at the end of its description reports the release's status. Merging it
+# merges, and blocks at the start and end of its description report the release's status. Merging it
 # into {{.Branch}} approves publication, so ordinary changes never create releases.
 on:
   push:
@@ -262,16 +262,17 @@ jobs:
         run: release-planner downstream --tag "$TAG" --target "$TARGET"
 {{- end}}
 
-  # Keep the release status section at the end of the release pull request's description up to
-  # date, from its checks through publication, whatever failed. After the merge, a failure also
-  # gets a comment that mentions whoever merged, since editing a description notifies no one.
+  # Keep the summary at the start of the release pull request's description and the status at
+  # its end up to date, from its checks through publication, whatever failed. After the merge, a
+  # failure also gets a comment that mentions whoever merged, since editing a description
+  # notifies no one.
   report:
     needs: [{{.Needs}}, publish{{if .Downstream}}, downstream{{end}}]
     if: always() && needs.validate.result != 'skipped'
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      actions: read # to download and link the build run's assets{{if .Downstream}} and read each downstream job's result{{end}}
+      actions: read # to download and link the build run's assets and link each job{{if .Downstream}} and read each downstream job's result{{end}}
       pull-requests: write # to edit the description's release status and comment on a failure
     steps:
 {{- template "install" .}}
@@ -296,7 +297,9 @@ jobs:
           GITHUB_TOKEN: ${{"{{"}} github.token {{"}}"}}
           NEEDS: ${{"{{"}} toJSON(needs) {{"}}"}}
           PULL_REQUEST: ${{"{{"}} github.event.pull_request.number {{"}}"}}
+          HEAD_REF: ${{"{{"}} github.event.pull_request.head.ref {{"}}"}}
+          HEAD_REPOSITORY: ${{"{{"}} github.event.pull_request.head.repo.full_name {{"}}"}}
           MERGED: ${{"{{"}} inputs.merged-commit || github.sha {{"}}"}}
         run: |
-          if [ -n "$PULL_REQUEST" ]; then target=(--pull-request "$PULL_REQUEST"); else target=(--merged "$MERGED"); fi
+          if [ -n "$PULL_REQUEST" ]; then target=(--pull-request "$PULL_REQUEST" --head-ref "$HEAD_REF" --head-repository "$HEAD_REPOSITORY"); else target=(--merged "$MERGED"); fi
           release-planner report --needs "$NEEDS" --branch {{.Branch}} --plan "$RUNNER_TEMP/plan/release-plan.json"{{if .ReleaseAssets.Workflow}} --assets "$RUNNER_TEMP/release-assets"{{end}}{{range .Downstream}} --downstream {{.Repository}}:{{.Workflow}}{{end}} "${target[@]}"

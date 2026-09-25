@@ -22,8 +22,8 @@ Agents are good at the tedious part: reading every commit and pull request since
 
 1. **You tell your agent "let's release."**
 2. **The agent works out the next release.** It runs `release-planner guide` for the procedure and `release-planner inventory` for every change since the previous release, the candidate versions, and a ready-made line for each pull request with its author. Then it applies your release policy and picks the version.
-3. **The agent opens a release PR.** It writes `_releases/v<version>.md` in your release notes style, checks it with `release-planner validate`, and explains its choice of version in the PR.
-4. **The Release workflow checks the release on the pull request.** The release commit is the newest commit the release PR shares with your release branch. The workflow validates the request, runs any release checks and builds any release assets on the release commit, and keeps a release status section at the end of the PR description up to date.
+3. **The agent opens a release PR.** It writes `_releases/v<version>.md` in your release notes style, checks it with `release-planner validate`, and explains its choice of version in one sentence in the PR description.
+4. **The Release workflow checks the release on the pull request.** The release commit is the newest commit the release PR shares with your release branch. The workflow validates the request, runs any release checks and builds any release assets on the release commit, and keeps the release status in the PR description up to date: a link to edit the notes and what merging does at the top, and the jobs and assets at the bottom.
 5. **You edit the notes and merge.** Change anything you like. Saving edits publishes nothing.
 6. **Merging publishes the release.** The workflow tags the release commit and publishes the notes file word for word as the GitHub release, with the files the PR built, then starts any downstream workflows.
 
@@ -261,7 +261,7 @@ Everyone runs the version your config pins. Agents check `release-planner versio
 | `inventory [--head <ref>] [--repository <owner/name>] [--offline]` | Agent | Lists the previous release, every commit since it with its pull request author's GitHub handle, the candidate next versions, and the lines that list each change, the new contributors, and the closing link in the notes. |
 | `validate --base <ref> [--head <ref>] [--repository <owner/name>] [--ci]` | Agent and CI | Validates a release pull request against the release branch, and prints the tag, release commit, and notes to publish, and any notes edits. Broken [release notes rules](#release-notes-rules) fail, or with `--ci` are warnings. In the Release workflow, it also warns when the `release` or `downstream` environment isn't set up as recommended. `validate --ci --merged <sha>` plans the publication a merge approved. `validate --rules` lists the rules. |
 | `publish --plan <file> --branch <name> [--built-plan <file>] [--assets <dir> [--signer-workflow <path>]]` | CI | Tags the release commit and publishes the approved notes, with optional attested files staged on a draft and verified first, and replaces edited notes of published releases. |
-| `report --needs <json> --branch <name> (--pull-request <n> \| --merged <sha>) [--downstream <owner/name:workflow.yml>...]` | CI | Writes the release status section of the release pull request's description. |
+| `report --needs <json> --branch <name> (--pull-request <n> [--head-ref <branch>] [--head-repository <owner/name>] \| --merged <sha>) [--downstream <owner/name:workflow.yml>...]` | CI | Writes the release status blocks at the start and end of the release pull request's description. |
 | `downstream --tag <tag> --target <owner/name:workflow.yml>...` | CI | Starts downstream workflows for a new stable release. |
 | `version` | Anyone | Prints the running version. |
 
@@ -290,7 +290,7 @@ It also refuses to delete notes that are already tagged, and it won't let a new 
 
 ### What if publication fails?
 
-Nothing is tagged until `validate`, your release checks, and any asset build pass. The release status in the PR description names the failed job, and a comment on the PR mentions whoever merged. Use **Re-run failed jobs** on the failed run, or start the Release workflow by hand with `merged-commit` set to the commit the release PR merged as. A retry publishes the same release commit, and after a successful publication makes no changes, keeping any notes edited since. Published tags and files never move; fix problems in a new release. Notes can be corrected in a new PR.
+Nothing is tagged until `validate`, your release checks, and any asset build pass. The summary at the top of the PR description names the failed job, and a comment on the PR mentions whoever merged. Use **Re-run failed jobs** on the failed run, or start the Release workflow by hand with `merged-commit` set to the commit the release PR merged as. A retry publishes the same release commit, and after a successful publication makes no changes, keeping any notes edited since. Published tags and files never move; fix problems in a new release. Notes can be corrected in a new PR.
 
 ### Can I publish binaries or other assets?
 

@@ -1,6 +1,7 @@
-// Package report writes the release status section at the end of a release pull request's
-// description, which follows the release from the pull request's checks through publication,
-// and, when a merged release fails, a comment that tells whoever merged it.
+// Package report writes the release pull request's description blocks, which follow the
+// release from the pull request's checks through publication: a summary at the start, which
+// says what merging does and then what it did, and a status at the end, with the jobs and
+// assets. When a merged release fails, it also writes a comment that tells whoever merged it.
 package report
 
 import (
@@ -14,11 +15,14 @@ import (
 	"github.com/fabricahq/release-planner/internal/publish"
 )
 
-// Start and End delimit the release status section at the end of a pull request's
-// description. The section is rewritten on every report; the text around it is left alone.
+// The markers delimit the two blocks the Release workflow owns in a pull request's
+// description: the summary at the start and the status at the end. Each report rewrites what
+// is between them; the text around them, such as the agent's reason for the version, is left alone.
 const (
-	Start = "<!-- release-planner:status:start -->"
-	End   = "<!-- release-planner:status:end -->"
+	SummaryStart = "<!-- release-planner:summary:start -->"
+	SummaryEnd   = "<!-- release-planner:summary:end -->"
+	StatusStart  = "<!-- release-planner:status:start -->"
+	StatusEnd    = "<!-- release-planner:status:end -->"
 )
 
 // Job is one Release workflow job's result and outputs, as the workflow's needs context has them.
@@ -43,19 +47,29 @@ type Target struct {
 // Job is the name of the target's job in the Release workflow's downstream matrix.
 func (t Target) Job() string { return "downstream (" + t.Repository + ":" + t.Workflow + ")" }
 
-// Status is everything the release status section describes.
+func (t Target) label() string { return t.Repository + " `" + t.Workflow + "`" }
+
+// Status is everything the description's blocks describe.
 type Status struct {
 	// Server is the GitHub URL, such as https://github.com, and Repository the owner/name.
 	Server, Repository string
 	RunURL             string
 	// RunID and RunAttempt identify the workflow run attempt that reports.
 	RunID, RunAttempt string
+	// Branch is the release branch. Before the merge, HeadRef is the pull request's branch, in
+	// HeadRepository, or in Repository when that is "".
+	Branch, HeadRef, HeadRepository string
 	// Merged is true after the pull request merged, in the run that publishes.
 	Merged bool
 	// Plan is the validated plan, or nil when validation failed before writing one.
-	Plan   *plan.Plan
-	Jobs   map[string]Job
-	Assets []Asset
+	Plan *plan.Plan
+	Jobs map[string]Job
+	// RunJobs are this run's jobs and BuildJobs those of the pull request's run, when the
+	// release reuses it, for linking each job. Either may be missing.
+	RunJobs, BuildJobs []publish.RunJob
+	// BuildsAssets is true when the repository configures release assets.
+	BuildsAssets bool
+	Assets       []Asset
 	// Archive is the URL of the release-assets workflow artifact, a zip of the assets, or ""
 	// when it's unknown.
 	Archive  string
@@ -64,17 +78,22 @@ type Status struct {
 	Downstream []Target
 }
 
+// Blocks are the contents of the description's summary and status blocks, without their markers.
+type Blocks struct{ Summary, Status string }
+
 // jobs are the Release workflow's jobs, in the order they run.
 var jobs = []struct{ id, label string }{
-	{"validate", "Validate the request"},
-	{"release-checks", "Release checks"},
+	{"validate", "Check the version and release notes"},
+	{"release-checks", "Run the release checks"},
 	{"release-assets", "Build the release assets"},
 	{"attest", "Attest the release assets"},
 	{"publish", "Publish"},
 	{"downstream", "Run downstream workflows"},
 }
 
-var icons = map[string]string{"success": "✅", "failure": "❌", "cancelled": "⛔"}
+var icons = map[string]string{"success": "✅", "failure": "❌", "cancelled": "⚪"}
+
+var failedVerb = map[string]string{"failure": "failed", "cancelled": "was cancelled"}
 
 // Failed returns the first Release workflow job that failed or was cancelled, or "".
 func (s Status) Failed() string {
@@ -86,90 +105,191 @@ func (s Status) Failed() string {
 	return ""
 }
 
-// Render writes the release status section, without its markers, or returns "" when there's
-// nothing to report: the pull request requests no release and edits no notes, and nothing failed.
-func Render(s Status) string {
-	failed := s.Failed()
-	p := s.Plan
-	if failed == "" && (p == nil || p.Empty()) {
-		return ""
+func (s Status) release(tag string) string {
+	return fmt.Sprintf("[%s](%s/%s/releases/tag/%s)", tag, s.Server, s.Repository, tag)
+}
+
+// edit links to the page that edits a notes file: on the pull request's branch before the
+// merge, and on the release branch after it, where saving starts a pull request that edits the
+// published notes.
+func (s Status) edit(tag, file string) string {
+	repository, ref := s.Repository, s.Branch
+	if !s.Merged && s.HeadRef != "" {
+		ref = s.HeadRef
+		if s.HeadRepository != "" {
+			repository = s.HeadRepository
+		}
 	}
+	return fmt.Sprintf("**[✏️ Edit the %s release notes](%s/%s/edit/%s/%s)**", tag, s.Server, repository, pathEscape(ref), pathEscape(file))
+}
+
+func pathEscape(p string) string {
+	parts := strings.Split(p, "/")
+	for i, part := range parts {
+		parts[i] = url.PathEscape(part)
+	}
+	return strings.Join(parts, "/")
+}
+
+// Render writes the description's blocks, or returns empty blocks when there's nothing to
+// report: the pull request requests no release and edits no notes, and nothing failed.
+func Render(s Status) Blocks {
+	p := s.Plan
+	if s.Failed() == "" && (p == nil || p.Empty()) {
+		return Blocks{}
+	}
+	return Blocks{Summary: s.summary(), Status: s.status()}
+}
+
+func (s Status) summary() string {
 	var b strings.Builder
 	line := func(format string, args ...any) { fmt.Fprintf(&b, format+"\n", args...) }
-	link := func(tag string) string {
-		return fmt.Sprintf("[%s](%s/%s/releases/tag/%s)", tag, s.Server, s.Repository, tag)
+	p, failed := s.Plan, s.Failed()
+	if p == nil {
+		p = &plan.Plan{}
 	}
-	line("### Release status\n")
-
 	published := s.Jobs["publish"].Result == "success"
-	if p != nil && p.Tag != "" {
-		version := "`" + p.Tag + "`"
-		if p.Prerelease {
-			version += " (prerelease)"
-		}
-		previous := "None"
-		if p.Previous != "" {
-			previous = link(p.Previous)
-		}
-		line("| Version | Release commit | Previous release |\n| --- | --- | --- |")
-		line("| %s | [`%s`](%s/%s/commit/%s) | %s |\n", version, short(p.Commit), s.Server, s.Repository, p.Commit, previous)
-		switch {
-		case s.Merged && published:
-			line("✅ Published %s.\n", link(p.Tag))
-		case !s.Merged && failed == "" && s.Jobs["validate"].Outputs["build"] != "true":
-			line("Release checks and assets run after the merge, because this pull request comes from a fork.\n")
-		}
+
+	if p.Tag != "" && p.File != "" {
+		line("%s\n", s.edit(p.Tag, p.File))
 	}
-	if failed != "" {
-		line("❌ **The %s job %s.** See [the workflow run](%s).", failed, map[string]string{"failure": "failed", "cancelled": "was cancelled"}[s.Jobs[failed].Result], s.RunURL)
-		if s.Merged {
-			line("Once the cause is fixed, use **Re-run failed jobs** on that run. It uses the same release commit and files, and changes nothing that already succeeded.\n")
-		} else {
-			line("Fix the cause and push to this branch, and the checks run again. Nothing is published until this pull request merges.\n")
-		}
+	for _, e := range p.Edits {
+		line("%s\n", s.edit(e.Tag, e.File))
 	}
 
-	var ran []string
-	for _, j := range jobs {
-		switch job := s.Jobs[j.id]; {
-		case job.Result == "skipped" && p != nil && p.Reused && (j.id == "release-checks" || j.id == "release-assets" || j.id == "attest"):
-			ran = append(ran, fmt.Sprintf("♻️ %s ([reused](%s/%s/actions/runs/%d))", j.label, s.Server, s.Repository, p.BuildRun))
-		case icons[job.Result] != "":
-			ran = append(ran, icons[job.Result]+" "+j.label)
+	failure := func(fix string) {
+		if failed != "" {
+			line("❌ **The %s job %s.** See [the workflow run](%s). %s\n", failed, failedVerb[s.Jobs[failed].Result], s.RunURL, fix)
 		}
 	}
-	if len(ran) > 0 {
-		line("**Jobs:** %s\n", strings.Join(ran, " · "))
-	}
-
-	if p != nil {
-		findings(&b, p.File, p.Findings)
-		if len(p.Edits) > 0 {
-			line("#### Notes edits\n")
+	switch {
+	case s.Merged:
+		if published {
+			if p.Tag != "" {
+				line("✅ Published %s from `%s`.\n", s.release(p.Tag), short(p.Commit))
+			}
 			for _, e := range p.Edits {
-				switch {
-				case s.Merged && published:
-					line("- ✅ Updated the notes of %s from `%s`.", link(e.Tag), e.File)
-				case s.Merged:
-					line("- The notes of %s aren't updated yet.", link(e.Tag))
-				default:
-					line("- Merging replaces the notes of %s with `%s`.", link(e.Tag), e.File)
-					if e.HandEdited {
-						line("  - ⚠️ The %s notes on GitHub differ from `%s` on the release branch: someone edited them on GitHub. Merging replaces them with this file.", e.Tag, e.File)
-					}
+				line("✅ Updated the notes of %s.\n", s.release(e.Tag))
+			}
+		}
+		failure("Once the cause is fixed, use **Re-run failed jobs** on that run. It uses the same release commit and files, and changes nothing that already succeeded.")
+	default:
+		failure("Fix the cause and push to this branch, and the checks run again. Nothing is published until this pull request merges.")
+		if p.Empty() {
+			break
+		}
+		line("**When you merge this PR:**")
+		if p.Tag != "" {
+			line("- The release commit, `%s`, is tagged `%s`.", short(p.Commit), p.Tag)
+			files := ""
+			switch {
+			case len(s.Assets) > 0:
+				files = " and the files listed below"
+			case s.BuildsAssets:
+				files = " and the release assets"
+			}
+			line("- The %s GitHub release is published with these release notes%s.", p.Tag, files)
+			if len(s.Downstream) > 0 && !p.Prerelease {
+				var names []string
+				for _, t := range s.Downstream {
+					names = append(names, t.label())
+				}
+				if len(names) == 1 {
+					line("- Then %s runs.", names[0])
+				} else {
+					line("- Then these workflows run: %s.", strings.Join(names, ", "))
 				}
 			}
-			line("")
-			for _, e := range p.Edits {
-				findings(&b, e.File, e.Findings)
+		}
+		for _, e := range p.Edits {
+			line("- The %s release notes on GitHub are replaced with `%s`. Its tag and files don't change.", e.Tag, e.File)
+			if e.HandEdited {
+				line("- ⚠️ Someone edited the %s notes on GitHub since they merged, so they differ from `%s` on the release branch. Merging replaces those edits.", e.Tag, e.File)
 			}
 		}
-		if len(p.Warnings) > 0 {
-			line("#### Settings\n")
-			for _, w := range p.Warnings {
-				line("- ⚠️ %s", w)
+		line("- This description updates with a link to the release, and you're @mentioned if anything fails.\n")
+	}
+
+	if !p.Empty() {
+		line("### Release status\n")
+		if p.Tag != "" {
+			version := "`" + p.Tag + "`"
+			if p.Prerelease {
+				version += " (prerelease)"
 			}
-			line("")
+			previous := "None"
+			if p.Previous != "" {
+				previous = s.release(p.Previous)
+			}
+			line("| Version | Release commit | Previous release |\n| --- | --- | --- |")
+			line("| %s | [`%s`](%s/%s/commit/%s) | %s |\n", version, short(p.Commit), s.Server, s.Repository, p.Commit, previous)
+		}
+		if len(p.Edits) > 0 {
+			line("| Version | Release notes file |\n| --- | --- |")
+			for _, e := range p.Edits {
+				line("| %s | `%s` |", s.release(e.Tag), e.File)
+			}
+		}
+	}
+	return strings.TrimRight(b.String(), "\n") + "\n"
+}
+
+func (s Status) status() string {
+	var b strings.Builder
+	line := func(format string, args ...any) { fmt.Fprintf(&b, format+"\n", args...) }
+	p := s.Plan
+	published := s.Jobs["publish"].Result == "success"
+	warnings := 0
+	if p != nil {
+		warnings = len(p.Findings)
+		for _, e := range p.Edits {
+			warnings += len(e.Findings)
+		}
+	}
+
+	var rows []string
+	row := func(icon, label, cell string) {
+		rows = append(rows, fmt.Sprintf("| %s | %s | %s |", icon, label, cell))
+	}
+	for _, j := range jobs {
+		result := s.Jobs[j.id].Result
+		switch {
+		case j.id == "downstream":
+			if icons[result] == "" {
+				continue
+			}
+			for _, t := range s.Downstream {
+				icon := icons[t.Result]
+				if icon == "" {
+					icon = "❔"
+				}
+				row(icon, "Run "+t.label(), s.details(s.RunJobs, t.Job(), s.RunURL))
+			}
+		case j.id == "publish" && !s.Merged && p != nil && !p.Empty():
+			row("⏸️", j.label, "Runs when you merge")
+		case result == "skipped" && p != nil && p.Reused && (j.id == "release-checks" || j.id == "release-assets" || j.id == "attest"):
+			build := fmt.Sprintf("%s/%s/actions/runs/%d", s.Server, s.Repository, p.BuildRun)
+			row("♻️", j.label, fmt.Sprintf("[Reused from the pull request](%s)", jobURL(s.BuildJobs, j.id, build)))
+		case icons[result] != "":
+			icon, label := icons[result], j.label
+			if j.id == "validate" && warnings > 0 {
+				label += fmt.Sprintf(" (%d %s)", warnings, plural(warnings, "warning"))
+				if result == "success" {
+					icon = "⚠️"
+				}
+			}
+			row(icon, label, s.details(s.RunJobs, j.id, s.RunURL))
+		}
+	}
+	if len(rows) > 0 {
+		line("#### Jobs\n\n| | Job | |\n| :-: | --- | --- |\n%s\n", strings.Join(rows, "\n"))
+	}
+
+	if warnings > 0 {
+		line("#### Release notes warnings\n")
+		findings(&b, p.File, p.Findings)
+		for _, e := range p.Edits {
+			findings(&b, e.File, e.Findings)
 		}
 	}
 
@@ -191,25 +311,45 @@ func Render(s Status) string {
 		line("")
 	}
 
-	if r := s.Jobs["downstream"].Result; len(s.Downstream) > 0 && icons[r] != "" {
-		line("#### Downstream\n")
-		for _, t := range s.Downstream {
-			icon := icons[t.Result]
-			if icon == "" {
-				icon = "❔"
-			}
-			line("- %s [%s `%s`](%s/%s/actions/workflows/%s)", icon, t.Repository, t.Workflow, s.Server, t.Repository, t.Workflow)
+	if p != nil {
+		for _, w := range p.Warnings {
+			line("⚠️ %s\n", w)
 		}
-		line("")
+		if p.Tag != "" && !s.Merged && s.Failed() == "" && s.Jobs["validate"].Outputs["build"] != "true" {
+			line("Release checks and assets run after the merge, because this pull request comes from a fork.\n")
+		}
 	}
 	return strings.TrimRight(b.String(), "\n") + "\n"
+}
+
+func (s Status) details(run []publish.RunJob, name, fallback string) string {
+	return fmt.Sprintf("[Details](%s)", jobURL(run, name, fallback))
+}
+
+// jobURL returns the page of the run's job with the name, or of the first job of the
+// reusable workflow that job calls, whose jobs are named like "release-assets / build", or
+// fallback when the run has none.
+func jobURL(run []publish.RunJob, name, fallback string) string {
+	for _, j := range run {
+		if (j.Name == name || strings.HasPrefix(j.Name, name+" / ")) && j.URL != "" {
+			return j.URL
+		}
+	}
+	return fallback
+}
+
+func plural(n int, word string) string {
+	if n == 1 {
+		return word
+	}
+	return word + "s"
 }
 
 func findings(b *strings.Builder, file string, found []notes.Finding) {
 	if len(found) == 0 {
 		return
 	}
-	fmt.Fprintf(b, "#### Release notes rules\n\n`%s` breaks these rules. They don't block merging; fix them if they're mistakes.\n\n", file)
+	fmt.Fprintf(b, "`%s` breaks these rules. They don't block merging; fix them if they're mistakes.\n\n", file)
 	for _, f := range found {
 		fmt.Fprintf(b, "- %s\n", f.String())
 	}
@@ -233,51 +373,68 @@ func size(n int64) string {
 	return fmt.Sprintf("%d B", n)
 }
 
-// Update writes content into the release status section at the end of the pull request's
-// description, and reports whether it changed the description. It adds the section only if
-// create is true, and never changes the text outside the section. An empty content leaves a
-// missing section missing and says an existing one is out of date.
-func Update(ctx context.Context, gh *publish.GitHub, number int, content string, create bool) (bool, error) {
+// Update writes the blocks into the pull request's description, and reports whether it
+// changed the description. It adds missing blocks, the summary at the start and the status at
+// the end, only if create is true or the description already has one, and never changes the
+// text outside the blocks. Empty blocks leave a description without blocks alone, and say
+// existing ones are out of date.
+func Update(ctx context.Context, gh *publish.GitHub, number int, blocks Blocks, create bool) (bool, error) {
 	// Read the description just before writing it, so a maintainer's edit is less likely to be lost.
 	body, err := gh.PullRequestBody(ctx, number)
 	if err != nil {
 		return false, err
 	}
-	updated, found := splice(body, content)
-	if !found && (content == "" || !create) {
+	found := strings.Contains(body, SummaryStart) || strings.Contains(body, StatusStart)
+	switch {
+	case !found && (blocks == Blocks{} || !create):
 		return false, nil
+	case blocks == Blocks{}:
+		blocks.Summary = "This pull request no longer requests a release or edits release notes.\n"
 	}
-	if found && content == "" {
-		updated, _ = splice(body, "### Release status\n\nThis pull request no longer requests a release or edits release notes.\n")
-	}
+	updated := splice(body, blocks)
 	if updated == body {
 		return false, nil
 	}
 	return true, gh.UpdatePullRequestBody(ctx, number, updated)
 }
 
-// splice returns body with its status section's content replaced by content, or with the
-// section appended after a blank line, and whether body had a section. A section whose end
-// marker was deleted runs to the end of body.
-func splice(body, content string) (string, bool) {
-	section := Start + "\n" + content + "\n" + End
-	i := strings.Index(body, Start)
-	if i < 0 {
-		switch {
-		case body == "" || strings.HasSuffix(body, "\n\n") || strings.HasSuffix(body, "\r\n\r\n"):
-		case strings.HasSuffix(body, "\n"):
-			body += "\n"
-		default:
-			body += "\n\n"
+// splice returns body with each block's content replaced, or with a missing summary inserted
+// at the start and a missing status appended at the end, each a blank line from the rest. A
+// block whose end marker was deleted runs to the next block, or to the end of body.
+func splice(body string, blocks Blocks) string {
+	summary := SummaryStart + "\n" + blocks.Summary + SummaryEnd
+	if i := strings.Index(body, SummaryStart); i >= 0 {
+		body = body[:i] + summary + rest(body[i+len(SummaryStart):], SummaryEnd, StatusStart)
+	} else {
+		body = summary + "\n\n" + body
+	}
+
+	status := StatusStart + "\n" + blocks.Status + StatusEnd
+	if i := strings.Index(body, StatusStart); i >= 0 {
+		return body[:i] + status + rest(body[i+len(StatusStart):], StatusEnd, "")
+	}
+	switch {
+	case strings.HasSuffix(body, "\n\n") || strings.HasSuffix(body, "\r\n\r\n"):
+	case strings.HasSuffix(body, "\n"):
+		body += "\n"
+	default:
+		body += "\n\n"
+	}
+	return body + status
+}
+
+// rest returns what follows a block's old content: the text after its end marker, or, when
+// the end marker is missing, the text from the next marker, or nothing.
+func rest(after, end, next string) string {
+	if j := strings.Index(after, end); j >= 0 {
+		return after[j+len(end):]
+	}
+	if next != "" {
+		if j := strings.Index(after, next); j >= 0 {
+			return after[j:]
 		}
-		return body + section, false
 	}
-	rest := body[i+len(Start):]
-	j := strings.Index(rest, End)
-	if j < 0 {
-		return body[:i] + section, true
-	}
-	return body[:i] + section + rest[j+len(End):], true
+	return ""
 }
 
 // Failure writes the comment that tells whoever merged the pull request which job failed, or

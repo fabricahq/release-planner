@@ -632,31 +632,40 @@ func (g *GitHub) ArtifactID(ctx context.Context, run int64, name string) (int64,
 	return 0, nil
 }
 
-// JobConclusions maps each of a workflow run's jobs, by name, to the conclusion of its
-// latest attempt, which stands after Re-run failed jobs.
-func (g *GitHub) JobConclusions(ctx context.Context, run int64) (map[string]string, error) {
-	conclusions, attempts := map[string]string{}, map[string]int{}
+// RunJob is one job of a workflow run, at its latest attempt.
+type RunJob struct {
+	Name       string `json:"name"`
+	Conclusion string `json:"conclusion"`
+	URL        string `json:"html_url"`
+	RunAttempt int    `json:"run_attempt"`
+}
+
+// Jobs lists a workflow run's jobs, each at its latest attempt, which stands after Re-run
+// failed jobs, in the order the API lists them.
+func (g *GitHub) Jobs(ctx context.Context, run int64) ([]RunJob, error) {
+	var jobs []RunJob
+	index := map[string]int{}
 	target := fmt.Sprintf("/actions/runs/%d/jobs?filter=all&per_page=100", run)
 	for target != "" {
 		var page struct {
-			Jobs []struct {
-				Name       string `json:"name"`
-				Conclusion string `json:"conclusion"`
-				RunAttempt int    `json:"run_attempt"`
-			} `json:"jobs"`
+			Jobs []RunJob `json:"jobs"`
 		}
 		next, err := g.do(ctx, http.MethodGet, target, nil, &page)
 		if err != nil {
 			return nil, fmt.Errorf("list the jobs of run %d in %s: %v", run, g.Repository, err)
 		}
 		for _, j := range page.Jobs {
-			if attempt, ok := attempts[j.Name]; !ok || j.RunAttempt > attempt {
-				conclusions[j.Name], attempts[j.Name] = j.Conclusion, j.RunAttempt
+			switch i, ok := index[j.Name]; {
+			case !ok:
+				index[j.Name] = len(jobs)
+				jobs = append(jobs, j)
+			case j.RunAttempt > jobs[i].RunAttempt:
+				jobs[i] = j
 			}
 		}
 		target = next
 	}
-	return conclusions, nil
+	return jobs, nil
 }
 
 // DispatchWorkflow runs a workflow that has a workflow_dispatch trigger on the repository's

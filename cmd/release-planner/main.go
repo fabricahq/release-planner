@@ -43,7 +43,7 @@ Prepare a release (agents):
 
 Run in the Release workflow:
   publish     Tag the release commit and publish the approved notes, or edit published notes
-  report      Write the release status section of the release pull request's description
+  report      Write the release status blocks of the release pull request's description
   downstream  Run workflows in other repositories for a new release
 
 Other:
