@@ -221,16 +221,20 @@ jobs:
 {{- if .Downstream}}
 
   # After a new stable release, run the workflows that depend on it in other repositories,
-  # with a GitHub App token limited to them. Nothing here can change the release.
+  # with a GitHub App token limited to them. Nothing here can change the release. One job
+  # per target, so Re-run failed jobs runs only the targets that failed.
   downstream:
+    name: downstream (${{"{{"}} matrix.target {{"}}"}})
     needs: [validate, publish]
     if: needs.publish.result == 'success' && needs.validate.outputs.tag != '' && !contains(needs.validate.outputs.version, '-')
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [{{range $i, $d := .Downstream}}{{if $i}}, {{end}}{{yamlString (printf "%s:%s" $d.Repository $d.Workflow)}}{{end}}]
     runs-on: ubuntu-latest
     environment: downstream
     permissions:
       contents: read
-    outputs:
-      results: ${{"{{"}} steps.run.outputs.results {{"}}"}}
     steps:
       - name: Check the downstream GitHub App settings
         env:
@@ -250,12 +254,12 @@ jobs:
           repositories: {{yamlString (join .DownstreamRepositories ",")}}
           permission-actions: write
 {{- template "install" .}}
-      - name: Run the downstream workflows
-        id: run
+      - name: Run the downstream workflow
         env:
           GITHUB_TOKEN: ${{"{{"}} steps.token.outputs.token {{"}}"}}
           TAG: ${{"{{"}} needs.validate.outputs.tag {{"}}"}}
-        run: release-planner downstream --tag "$TAG"{{range .Downstream}} --target {{.Repository}}:{{.Workflow}}{{end}}
+          TARGET: ${{"{{"}} matrix.target {{"}}"}}
+        run: release-planner downstream --tag "$TAG" --target "$TARGET"
 {{- end}}
 
   # Keep one status comment on the release pull request, from its checks through publication,
@@ -266,7 +270,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      actions: read # to download the pull request's run's assets
+      actions: read # to download the pull request's run's assets{{if .Downstream}} and read each downstream job's result{{end}}
       pull-requests: write # to write the status comment
     steps:
 {{- template "install" .}}
@@ -294,4 +298,4 @@ jobs:
           MERGED: ${{"{{"}} inputs.merged-commit || github.sha {{"}}"}}
         run: |
           if [ -n "$PULL_REQUEST" ]; then target=(--pull-request "$PULL_REQUEST"); else target=(--merged "$MERGED"); fi
-          release-planner report --needs "$NEEDS" --branch {{.Branch}} --plan "$RUNNER_TEMP/plan/release-plan.json"{{if .ReleaseAssets.Workflow}} --assets "$RUNNER_TEMP/release-assets"{{end}} "${target[@]}"
+          release-planner report --needs "$NEEDS" --branch {{.Branch}} --plan "$RUNNER_TEMP/plan/release-plan.json"{{if .ReleaseAssets.Workflow}} --assets "$RUNNER_TEMP/release-assets"{{end}}{{range .Downstream}} --downstream {{.Repository}}:{{.Workflow}}{{end}} "${target[@]}"

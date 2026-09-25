@@ -92,15 +92,20 @@ func TestRendersPublicationReuseAndDownstream(t *testing.T) {
 	p := release()
 	p.Reused, p.BuildRun = true, 77
 	s := status(p, true, results("validate", "success", "release-checks", "skipped", "release-assets", "skipped", "attest", "skipped", "publish", "success", "downstream", "failure"))
-	s.Jobs["downstream"] = Job{Result: "failure", Outputs: map[string]string{"results": `[{"repository":"o/tap","workflow":"update.yml"},{"repository":"o/bucket","workflow":"update.yml","error":"not found"}]`}}
+	s.Downstream = []Target{{"o/tap", "update.yml", "success"}, {"o/bucket", "update.yml", "failure"}, {"o/other", "update.yml", ""}}
 	body := Render(s)
 	contains(t, body, "✅ Published [v1.2.0](https://github.com/o/r/releases/tag/v1.2.0).",
 		"- ♻️ Release checks: reused from [the pull request's run](https://github.com/o/r/actions/runs/77)",
 		"- ♻️ Attest the release assets: reused",
 		"- ✅ [o/tap `update.yml`](https://github.com/o/tap/actions/workflows/update.yml)",
 		"- ❌ [o/bucket `update.yml`](https://github.com/o/bucket/actions/workflows/update.yml)",
+		"- ❔ [o/other `update.yml`](https://github.com/o/other/actions/workflows/update.yml)",
 		"❌ **The downstream job failed.**")
 	lacks(t, body, "Merging publishes")
+
+	// Downstream jobs that never ran, such as for a prerelease, list nothing.
+	s.Jobs["downstream"] = Job{Result: "skipped"}
+	lacks(t, Render(s), "### Downstream")
 }
 
 func TestRendersNotesEdits(t *testing.T) {

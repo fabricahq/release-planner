@@ -498,7 +498,12 @@ var combinations = map[string]string{
 }
 
 type job struct {
-	Needs       any               `yaml:"needs"`
+	Name     string `yaml:"name"`
+	Needs    any    `yaml:"needs"`
+	Strategy struct {
+		FailFast *bool               `yaml:"fail-fast"`
+		Matrix   map[string][]string `yaml:"matrix"`
+	} `yaml:"strategy"`
 	If          string            `yaml:"if"`
 	Uses        string            `yaml:"uses"`
 	Secrets     any               `yaml:"secrets"`
@@ -619,9 +624,22 @@ func TestWorkflowCombinations(t *testing.T) {
 					d.Steps[1].With["owner"] != "fabricahq" || d.Steps[1].With["permission-actions"] != "write" {
 					t.Errorf("downstream: %+v", d)
 				}
-				last := d.Steps[len(d.Steps)-1].Run
-				if !strings.Contains(last, "--target fabricahq/homebrew-tap:update-code-rules.yml") {
-					t.Errorf("downstream runs %q", last)
+				// One job per target, named for it, so a retry runs only the targets that failed.
+				targets := []string{"fabricahq/homebrew-tap:update-code-rules.yml"}
+				if name == "all" {
+					targets = append(targets, "fabricahq/scoop-bucket:update.yml")
+				}
+				if d.Name != "downstream (${{ matrix.target }})" || d.Strategy.FailFast == nil || *d.Strategy.FailFast || !slices.Equal(d.Strategy.Matrix["target"], targets) {
+					t.Errorf("downstream matrix: %q %+v", d.Name, d.Strategy)
+				}
+				if last := d.Steps[len(d.Steps)-1]; last.Run != `release-planner downstream --tag "$TAG" --target "$TARGET"` {
+					t.Errorf("downstream runs %q", last.Run)
+				}
+				run := jobs["report"].Steps[len(jobs["report"].Steps)-1].Run
+				for _, target := range targets {
+					if !strings.Contains(run, "--downstream "+target) {
+						t.Errorf("report lacks --downstream %s: %q", target, run)
+					}
 				}
 			}
 			report := jobs["report"]

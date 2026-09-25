@@ -5,7 +5,6 @@ package report
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -30,12 +29,15 @@ type Asset struct {
 	Digest string // sha256:<hex>
 }
 
-// Target is one downstream workflow the downstream job ran, as its results output lists it.
+// Target is one downstream workflow, which its own downstream job runs.
 type Target struct {
-	Repository string `json:"repository"`
-	Workflow   string `json:"workflow"`
-	Error      string `json:"error,omitempty"`
+	Repository, Workflow string
+	// Result is the conclusion of the target's job, or "" when it's unknown.
+	Result string
 }
+
+// Job is the name of the target's job in the Release workflow's downstream matrix.
+func (t Target) Job() string { return "downstream (" + t.Repository + ":" + t.Workflow + ")" }
 
 // Status is everything the comment describes.
 type Status struct {
@@ -49,6 +51,8 @@ type Status struct {
 	Jobs     map[string]Job
 	Assets   []Asset
 	MergedBy string
+	// Downstream lists the downstream workflows, with their jobs' results.
+	Downstream []Target
 }
 
 // jobs are the Release workflow's jobs, in the order they run.
@@ -184,20 +188,16 @@ func Render(s Status) string {
 		line("")
 	}
 
-	if d := s.Jobs["downstream"]; d.Result == "success" || d.Result == "failure" {
-		var targets []Target
-		_ = json.Unmarshal([]byte(d.Outputs["results"]), &targets)
-		if len(targets) > 0 {
-			line("### Downstream\n")
-			for _, t := range targets {
-				icon := "✅"
-				if t.Error != "" {
-					icon = "❌"
-				}
-				line("- %s [%s `%s`](%s/%s/actions/workflows/%s)", icon, t.Repository, t.Workflow, s.Server, t.Repository, t.Workflow)
+	if r := s.Jobs["downstream"].Result; len(s.Downstream) > 0 && icons[r] != "" {
+		line("### Downstream\n")
+		for _, t := range s.Downstream {
+			icon := icons[t.Result]
+			if icon == "" {
+				icon = "❔"
 			}
-			line("")
+			line("- %s [%s `%s`](%s/%s/actions/workflows/%s)", icon, t.Repository, t.Workflow, s.Server, t.Repository, t.Workflow)
 		}
+		line("")
 	}
 	return strings.TrimRight(b.String(), "\n") + "\n"
 }

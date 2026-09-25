@@ -596,6 +596,33 @@ func (g *GitHub) Artifacts(ctx context.Context, run int64) ([]string, error) {
 	return names, nil
 }
 
+// JobConclusions maps each of a workflow run's jobs, by name, to the conclusion of its
+// latest attempt, which stands after Re-run failed jobs.
+func (g *GitHub) JobConclusions(ctx context.Context, run int64) (map[string]string, error) {
+	conclusions, attempts := map[string]string{}, map[string]int{}
+	target := fmt.Sprintf("/actions/runs/%d/jobs?filter=all&per_page=100", run)
+	for target != "" {
+		var page struct {
+			Jobs []struct {
+				Name       string `json:"name"`
+				Conclusion string `json:"conclusion"`
+				RunAttempt int    `json:"run_attempt"`
+			} `json:"jobs"`
+		}
+		next, err := g.do(ctx, http.MethodGet, target, nil, &page)
+		if err != nil {
+			return nil, fmt.Errorf("list the jobs of run %d in %s: %v", run, g.Repository, err)
+		}
+		for _, j := range page.Jobs {
+			if attempt, ok := attempts[j.Name]; !ok || j.RunAttempt > attempt {
+				conclusions[j.Name], attempts[j.Name] = j.Conclusion, j.RunAttempt
+			}
+		}
+		target = next
+	}
+	return conclusions, nil
+}
+
 // DispatchWorkflow runs a workflow that has a workflow_dispatch trigger on the repository's
 // default branch, with the given inputs.
 func (g *GitHub) DispatchWorkflow(ctx context.Context, workflow string, inputs map[string]string) error {

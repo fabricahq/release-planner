@@ -171,7 +171,7 @@ downstream:
     workflow: update-code-rules.yml
 ```
 
-Each needs a `workflow_dispatch` trigger with string inputs `tag` and `version`. A `downstream` job, in an environment named `downstream`, mints a GitHub App token for those repositories from the variable `DOWNSTREAM_APP_CLIENT_ID` and the secret `DOWNSTREAM_APP_PRIVATE_KEY`, and starts each workflow. Prereleases and notes edits start nothing. A failure doesn't affect the published release; the status comment shows each target's result. See the [docs](docs/src/content/docs/customize/downstream.md) to create the App.
+Each needs a `workflow_dispatch` trigger with string inputs `tag` and `version`. A `downstream` job, in an environment named `downstream`, mints a GitHub App token for those repositories from the variable `DOWNSTREAM_APP_CLIENT_ID` and the secret `DOWNSTREAM_APP_PRIVATE_KEY`, and starts each workflow in its own job. Prereleases and notes edits start nothing. A failure doesn't affect the published release; the status comment shows each target's result, and **Re-run failed jobs** starts only the targets that failed. See the [docs](docs/src/content/docs/customize/downstream.md) to create the App.
 
 ### Release notes style
 
@@ -261,7 +261,7 @@ Everyone runs the version your config pins. Agents check `release-planner versio
 | `inventory [--head <ref>] [--repository <owner/name>] [--offline]` | Agent | Lists the previous release, every commit since it with its pull request author's GitHub handle, the candidate next versions, and the lines that list each change, the new contributors, and the closing link in the notes. |
 | `validate --base <ref> [--head <ref>] [--repository <owner/name>] [--ci]` | Agent and CI | Validates a release pull request against the release branch, and prints the tag, release commit, and notes to publish, and any notes edits. Broken [release notes rules](#release-notes-rules) fail, or with `--ci` are warnings. In the Release workflow, it also warns when the `release` or `downstream` environment isn't set up as recommended. `validate --ci --merged <sha>` plans the publication a merge approved. `validate --rules` lists the rules. |
 | `publish --plan <file> --branch <name> [--built-plan <file>] [--assets <dir> [--signer-workflow <path>]]` | CI | Tags the release commit and publishes the approved notes, with optional attested files staged on a draft and verified first, and replaces edited notes of published releases. |
-| `report --needs <json> --branch <name> (--pull-request <n> \| --merged <sha>)` | CI | Writes the release status comment on the release pull request. |
+| `report --needs <json> --branch <name> (--pull-request <n> \| --merged <sha>) [--downstream <owner/name:workflow.yml>...]` | CI | Writes the release status comment on the release pull request. |
 | `downstream --tag <tag> --target <owner/name:workflow.yml>...` | CI | Starts downstream workflows for a new stable release. |
 | `version` | Anyone | Prints the running version. |
 

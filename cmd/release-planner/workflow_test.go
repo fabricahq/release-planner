@@ -99,10 +99,46 @@ func TestDownstreamRunsEachTargetWithTheRelease(t *testing.T) {
 		sent.Ref != "main" || sent.Inputs["tag"] != "v1.2.0" || sent.Inputs["version"] != "1.2.0" {
 		t.Fatal(sent, err)
 	}
-	var results []struct{ Repository, Workflow, Error string }
-	if err := json.Unmarshal([]byte(strings.TrimPrefix(strings.TrimSpace(output("output")), "results=")), &results); err != nil ||
-		len(results) != 2 || results[0].Error != "" || !strings.Contains(results[1].Error, "fabricahq/scoop-bucket") {
-		t.Fatal(results, err, output("output"))
+	if !strings.Contains(out, "::error title=Downstream::") || !strings.Contains(out, "fabricahq/scoop-bucket") || output("output") != "" {
+		t.Fatalf("%s %q", out, output("output"))
+	}
+}
+
+// The downstream job is a matrix with one result in the needs context, so the report reads
+// each target's job, at its latest attempt.
+func TestReportListsEachDownstreamTarget(t *testing.T) {
+	actionsFiles(t)
+	t.Setenv("GITHUB_RUN_ID", "100")
+	job := func(name, conclusion string, attempt int) map[string]any {
+		return map[string]any{"name": name, "conclusion": conclusion, "run_attempt": attempt}
+	}
+	api := newAPI(t, map[string]any{
+		"GET /actions/runs/100/jobs": map[string]any{"jobs": []any{
+			job("publish", "success", 1),
+			job("downstream (fabricahq/homebrew-tap:update.yml)", "success", 1),
+			job("downstream (fabricahq/scoop-bucket:update.yml)", "failure", 1),
+			job("downstream (fabricahq/winget:update.yml)", "failure", 1),
+			job("downstream (fabricahq/winget:update.yml)", "success", 2),
+		}},
+		"GET /issues/2/comments":   []any{map[string]any{"id": 5, "body": "<!-- release-planner:status -->\nold"}},
+		"PATCH /issues/comments/5": map[string]any{},
+	})
+	file := writePlan(t, plan.Plan{Tag: "v1.2.0", Commit: strings.Repeat("a", 40), PullRequest: 2})
+	needs := `{"validate":{"result":"success","outputs":{}},"publish":{"result":"success","outputs":{}},"downstream":{"result":"failure","outputs":{}}}`
+	args := []string{"report", "--needs", needs, "--branch", "main", "--merged", merged, "--plan", file,
+		"--downstream", "fabricahq/homebrew-tap:update.yml", "--downstream", "fabricahq/scoop-bucket:update.yml", "--downstream", "fabricahq/winget:update.yml"}
+	if code, out, errOut := cli(t, args...); code != 0 {
+		t.Fatalf("%d %s %s", code, out, errOut)
+	}
+	body := api.sent("PATCH /issues/comments/5")
+	for _, want := range []string{
+		"- ✅ [fabricahq/homebrew-tap `update.yml`]",
+		"- ❌ [fabricahq/scoop-bucket `update.yml`]",
+		"- ✅ [fabricahq/winget `update.yml`]",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("lacks %q:\n%s", want, body)
+		}
 	}
 }
 
@@ -110,7 +146,7 @@ func TestDownstreamSkipsPrereleases(t *testing.T) {
 	output := actionsFiles(t)
 	api := newAPI(t, map[string]any{})
 	code, out, _ := cli(t, "downstream", "--tag", "v1.2.0-rc.1", "--target", "fabricahq/homebrew-tap:update.yml")
-	if code != 0 || !strings.Contains(out, "prerelease") || len(api.requests) != 0 || output("output") != "results=[]\n" {
+	if code != 0 || !strings.Contains(out, "prerelease") || len(api.requests) != 0 || output("output") != "" {
 		t.Fatalf("%d %s %v %q", code, out, api.requests, output("output"))
 	}
 	if code, _, errOut := cli(t, "downstream", "--tag", "v1.2.0", "--target", "homebrew-tap"); code != 1 || !strings.Contains(errOut, "owner/name:workflow.yml") {

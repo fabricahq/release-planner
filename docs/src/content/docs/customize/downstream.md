@@ -35,13 +35,13 @@ on:
 
 ## When they run
 
-After a new release publishes, the `downstream` job starts each target workflow. It doesn't run for:
+After a new release publishes, the `downstream` job starts the target workflows, one job per target, named `downstream (<repository>:<workflow>)`. It doesn't run for:
 
 - prereleases, whose version has a `-` suffix, such as `v1.2.0-rc.1`
 - notes edits to a published release
 - a release that failed to publish
 
-A failed trigger doesn't affect the published release. The status comment on the release pull request lists each target with ✅ or ❌ and a link to its workflow's runs. To try again, use **Re-run failed jobs** on the release run; publishing is skipped because it already succeeded.
+A failed trigger doesn't affect the published release. The status comment on the release pull request lists each target with ✅ or ❌ and a link to its workflow's runs. To try again, use **Re-run failed jobs** on the release run: it runs only the targets whose jobs failed, so a target workflow that already started doesn't run twice. Publishing is skipped because it already succeeded.
 
 ## Create the GitHub App
 

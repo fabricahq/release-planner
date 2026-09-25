@@ -17,7 +17,7 @@ import (
 )
 
 func cmdReport(ctx context.Context, args []string, out io.Writer) error {
-	fs, _ := flags("report", "report --needs <json> --branch <name> (--pull-request <number> | --merged <sha>) [--plan <file>] [--assets <dir>]")
+	fs, _ := flags("report", "report --needs <json> --branch <name> (--pull-request <number> | --merged <sha>) [--plan <file>] [--assets <dir>] [--downstream <owner/name:workflow.yml>...]")
 	needs := fs.String("needs", "", "the Release workflow's needs context, as JSON")
 	branch := fs.String("branch", "", "release branch")
 	number := fs.String("pull-request", "", "the release pull request, in its own run")
@@ -25,6 +25,8 @@ func cmdReport(ctx context.Context, args []string, out io.Writer) error {
 	planFile := fs.String("plan", "", "release plan written by release-planner validate, if validate wrote one")
 	assetsDir := fs.String("assets", "", "directory of the built release assets, if any")
 	repository := fs.String("repository", os.Getenv("GITHUB_REPOSITORY"), "GitHub repository, as owner/name")
+	var downstream targets
+	fs.Var(&downstream, "downstream", "a downstream workflow, as owner/name:workflow.yml; repeat for each")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -60,6 +62,23 @@ func cmdReport(ctx context.Context, args []string, out io.Writer) error {
 	}
 
 	gh := api(os.Getenv("GITHUB_TOKEN"), *repository)
+	s.Downstream = downstream
+	switch s.Jobs["downstream"].Result {
+	case "success":
+		for i := range s.Downstream {
+			s.Downstream[i].Result = "success"
+		}
+	case "failure", "cancelled":
+		// The needs context has one result for the whole matrix, so read each target's job.
+		run, _ := strconv.ParseInt(os.Getenv("GITHUB_RUN_ID"), 10, 64)
+		conclusions, err := gh.JobConclusions(ctx, run)
+		if err != nil {
+			fmt.Fprintf(out, "::warning title=Release status::Couldn't read the downstream jobs' results: %s\n", escapeData(err.Error()))
+		}
+		for i, t := range s.Downstream {
+			s.Downstream[i].Result = conclusions[t.Job()]
+		}
+	}
 	pr, _ := strconv.Atoi(*number)
 	if s.Merged && s.Plan != nil {
 		pr = s.Plan.PullRequest
@@ -91,7 +110,7 @@ func cmdReport(ctx context.Context, args []string, out io.Writer) error {
 	return nil
 }
 
-// targets collects repeated --target flags.
+// targets collects repeated --target or --downstream flags.
 type targets []report.Target
 
 func (t *targets) String() string { return "" }
@@ -120,7 +139,7 @@ func cmdDownstream(ctx context.Context, args []string, out io.Writer) error {
 	}
 	if version.IsPrerelease() {
 		fmt.Fprintf(out, "%s is a prerelease, so no downstream workflows run.\n", *tag)
-		return appendEnvFile("GITHUB_OUTPUT", "results=[]\n")
+		return nil
 	}
 	token := os.Getenv("GITHUB_TOKEN")
 	if token == "" {
@@ -128,21 +147,13 @@ func cmdDownstream(ctx context.Context, args []string, out io.Writer) error {
 	}
 	inputs := map[string]string{"tag": *tag, "version": strings.TrimPrefix(*tag, "v")}
 	failed := 0
-	for i, t := range list {
+	for _, t := range list {
 		if err := api(token, t.Repository).DispatchWorkflow(ctx, t.Workflow, inputs); err != nil {
-			list[i].Error = err.Error()
 			failed++
 			fmt.Fprintf(out, "::error title=Downstream::%s\n", escapeData(err.Error()))
 			continue
 		}
 		fmt.Fprintf(out, "Ran %s in %s for %s.\n", t.Workflow, t.Repository, *tag)
-	}
-	results, err := json.Marshal(list)
-	if err != nil {
-		return err
-	}
-	if err := appendEnvFile("GITHUB_OUTPUT", "results="+string(results)+"\n"); err != nil {
-		return err
 	}
 	if failed > 0 {
 		return fmt.Errorf("%d of %d downstream workflows didn't start; %s is published either way", failed, len(list), *tag)
