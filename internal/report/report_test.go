@@ -523,7 +523,7 @@ func TestUpdateEditsOnlyTheBlocks(t *testing.T) {
 func TestFailureCommentMentionsWhoMerged(t *testing.T) {
 	s := status(release(), true, results("validate", "success", "publish", "failure", "downstream", "skipped"))
 	s.MergedBy = "mona"
-	want := "<!-- release-planner:failure run=100 attempt=1 job=publish -->\n@mona The release's **publish** job failed in [this workflow run](https://github.com/o/r/actions/runs/100). The release status at the end of the description has the details and how to retry.\n"
+	want := "<!-- release-planner:failure run=100 attempt=1 job=publish -->\n@mona The release's **publish** job failed in [this workflow run](https://github.com/o/r/actions/runs/100). The pull request description has the details and how to retry.\n"
 	if got := Failure(s); got != want {
 		t.Fatalf("%q", got)
 	}

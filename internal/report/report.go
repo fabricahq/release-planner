@@ -449,7 +449,7 @@ func Failure(s Status) string {
 	if s.MergedBy != "" {
 		mention = "@" + s.MergedBy + " "
 	}
-	return fmt.Sprintf("%s\n%sThe release's **%s** job %s in [this workflow run](%s). The release status at the end of the description has the details and how to retry.\n",
+	return fmt.Sprintf("%s\n%sThe release's **%s** job %s in [this workflow run](%s). The pull request description has the details and how to retry.\n",
 		failureMarker(s, failed), mention, failed, map[string]string{"failure": "failed", "cancelled": "was cancelled"}[s.Jobs[failed].Result], s.RunURL)
 }
 
