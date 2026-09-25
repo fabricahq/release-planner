@@ -58,7 +58,7 @@ func TestInstallThenCheckAndGuideSucceed(t *testing.T) {
 	if code, out, _ := cli(t, "guide", "--dir", dir); code != 0 || !strings.Contains(out, "# Prepare a release (Release Planner v0.1.0)") {
 		t.Fatalf("guide: %d %s", code, out)
 	}
-	if code, out, _ := cli(t, "guide", "--default-style"); code != 0 || !strings.HasPrefix(out, "- Organize changes under these headings") {
+	if code, out, _ := cli(t, "guide", "--default-style"); code != 0 || !strings.HasPrefix(out, "- Describe only what the readers the policy names would notice or care about") {
 		t.Fatalf("default style: %d %s", code, out)
 	}
 }
