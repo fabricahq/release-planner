@@ -12,7 +12,9 @@ The full documentation is at <https://release-planner.fabricahq.com>.
 
 ## Why use it?
 
-Tools that generate notes from commit messages produce a changelog, not an explanation, and writing good notes by hand for every release takes time. Release Planner gives the reading and drafting to your agent and keeps the decision with you: nothing is tagged or published until you merge the release pull request, and the published notes are exactly the ones you merged. It needs no commit message conventions.
+When you're ready to release, you want your agent to do as much of the work as possible, while making sure it follows your release process and misses nothing.
+
+Release Planner splits the work. Deterministic code handles the parts that must be exact: it finds everything that shipped since your last release and checks that the notes account for every change. Your agent handles the judgment, drafting the notes according to your customizable release policy. Then you review the notes in a pull request, edit them to your liking, and merge to release.
 
 ## How does it work?
 
