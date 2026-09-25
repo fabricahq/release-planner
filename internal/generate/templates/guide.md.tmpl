@@ -57,7 +57,7 @@ Commit the notes, then run:
 release-planner validate --base origin/{{.Branch}} --head HEAD
 ```
 
-It checks the version and the notes against the release notes rules, and lists every rule the notes break, with its line; `release-planner validate --rules` describes them. Fix each finding by editing the file in place, commit, and rerun until it passes. Before you push, read the whole file from top to bottom, as a reader would, and cut any implementation detail that doesn't help that reader understand the value or act.
+It checks the version and the notes against the release notes rules, and lists every rule the notes break, with its line; `release-planner validate --rules` describes them. Fix each finding by editing the file in place, commit, and rerun until it passes. Before you push, read the whole file from top to bottom, as a reader would, and cut any implementation detail that doesn't help that reader understand the value or act, unless the style or policy asks for it.
 
 ## 7. Open the pull request
 
