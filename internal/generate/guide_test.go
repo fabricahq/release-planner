@@ -9,7 +9,7 @@ import (
 
 func guideFor(t *testing.T, style, mode string) string {
 	t.Helper()
-	yaml := "schema-version: 1\nversion: v0.2.0\nfirst-version: v1.0.0\nnotes-dir: docs/releases\nbranch: trunk\nrelease-checks:\n  run: make test\n"
+	yaml := "schema-version: 1\nversion: v0.2.0\nfirst-version: v1.0.0\nrelease-notes-dir: docs/releases\nrelease-branch: trunk\nrelease-checks:\n  run: make test\n"
 	if mode != "" {
 		yaml += "release-notes-style:\n  file: .release-planner/release-notes-style.md\n  mode: " + mode + "\n"
 	}

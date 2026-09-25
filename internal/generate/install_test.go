@@ -132,7 +132,7 @@ func TestInstallIsIdempotent(t *testing.T) {
 // A notes directory with YAML-significant characters still produces a workflow that parses
 // back to the same path filters.
 func TestWorkflowQuotesNotesDirectory(t *testing.T) {
-	c, err := config.Parse([]byte("schema-version: 1\nversion: v0.2.0\nnotes-dir: \"team's releases\"\n"), "")
+	c, err := config.Parse([]byte("schema-version: 1\nversion: v0.2.0\nrelease-notes-dir: \"team's releases\"\n"), "")
 	if err != nil {
 		t.Fatal(err)
 	}

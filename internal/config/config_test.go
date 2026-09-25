@@ -32,8 +32,8 @@ func TestParseReadsEverySetting(t *testing.T) {
 	c, err := Parse([]byte(`schema-version: 1
 version: 0123456789abcdef0123456789abcdef01234567
 first-version: v1.0.0
-notes-dir: docs/releases
-branch: trunk
+release-notes-dir: docs/releases
+release-branch: trunk
 exclude-rules: [no-long-heading, list-every-change]
 release-notes-style:
   file: docs/release-notes-style.md
@@ -99,10 +99,10 @@ func TestParseRejectsInvalidSettings(t *testing.T) {
 		"branch pin":        {"schema-version: 1\nversion: main\nrelease-checks:\n  run: x\n", "version:"},
 		"short sha":         {"schema-version: 1\nversion: 0123456\nrelease-checks:\n  run: x\n", "version:"},
 		"bad first":         {"schema-version: 1\nversion: v0.2.0\nfirst-version: 1.0\nrelease-checks:\n  run: x\n", "first-version"},
-		"escaping dir":      {"schema-version: 1\nversion: v0.2.0\nnotes-dir: ../x\nrelease-checks:\n  run: x\n", "notes-dir"},
-		"absolute dir":      {"schema-version: 1\nversion: v0.2.0\nnotes-dir: /x\nrelease-checks:\n  run: x\n", "notes-dir"},
-		"pattern dir":       {"schema-version: 1\nversion: v0.2.0\nnotes-dir: rel*\n", "path filters treat as patterns"},
-		"config dir":        {"schema-version: 1\nversion: v0.2.0\nnotes-dir: .release-planner/notes\nrelease-checks:\n  run: x\n", "notes-dir"},
+		"escaping dir":      {"schema-version: 1\nversion: v0.2.0\nrelease-notes-dir: ../x\nrelease-checks:\n  run: x\n", "release-notes-dir"},
+		"absolute dir":      {"schema-version: 1\nversion: v0.2.0\nrelease-notes-dir: /x\nrelease-checks:\n  run: x\n", "release-notes-dir"},
+		"pattern dir":       {"schema-version: 1\nversion: v0.2.0\nrelease-notes-dir: rel*\n", "path filters treat as patterns"},
+		"config dir":        {"schema-version: 1\nversion: v0.2.0\nrelease-notes-dir: .release-planner/notes\nrelease-checks:\n  run: x\n", "release-notes-dir"},
 		"run and workflow":  {"schema-version: 1\nversion: v0.2.0\nrelease-checks:\n  run: x\n  workflow: ci.yml\n", "run or workflow, not both"},
 		"workflow tools":    {"schema-version: 1\nversion: v0.2.0\nrelease-checks:\n  go: '1.27.x'\n  workflow: ci.yml\n", "set up toolchains in ci.yml"},
 		"workflow path":     {"schema-version: 1\nversion: v0.2.0\nrelease-checks:\n  workflow: ../ci.yml\n", "release-checks.workflow"},

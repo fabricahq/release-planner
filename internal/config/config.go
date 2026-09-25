@@ -47,9 +47,9 @@ type Config struct {
 	// FirstVersion is the version the repository's first release must use.
 	FirstVersion string `yaml:"first-version"`
 	// NotesDir holds the v<semver>.md release notes, one file per release.
-	NotesDir string `yaml:"notes-dir"`
-	// Branch is the branch whose notes changes publish releases.
-	Branch            string            `yaml:"branch"`
+	NotesDir string `yaml:"release-notes-dir"`
+	// Branch is the release branch: release pull requests merge into it, and releases publish from it.
+	Branch            string            `yaml:"release-branch"`
 	ReleaseChecks     ReleaseChecks     `yaml:"release-checks"`
 	ReleaseNotesStyle ReleaseNotesStyle `yaml:"release-notes-style"`
 	// ExcludeRules are release notes rules that release-planner validate skips.
@@ -138,7 +138,7 @@ func Load(root string) (Config, error) {
 	return Parse(data, string(style))
 }
 
-// DefaultNotesDir is where release notes live when the config doesn't set notes-dir.
+// DefaultNotesDir is where release notes live when the config doesn't set release-notes-dir.
 // The leading underscore keeps it apart from the repository's own content.
 const DefaultNotesDir = "_releases"
 
@@ -192,13 +192,13 @@ func (c Config) check() error {
 		add("first-version: %q is not a version such as v1.0.0", c.FirstVersion)
 	}
 	if clean := path.Clean(c.NotesDir); clean != c.NotesDir || path.IsAbs(clean) || clean == "." || strings.HasPrefix(clean, "..") || clean == Dir || strings.HasPrefix(clean, Dir+"/") {
-		add("notes-dir: use a relative directory inside the repository and outside %s, such as %s", Dir, DefaultNotesDir)
+		add("release-notes-dir: use a relative directory inside the repository and outside %s, such as %s", Dir, DefaultNotesDir)
 	}
 	if strings.ContainsAny(c.NotesDir, "*?[]!+\\") || strings.ContainsFunc(c.NotesDir, unicode.IsControl) {
-		add("notes-dir: %q has characters that GitHub path filters treat as patterns; use letters, digits, and punctuation such as - _ . /", c.NotesDir)
+		add("release-notes-dir: %q has characters that GitHub path filters treat as patterns; use letters, digits, and punctuation such as - _ . /", c.NotesDir)
 	}
 	if !branchName.MatchString(c.Branch) {
-		add("branch: %q is not a valid branch name", c.Branch)
+		add("release-branch: %q is not a valid branch name", c.Branch)
 	}
 	for name, v := range map[string]string{"go": c.ReleaseChecks.Go, "node": c.ReleaseChecks.Node, "python": c.ReleaseChecks.Python} {
 		if v != "" && !toolVersion.MatchString(v) {

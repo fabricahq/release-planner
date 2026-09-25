@@ -98,8 +98,8 @@ Everything in `.release-planner/` belongs to you; Release Planner never rewrites
 | `release-checks` | none | Optional release-only checks. See [Release checks](#release-checks). |
 | `exclude-rules` | none | Release notes rules to skip, by ID, such as `[no-long-heading]`. See [Release notes rules](#release-notes-rules). |
 | `release-notes-style` | none | Your own release notes style: `file`, the markdown file that holds it, and `mode`, `append` or `replace`. See [Release notes style](#release-notes-style). |
-| `notes-dir` | `_releases` | Where the release notes files live. |
-| `branch` | `main` | The branch whose notes changes publish releases. |
+| `release-notes-dir` | `_releases` | Where the release notes files live. |
+| `release-branch` | `main` | The branch that release pull requests merge into, and releases are published from. |
 
 ### Release checks
 

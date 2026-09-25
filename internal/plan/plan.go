@@ -1,6 +1,6 @@
 // Package plan validates release requests and describes what a new release would contain.
 //
-// A release request is one new or edited <notes-dir>/v<semver>.md file between two commits.
+// A release request is one new or edited <release-notes-dir>/v<semver>.md file between two commits.
 // A plan binds that file's version and notes to the head commit, which the release tags.
 // Ported from Code Rules' internal/release planner.
 package plan
@@ -68,7 +68,7 @@ func notesFiles(ctx context.Context, repo gitrepo.Repo, notesDir, commit string)
 // relocated reports whether name, added at head for an already-published tag, is the tag's
 // own notes moved to another directory. The tagged commit always holds the notes it published,
 // so it must hold exactly one file of that name, byte-for-byte the added one; with several it
-// can't tell which was published, and refuses. That lets a repository change notes-dir without
+// can't tell which was published, and refuses. That lets a repository change release-notes-dir without
 // publishing anything. A retry, whose tag points at head, is never a relocation.
 func relocated(ctx context.Context, repo gitrepo.Repo, tag, head, name string) (bool, error) {
 	target, err := repo.Resolve(ctx, "refs/tags/"+tag)

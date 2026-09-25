@@ -37,11 +37,11 @@ first-version: v1.0.0
 
 # Where the release notes files live, one per release.
 # Default: _releases
-notes-dir: _releases
+release-notes-dir: _releases
 
-# The branch releases are published from.
+# The branch that release pull requests merge into, and releases are published from.
 # Default: main
-branch: main
+release-branch: main
 
 # Your own release notes style: the markdown file that holds it, and whether
 # it adds to the default style (append) or replaces it (replace).
