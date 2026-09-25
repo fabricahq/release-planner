@@ -51,8 +51,11 @@ type Config struct {
 	// NotesDir holds the v<semver>.md release notes, one file per release.
 	NotesDir string `yaml:"release-notes-dir"`
 	// Branch is the release branch: release pull requests merge into it, and releases publish from it.
-	Branch            string            `yaml:"release-branch"`
-	ReleaseChecks     ReleaseChecks     `yaml:"release-checks"`
+	Branch        string        `yaml:"release-branch"`
+	ReleaseChecks ReleaseChecks `yaml:"release-checks"`
+	ReleaseAssets ReleaseAssets `yaml:"release-assets"`
+	// Downstream lists workflows in other repositories to run after each new stable release.
+	Downstream        []Downstream      `yaml:"downstream"`
 	ReleaseNotesStyle ReleaseNotesStyle `yaml:"release-notes-style"`
 	// ReleaseNotesRules sets release notes rules by ID. The only setting is RuleOff, which
 	// turns a rule off.
@@ -108,12 +111,57 @@ type ReleaseChecks struct {
 // Enabled reports whether the repository has release-only checks.
 func (v ReleaseChecks) Enabled() bool { return v.Run != "" || v.Workflow != "" }
 
+// ReleaseAssets names the workflow that builds the files attached to each release, on the
+// release pull request, before approval.
+type ReleaseAssets struct {
+	// Workflow names a workflow in .github/workflows that accepts workflow_call with string
+	// inputs ref, tag, and version, checks out ref, and uploads the files as one artifact
+	// named release-assets. It gets no secrets and can only read the repository.
+	Workflow string `yaml:"workflow"`
+}
+
+// Downstream is a workflow in another repository, run with the new release's tag and
+// version after each stable release, such as one that updates a Homebrew tap.
+type Downstream struct {
+	// Repository is the owner/name the workflow is in.
+	Repository string `yaml:"repository"`
+	// Workflow is the workflow's file name in that repository's .github/workflows. It needs a
+	// workflow_dispatch trigger with string inputs tag and version.
+	Workflow string `yaml:"workflow"`
+}
+
+// DownstreamOwner is the owner of every downstream repository, which one GitHub App
+// installation token covers.
+func (c Config) DownstreamOwner() string {
+	if len(c.Downstream) == 0 {
+		return ""
+	}
+	owner, _, _ := strings.Cut(c.Downstream[0].Repository, "/")
+	return owner
+}
+
+// DownstreamRepositories lists the names of the downstream repositories, without the owner.
+func (c Config) DownstreamRepositories() []string {
+	var names []string
+	for _, d := range c.Downstream {
+		_, name, _ := strings.Cut(d.Repository, "/")
+		if !slices.Contains(names, name) {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
 var (
 	commitSHA    = regexp.MustCompile(`^[0-9a-f]{40}$`)
 	toolVersion  = regexp.MustCompile(`^[0-9A-Za-z.*+-]+$`)
 	branchName   = regexp.MustCompile(`^[0-9A-Za-z._/-]+$`)
 	workflowFile = regexp.MustCompile(`^[0-9A-Za-z._-]+\.ya?ml$`)
+	repository   = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 )
+
+// GeneratedWorkflow is the Release workflow's file name, which can't also be a workflow it calls.
+const GeneratedWorkflow = "release-planner.yml"
 
 // Load reads and validates the config and the optional release notes style at the repository root.
 func Load(root string) (Config, error) {
@@ -229,10 +277,29 @@ func (c Config) check() error {
 		add("release-checks: set run or workflow, not both")
 	case v.Workflow != "" && (v.Go != "" || v.Node != "" || v.Python != ""):
 		add("release-checks: go, node, and python apply to run; set up toolchains in %s instead", v.Workflow)
-	case v.Workflow != "" && (!workflowFile.MatchString(v.Workflow) || v.Workflow == "release-planner.yml"):
-		add("release-checks.workflow: name a workflow file in .github/workflows, such as ci.yml")
+	case v.Workflow != "" && (!workflowFile.MatchString(v.Workflow) || v.Workflow == GeneratedWorkflow):
+		add("release-checks.workflow: name a workflow file in .github/workflows other than %s, such as ci.yml", GeneratedWorkflow)
 	case v.Run == "" && v.Workflow == "" && (v.Go != "" || v.Node != "" || v.Python != ""):
 		add("release-checks: toolchains are set but there is no run script")
+	}
+	if w := c.ReleaseAssets.Workflow; w != "" && (!workflowFile.MatchString(w) || w == GeneratedWorkflow) {
+		add("release-assets.workflow: name a workflow file in .github/workflows other than %s, such as build-release.yml", GeneratedWorkflow)
+	}
+	for i, d := range c.Downstream {
+		switch {
+		case !repository.MatchString(d.Repository):
+			add("downstream[%d].repository: name the repository as owner/name, not %q", i, d.Repository)
+		case !strings.EqualFold(c.DownstreamOwner(), strings.Split(d.Repository, "/")[0]):
+			add("downstream[%d].repository: every downstream repository must belong to %s, so one GitHub App token covers them", i, c.DownstreamOwner())
+		}
+		if !workflowFile.MatchString(d.Workflow) {
+			add("downstream[%d].workflow: name a workflow file in %s's .github/workflows, such as update-formula.yml", i, d.Repository)
+		}
+		for _, other := range c.Downstream[:i] {
+			if other == d {
+				add("downstream[%d]: %s in %s is listed twice", i, d.Workflow, d.Repository)
+			}
+		}
 	}
 	for _, id := range slices.Sorted(maps.Keys(c.ReleaseNotesRules)) {
 		switch {

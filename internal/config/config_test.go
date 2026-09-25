@@ -93,6 +93,17 @@ func TestLoadReadsOnlyTheNamedStyleFile(t *testing.T) {
 	}
 }
 
+func TestParseReadsAssetsAndDownstream(t *testing.T) {
+	c, err := Parse([]byte("schema-version: 1\nversion: v0.2.0\nrelease-assets:\n  workflow: build-release.yml\ndownstream:\n  - repository: fabricahq/homebrew-tap\n    workflow: update-code-rules.yml\n  - repository: fabricahq/scoop-bucket\n    workflow: update.yml\n  - repository: fabricahq/homebrew-tap\n    workflow: update-other.yml\n"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.ReleaseAssets.Workflow != "build-release.yml" || len(c.Downstream) != 3 || c.DownstreamOwner() != "fabricahq" ||
+		strings.Join(c.DownstreamRepositories(), ",") != "homebrew-tap,scoop-bucket" {
+		t.Fatalf("%+v", c)
+	}
+}
+
 func TestParseRejectsInvalidSettings(t *testing.T) {
 	for name, tc := range map[string]struct{ yaml, want string }{
 		"missing version":   {"schema-version: 1\nrelease-checks:\n  run: x\n", "version:"},
@@ -123,6 +134,15 @@ func TestParseRejectsInvalidSettings(t *testing.T) {
 		"bad rule setting":  {"schema-version: 1\nversion: v0.2.0\nrelease-notes-rules:\n  no-long-heading: 100\n", `release-notes-rules.no-long-heading: use off, not "100"`},
 		"rules as a list":   {"schema-version: 1\nversion: v0.2.0\nrelease-notes-rules: [no-long-heading]\n", "cannot unmarshal"},
 		"style not md":      {"schema-version: 1\nversion: v0.2.0\nrelease-notes-style:\n  file: style.txt\n  mode: append\n", "a .md file"},
+		"checks self":       {"schema-version: 1\nversion: v0.2.0\nrelease-checks:\n  workflow: release-planner.yml\n", "other than release-planner.yml"},
+		"assets self":       {"schema-version: 1\nversion: v0.2.0\nrelease-assets:\n  workflow: release-planner.yml\n", "release-assets.workflow: name a workflow file in .github/workflows other than release-planner.yml"},
+		"assets path":       {"schema-version: 1\nversion: v0.2.0\nrelease-assets:\n  workflow: .github/workflows/build.yml\n", "release-assets.workflow"},
+		"assets key":        {"schema-version: 1\nversion: v0.2.0\nrelease-assets:\n  run: make\n", "field run not found"},
+		"downstream repo":   {"schema-version: 1\nversion: v0.2.0\ndownstream:\n  - repository: homebrew-tap\n    workflow: update.yml\n", `downstream[0].repository: name the repository as owner/name, not "homebrew-tap"`},
+		"downstream owner":  {"schema-version: 1\nversion: v0.2.0\ndownstream:\n  - repository: o/tap\n    workflow: a.yml\n  - repository: p/tap\n    workflow: a.yml\n", "downstream[1].repository: every downstream repository must belong to o"},
+		"downstream file":   {"schema-version: 1\nversion: v0.2.0\ndownstream:\n  - repository: o/tap\n    workflow: update\n", "downstream[0].workflow"},
+		"downstream twice":  {"schema-version: 1\nversion: v0.2.0\ndownstream:\n  - repository: o/tap\n    workflow: a.yml\n  - repository: o/tap\n    workflow: a.yml\n", "listed twice"},
+		"downstream key":    {"schema-version: 1\nversion: v0.2.0\ndownstream:\n  - repository: o/tap\n    workflow: a.yml\n    ref: main\n", "field ref not found"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := Parse([]byte(tc.yaml), ""); err == nil || !strings.Contains(err.Error(), tc.want) {
