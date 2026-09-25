@@ -11,7 +11,7 @@ Only two settings are required:
 
 ```yaml
 schema-version: 1   # the format of this file; always 1 for now
-version: v0.3.0     # the Release Planner version this repository uses
+version: v0.3.2     # the Release Planner version this repository uses
 ```
 
 Everything else has a sensible default, so many repositories never add more.
@@ -29,7 +29,7 @@ schema-version: 1
 # from source with Go instead of downloading a release. Bumping it upgrades the
 # GitHub Actions workflow (.github/workflows/release-planner.yml) and the agent
 # guide together; run release-planner install after changing it.
-version: v0.3.0
+version: v0.3.2
 
 # The version your first release must use.
 # Default: v0.1.0
@@ -79,7 +79,7 @@ For the details of the last five, see [Release notes style](/customize/release-n
 Install the new version, change `version` in `config.yml` to match, then regenerate your files:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/fabricahq/release-planner/main/install.sh | sh -s -- --version v0.3.0
+curl -fsSL https://raw.githubusercontent.com/fabricahq/release-planner/main/install.sh | sh -s -- --version v0.3.2
 release-planner install
 ```
 

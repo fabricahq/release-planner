@@ -14,7 +14,7 @@ Release checks are for things your pull requests don't check:
 - **A smoke test of what you ship.** Build the real package or binary from the release commit and use it the way a user would.
 - **An API compatibility check** against the previous release, which catches a breaking change released under a minor version. For example: `gorelease`, `cargo-semver-checks`, `buf breaking`, or an OpenAPI diff.
 - **A fresh vulnerability scan**, because new advisories are published after code merges. For example: `govulncheck`, `npm audit`, or `osv-scanner`.
-- **Upgrade tests** from the previous release, or **slow suites** you don't run on every pull request.
+- **Upgrade tests** from the previous release, or **slow suites** you don't run on every pull request, such as end-to-end tests, the full platform matrix, or benchmarks.
 
 ## Run a script
 

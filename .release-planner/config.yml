@@ -1,4 +1,4 @@
-# Release Planner configuration: https://github.com/fabricahq/release-planner#configuration
+# Release Planner configuration: https://release-planner.fabricahq.com/customize/configuration/
 #
 # Release Planner releases itself from the approved commit with the hand-written
 # .github/workflows/release.yml, so it does not run install. This file drives
