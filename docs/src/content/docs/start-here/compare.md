@@ -6,10 +6,10 @@ description: Which kind of release tool Release Planner is, how it compares with
 There are a _lot_ of release automation tools available, and they generally fall into three camps:
 
 - **Computed release notes.** These tools deterministically generate release notes as a list of changes from commit messages or pull request titles.
-- **Written release notes.** With these tools, humans write the notes, review them in a pull request, and then merge the pull request to kick off the release.
+- **Written release notes.** With these tools, humans write the notes, and use a streamlined process to kick off a release such as merging a dedicated "release" pull request.
 - **Build and packaging tools.** These tools build, package, and distribute your software, and leave the notes to something else.
 
-Release Planner is in the **written release notes** camp. The difference is who writes the notes, and when. It's also not mutually exclusive with other tools: it can publish your GitHub releases on its own, or work alongside the tools you already use to build and distribute your software.
+Release Planner is a **written release notes** tool, but designed for an agent-centric workflow. Instead of asking every contributor to write a note, you ask your coding agent for a release. It reads everything that merged, picks the version, writes the notes, and opens a release pull request. You edit and approve.
 
 ## Release Planner vs. computed release notes tools
 
@@ -23,7 +23,9 @@ Release Planner also separates planning a release from publishing it. The releas
 
 Written release notes tools like Changesets and towncrier have pull request authors write a short release note with each pull request. The tool later collects them into a release. Because the notes come from the humans who authored the change, they usually read much better than a list of commits.
 
-Release Planner also produces written notes, but writes them once, at release time, instead of in every pull request. Because your agent sees the whole release at once, the notes read as one release rather than a pile of fragments, and you review them in one place, together with the version, which your agent picks from your [release policy](/customize/policy/) and explains. [Release notes rules](/customize/release-notes-style/#release-notes-rules) then check the result, whether your agent or you wrote the text.
+Release Planner also produces written notes, but your agent writes them, once, at release time. Contributors don't write anything extra in their pull requests. When you ask for a release, your agent reads every pull request merged since the last one, picks the version from your [release policy](/customize/policy/) and explains why, and writes notes for the whole release. Because it sees the whole release at once, the notes read as one release rather than a pile of fragments.
+
+You stay the editor. You review the notes and the version in one pull request, change anything you like, and merging publishes exactly what you approved. [Release notes rules](/customize/release-notes-style/#release-notes-rules) check the result, whether your agent or you wrote the text.
 
 ## Release Planner vs. build and packaging tools
 
@@ -31,9 +33,9 @@ Tools like GoReleaser build and package your software: cross-compiled binaries, 
 
 Run GoReleaser, or any build tool, from your [build workflow](/customize/release-assets/) with its own publishing turned off. Release Planner builds the files on the release pull request, attests them, publishes them with the notes when you merge, and then starts any [downstream workflows](/customize/downstream/), such as a Homebrew tap update.
 
-## Who it's not for
+## Who Release Planner is not for
 
 - **You want every merge released automatically, with no one approving.** Try semantic-release.
 - **You publish many packages from one repository, each with its own version.** Release Planner releases one version per repository. Try Changesets.
 - **You can't use an AI agent, or need notes produced the same way every time.** Try release-please or git-cliff.
-- **You're not on GitHub.** Release Planner publishes GitHub releases and runs on GitHub Actions.
+- **You're not on GitHub.** Release Planner currently works exclusively with GitHub releases and runs on GitHub Actions.
