@@ -15,6 +15,7 @@ Unless you change it, the agent:
   - ⬆️ Improvements
   - 🐛 Squashed Bugs
   - ⛓️‍💥 Breaking Changes
+- gives upgrade instructions only for breaking changes, focused on what readers must change
 - gives significant changes their own subheading, and uses bullets for small ones
 - ends every entry with the pull requests it covers, such as (#7) or (#7, #9)
 - groups related commits into one entry
