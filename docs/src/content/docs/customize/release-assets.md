@@ -61,13 +61,15 @@ jobs:
 ## What happens to the files
 
 1. **On the release pull request**, the release workflow builds the assets from the release commit. The build runs with read access to the repository and none of its secrets.
-2. An `attest` job signs each file's [build provenance](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations), so anyone can check it came from your release workflow.
+2. An `attest` job signs each file's [build provenance](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations), so anyone can check it came from your release workflow with `gh attestation verify <file> --repo <owner>/<name>`.
 3. The status comment on the pull request lists each file with its size and SHA-256.
 4. **When you merge**, the publish job downloads the files the pull request built, verifies each file's attestation was made by this repository's `release-planner.yml`, uploads them to a draft release, checks GitHub's checksums, and publishes last.
 
 If the pull request's files are gone, because the pull request's run didn't finish before the merge or its artifacts expired, the release workflow builds and attests them again from the same release commit after the merge.
 
 A pull request from a fork builds nothing, because its workflow can't sign attestations; the files are built after the merge instead.
+
+Keep the build reproducible. If an upload is interrupted and the files have to be built again, a draft that already holds different files stops publication until you delete them from the draft. A published release's files never change.
 
 ## Requirements
 
