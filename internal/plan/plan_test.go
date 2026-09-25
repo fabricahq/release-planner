@@ -2,6 +2,7 @@ package plan
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -400,5 +401,29 @@ func TestAddEntries(t *testing.T) {
 	if first.Closing != "This is the first release. Browse the source at [v1.0.0](https://github.com/fabricahq/example/tree/v1.0.0)." ||
 		first.NewContributors[0].Entry != "- @octocat made their first contribution in #7" {
 		t.Fatalf("%+v", first)
+	}
+}
+
+// GitHub can title a pull request's merge commit "<title> (#N)" instead of "Merge pull
+// request #N …". Either way, the commits inside the pull request aren't listed on their own.
+func TestTitledMergeCommitListsOnlyThePullRequest(t *testing.T) {
+	f := newFixture(t)
+	f.git("checkout", "-q", "-b", "feature")
+	f.write("b.md", "b")
+	f.commit("Work in progress")
+	f.git("checkout", "-q", "main")
+	f.git("merge", "-q", "--no-ff", "feature", "-m", "Add the b file (#12)")
+	inv, err := Take(context.Background(), f.repo, opts, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var listed []string
+	for _, c := range inv.Commits {
+		if Listed(c) {
+			listed = append(listed, fmt.Sprintf("%s #%d", c.Title, c.PullRequest))
+		}
+	}
+	if !reflect.DeepEqual(listed, []string{"Initial #0", "Add the b file #12"}) {
+		t.Fatalf("listed %v", listed)
 	}
 }

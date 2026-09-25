@@ -406,7 +406,7 @@ func appendEnvFile(name, content string) error {
 func cmdPublish(ctx context.Context, args []string, out io.Writer) error {
 	fs, _ := flags("publish", "publish --plan <file> --commit <sha> --branch <name> [--assets <dir>] [--repository owner/name]")
 	planFile := fs.String("plan", "", "release plan written by release-planner validate --out")
-	commit := fs.String("commit", "", "approved commit from the plan job")
+	commit := fs.String("commit", "", "approved commit from the validate job")
 	branch := fs.String("branch", "", "release branch; the commit must be a pull request merged into it")
 	repository := fs.String("repository", os.Getenv("GITHUB_REPOSITORY"), "GitHub repository, as owner/name")
 	assetsDir := fs.String("assets", "", "directory of files to attach to the release, staged on a draft and verified before publishing")
@@ -499,7 +499,7 @@ func warnAboutEnvironment(ctx context.Context, out io.Writer, branch string, ann
 	env, err := gh.Environment(ctx, releaseEnvironment, branch)
 	var warnings []string
 	if err != nil {
-		warnings = []string{fmt.Sprintf("Couldn't check the %s environment's settings: %v. Give the plan job actions: read to check them.", releaseEnvironment, err)}
+		warnings = []string{fmt.Sprintf("Couldn't check the %s environment's settings: %v. Give the validate job actions: read to check them.", releaseEnvironment, err)}
 	} else {
 		warnings = publish.EnvironmentWarnings(releaseEnvironment, branch, env)
 	}

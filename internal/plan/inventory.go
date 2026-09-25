@@ -163,7 +163,8 @@ func changes(ctx context.Context, repo gitrepo.Repo, notesDir, previous, head st
 	onBranch := map[string]bool{}
 	pullRequestMerge := map[string]bool{}
 	for _, c := range commits {
-		pullRequestMerge[c.SHA] = c.merge && strings.HasPrefix(c.Subject, "Merge pull request #")
+		// GitHub can title a merge commit "Merge pull request #N …" or "<title> (#N)".
+		pullRequestMerge[c.SHA] = c.merge && c.PullRequest != 0
 	}
 	for stack := []string{head}; len(stack) > 0; {
 		sha := stack[len(stack)-1]

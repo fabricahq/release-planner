@@ -171,9 +171,9 @@ func TestWorkflowRendersTheConfiguredSettings(t *testing.T) {
 		"environment: release",
 		"actions: read # to check the release environment's settings\n",
 		"GITHUB_TOKEN: ${{ github.token }}\n        run: release-planner validate --ci",
-		"  release-checks:\n    needs: plan\n",
-		"needs: [plan, release-checks]\n",
-		"${{ needs.plan.outputs.commit }}",
+		"  release-checks:\n    needs: validate\n",
+		"needs: [validate, release-checks]\n",
+		"${{ needs.validate.outputs.commit }}",
 	} {
 		if !strings.Contains(wf, want) {
 			t.Errorf("workflow lacks %q", want)
@@ -351,7 +351,7 @@ func TestReleaseChecksAcceptOnlyCallableWorkflows(t *testing.T) {
 		t.Fatal(err)
 	}
 	wf := read(t, root, WorkflowPath)
-	if strings.Contains(wf, "release-checks:") || !strings.Contains(wf, "needs: [plan]\n") {
+	if strings.Contains(wf, "release-checks:") || !strings.Contains(wf, "needs: [validate]\n") {
 		t.Errorf("no checks configured, but the workflow runs them:\n%s", wf)
 	}
 
@@ -381,7 +381,7 @@ func TestReleaseChecksAcceptOnlyCallableWorkflows(t *testing.T) {
 		t.Fatal(err)
 	}
 	wf = read(t, root, WorkflowPath)
-	for _, want := range []string{"uses: ./.github/workflows/ci.yml\n", "ref: ${{ needs.plan.outputs.commit }}\n", "secrets: inherit\n", "  release-checks:\n    needs: plan\n", "needs: [plan, release-checks]\n"} {
+	for _, want := range []string{"uses: ./.github/workflows/ci.yml\n", "ref: ${{ needs.validate.outputs.commit }}\n", "secrets: inherit\n", "  release-checks:\n    needs: validate\n", "needs: [validate, release-checks]\n"} {
 		if !strings.Contains(wf, want) {
 			t.Errorf("workflow lacks %q", want)
 		}

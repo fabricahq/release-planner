@@ -51,7 +51,7 @@ env:
 jobs:
   # Check the generated files, then validate the notes change and bind it to one version and
   # commit. Release notes rules that the notes break are warnings, not failures.
-  plan:
+  validate:
     if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/{{.Branch}}'
     runs-on: ubuntu-latest
     permissions:
@@ -87,22 +87,22 @@ jobs:
   # Run this repository's release-only checks on the exact commit being released.
   # The called workflow gets the repository's secrets, but never the release-write token.
   release-checks:
-    needs: plan
-    if: needs.plan.outputs.tag != ''
+    needs: validate
+    if: needs.validate.outputs.tag != ''
     uses: ./.github/workflows/{{.ReleaseChecks.Workflow}}
     with:
-      ref: ${{"{{"}} needs.plan.outputs.commit {{"}}"}}
+      ref: ${{"{{"}} needs.validate.outputs.commit {{"}}"}}
     secrets: inherit
 {{else if .ReleaseChecks.Run}}
   # Run this repository's release-only checks on the exact commit being released.
   release-checks:
-    needs: plan
-    if: needs.plan.outputs.tag != ''
+    needs: validate
+    if: needs.validate.outputs.tag != ''
     runs-on: ubuntu-latest
     steps:
       - uses: {{.Actions.Checkout}}
         with:
-          ref: ${{"{{"}} needs.plan.outputs.commit {{"}}"}}
+          ref: ${{"{{"}} needs.validate.outputs.commit {{"}}"}}
           persist-credentials: false
 {{- if .ReleaseChecks.Go}}
       - uses: {{.Actions.SetupGo}}
@@ -125,8 +125,8 @@ jobs:
 {{end}}
   # The only job that can write. It runs the pinned Release Planner release and no repository code.
   publish:
-    needs: {{if .ReleaseChecks.Enabled}}[plan, release-checks]{{else}}[plan]{{end}}
-    if: needs.plan.outputs.tag != '' && github.event_name != 'pull_request' && github.ref == 'refs/heads/{{.Branch}}'
+    needs: {{if .ReleaseChecks.Enabled}}[validate, release-checks]{{else}}[validate]{{end}}
+    if: needs.validate.outputs.tag != '' && github.event_name != 'pull_request' && github.ref == 'refs/heads/{{.Branch}}'
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -145,5 +145,5 @@ jobs:
       - name: Tag the approved commit and publish the approved notes
         env:
           GITHUB_TOKEN: ${{"{{"}} github.token {{"}}"}}
-          COMMIT: ${{"{{"}} needs.plan.outputs.commit {{"}}"}}
+          COMMIT: ${{"{{"}} needs.validate.outputs.commit {{"}}"}}
         run: release-planner publish --plan "$RUNNER_TEMP/plan/release-plan.json" --commit "$COMMIT" --branch {{.Branch}}
