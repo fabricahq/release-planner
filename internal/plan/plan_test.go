@@ -287,3 +287,19 @@ func TestRelocatedTaggedNotesAreHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// A tagged commit with more than one file of the notes' name can't say which was published,
+// so a matching copy of the other one isn't accepted as a move.
+func TestRelocationNeedsOnePublishedFile(t *testing.T) {
+	f := newFixture(t)
+	f.write("releases/v1.0.0.md", "Approved")
+	f.write("docs/v1.0.0.md", "Rewritten")
+	published := f.commit("Release v1.0.0")
+	f.git("tag", "v1.0.0", published)
+	f.write("_releases/v1.0.0.md", "Rewritten")
+	f.commit("Move rewritten notes")
+	moved := Options{NotesDir: "_releases", FirstVersion: "v1.0.0"}
+	if _, err := Read(context.Background(), f.repo, moved, published, "HEAD"); err == nil || !strings.Contains(err.Error(), "already points to another commit") {
+		t.Fatal(err)
+	}
+}

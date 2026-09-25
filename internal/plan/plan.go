@@ -89,9 +89,10 @@ func notesFiles(ctx context.Context, repo gitrepo.Repo, notesDir, commit string)
 }
 
 // relocated reports whether name, added at head for an already-published tag, is the tag's
-// own notes moved to another directory: byte-for-byte the file of the same name in the tagged
-// commit. That lets a repository change notes-dir without publishing anything. A retry, whose
-// tag points at head, is never a relocation.
+// own notes moved to another directory. The tagged commit always holds the notes it published,
+// so it must hold exactly one file of that name, byte-for-byte the added one; with several it
+// can't tell which was published, and refuses. That lets a repository change notes-dir without
+// publishing anything. A retry, whose tag points at head, is never a relocation.
 func relocated(ctx context.Context, repo gitrepo.Repo, tag, head, name string) (bool, error) {
 	target, err := repo.Resolve(ctx, "refs/tags/"+tag)
 	if err != nil {
@@ -108,14 +109,15 @@ func relocated(ctx context.Context, repo gitrepo.Repo, tag, head, name string) (
 	if err != nil {
 		return false, err
 	}
+	var published []string
 	for _, entry := range strings.Split(out, "\x00") {
 		meta, file, ok := strings.Cut(entry, "\t")
 		fields := strings.Fields(meta)
-		if ok && len(fields) == 3 && fields[1] == "blob" && path.Base(file) == path.Base(name) && fields[2] == strings.TrimSpace(blob) {
-			return true, nil
+		if ok && len(fields) == 3 && fields[1] == "blob" && path.Base(file) == path.Base(name) {
+			published = append(published, fields[2])
 		}
 	}
-	return false, nil
+	return len(published) == 1 && published[0] == strings.TrimSpace(blob), nil
 }
 
 // Read validates the release request between base and head.
