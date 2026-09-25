@@ -32,7 +32,7 @@ When your agent prepares a release, its pull request adds the next file, such as
 
 ## The `release-planner` command
 
-Release Planner itself is a small command-line program for macOS and Linux. Your `config.yml` pins its version, and everyone uses exactly that version: your agent checks it before preparing a release, and your release workflow downloads that release and verifies its signature before running it.
+Release Planner itself is a small command-line program for macOS and Linux. Your `config.yml` pins its version, and everyone uses exactly that version: your agent checks it before preparing a release, and your release workflow downloads that release and verifies its build attestation and checksums before running it.
 
 The command does three jobs:
 

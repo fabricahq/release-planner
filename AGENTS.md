@@ -8,7 +8,7 @@ Keep dependencies to the standard library and `go.yaml.in/yaml/v3`. The publish 
 
 Run `gofmt -l . && go vet ./... && go test ./...` before you push.
 
-The documentation site lives in `docs/`; see its README. When a command, config key, or generated file changes, update the page that describes it, and the README, in the same pull request.
+The documentation site lives in `docs/`; see its README. When a command, config key, or generated file changes, update the page that describes it in the same pull request, and the README if its quick start or limits change.
 
 ## Releases
 
