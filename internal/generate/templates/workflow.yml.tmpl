@@ -226,7 +226,9 @@ jobs:
   # repository code.
   attest-release:
     needs: [validate, publish]
-    if: needs.publish.result == 'success' && needs.validate.outputs.tag != ''
+    # !cancelled() stops GitHub from adding success(), which would skip this job whenever the
+    # build was reused and its jobs skipped.
+    if: "!cancelled() && needs.publish.result == 'success' && needs.validate.outputs.tag != ''"
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -250,7 +252,9 @@ jobs:
   downstream:
     name: downstream (${{"{{"}} matrix.target {{"}}"}})
     needs: [validate, publish{{if .ReleaseAssets.Workflow}}, attest-release{{end}}]
-    if: needs.publish.result == 'success'{{if .ReleaseAssets.Workflow}} && needs.attest-release.result == 'success'{{end}} && needs.validate.outputs.tag != '' && !contains(needs.validate.outputs.version, '-')
+    # !cancelled() stops GitHub from adding success(), which would skip this job whenever the
+    # build was reused and its jobs skipped.
+    if: "!cancelled() && needs.publish.result == 'success'{{if .ReleaseAssets.Workflow}} && needs.attest-release.result == 'success'{{end}} && needs.validate.outputs.tag != '' && !contains(needs.validate.outputs.version, '-')"
     strategy:
       fail-fast: false
       matrix:

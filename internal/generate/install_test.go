@@ -619,7 +619,7 @@ func TestWorkflowCombinations(t *testing.T) {
 				// After publication, the published files are attested again from the release branch.
 				again := jobs["attest-release"]
 				if !maps.Equal(again.Permissions, attest.Permissions) || !slices.Equal(again.Needs.([]any), []any{"validate", "publish"}) ||
-					again.If != "needs.publish.result == 'success' && needs.validate.outputs.tag != ''" ||
+					again.If != "!cancelled() && needs.publish.result == 'success' && needs.validate.outputs.tag != ''" ||
 					!strings.Contains(again.Steps[0].Run, `gh release download "$TAG"`) || again.Steps[1].Uses != attest.Steps[1].Uses ||
 					again.Steps[1].With["subject-path"] != "${{ runner.temp }}/published/*" {
 					t.Errorf("attest-release: %+v", again)
@@ -652,6 +652,14 @@ func TestWorkflowCombinations(t *testing.T) {
 					if !strings.Contains(run, "--downstream "+target) {
 						t.Errorf("report lacks --downstream %s: %q", target, run)
 					}
+				}
+			}
+			// A job after publish runs even when the pull request's build was reused and its jobs
+			// skipped, so its condition names a status function and GitHub adds no success().
+			for id, j := range jobs {
+				needs, _ := j.Needs.([]any)
+				if slices.Contains(needs, any("publish")) && !strings.Contains(j.If, "!cancelled()") && !strings.Contains(j.If, "always()") {
+					t.Errorf("%s runs if %q, which GitHub skips after a reused build", id, j.If)
 				}
 			}
 			report := jobs["report"]
