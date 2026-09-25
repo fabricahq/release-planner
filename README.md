@@ -66,7 +66,6 @@ Before you merge your first release, protect your release branch and create the 
 - **GitHub only.** Release Planner publishes GitHub releases and runs on GitHub Actions. Other hosts, such as GitLab, are not supported.
 - **macOS and Linux only.** There is no Windows build of the command.
 - **One version per repository.** Releases are tagged with SemVer versions such as `v1.2.3`, so separate versions for packages in a monorepo, and calendar versions, are not supported.
-- **No release files yet.** The generated workflow publishes the notes but doesn't attach binaries or other files to the release. Support is planned.
 - **A person approves every release.** Each release waits for someone to merge its release pull request. If you want every merge released automatically from commit message conventions, [release-please](https://github.com/googleapis/release-please) or [semantic-release](https://github.com/semantic-release/semantic-release) fits better.
 
 ## Learn more

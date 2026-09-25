@@ -143,7 +143,7 @@ The generated workflow runs when a pull request changes `_releases/`, `.release-
 2. **release-checks** (optional): runs the repository's [release checks](/customize/release-checks/) on the planned commit.
 3. **publish**: the only job with permission to write. It runs Release Planner at the pinned version and none of the repository's code. Before writing, it confirms that the version tags haven't changed since validation, that the previous release is published, and that any existing tag or release matches the plan. It then creates the tag and release, and afterward verifies that the tag points to the approved commit. If a matching release is already published, it changes nothing.
 
-The publish job uses the `release` environment and runs one publication at a time across the repository. It doesn't pass `--assets`, so the generated workflow doesn't attach files to releases yet.
+The publish job uses the `release` environment and runs one publication at a time across the repository.
 
 ## Retrying a failed release
 
