@@ -17,6 +17,14 @@ func TestParseFillsDefaults(t *testing.T) {
 	}
 }
 
+func TestNotesDirInReadsOnlyTheNotesDirectory(t *testing.T) {
+	for data, want := range map[string]string{"": "_releases", "release-notes-dir: docs/releases/\nunknown: key\n": "docs/releases", "[": "_releases"} {
+		if got := NotesDirIn([]byte(data)); got != want {
+			t.Errorf("NotesDirIn(%q) = %q, want %q", data, got, want)
+		}
+	}
+}
+
 func TestReleaseChecksAreOptional(t *testing.T) {
 	c, err := Parse([]byte("schema-version: 1\nversion: v0.2.0\n"), "")
 	if err != nil || c.ReleaseChecks.Enabled() {

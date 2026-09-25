@@ -118,7 +118,7 @@ To correct a published release's notes, edit its file in a pull request of its o
 - Adding or correcting the notes file of an untagged version requests that release.
 - Changing the notes file of a tagged version is a notes edit.
 - Deleting an untagged version's notes file withdraws that request.
-- Moving a tagged version's notes file unchanged, such as to a new `release-notes-dir`, changes nothing.
+- Moving a tagged version's notes file unchanged out of the `release-notes-dir` the release commit configures, such as into a new one, changes nothing. Moving any other file into a tagged version's notes path adds that file, so it's a notes edit.
 
 It fails, and nothing is published, when:
 

@@ -249,14 +249,35 @@ func TestTaggedNotesCantBeDeleted(t *testing.T) {
 }
 
 // Moving tagged notes, unchanged, to a new notes directory changes nothing, alongside the
-// config change that moves it. Rewriting them on the way is not a move.
+// config change that moves it. Rewriting them on the way is not a move, and neither is
+// moving in a file from outside the old notes directory.
 func TestMovedNotesAreNotChanges(t *testing.T) {
 	f := published(t)
+	f.write(".release-planner/config.yml", "release-notes-dir: releases\n")
+	f.write("docs/v1.0.0.md", "Not the notes\n")
+	f.commit("Configure")
 	moved := Options{NotesDir: "_releases", FirstVersion: "v1.0.0"}
+	f.git("checkout", "-q", "-b", "unrelated")
+	f.write("_releases/v1.0.0.md", "Not the notes\n")
+	f.git("rm", "-q", "docs/v1.0.0.md")
+	head := f.commit("Move an unrelated file")
+	f.git("checkout", "-q", "main")
+	if _, err := Read(context.Background(), f.repo, moved, "main", head); err == nil || !strings.Contains(err.Error(), "also changes docs/v1.0.0.md") {
+		t.Fatal(err)
+	}
+	// Without the deletion, the file is an edit of v1.0.0's notes.
+	f.git("checkout", "-q", "unrelated")
+	f.git("checkout", "-q", "main", "--", "docs/v1.0.0.md")
+	head = f.commit("Copy instead")
+	f.git("checkout", "-q", "main")
+	if p, err := Read(context.Background(), f.repo, moved, "main", head); err != nil || len(p.Edits) != 1 || p.Edits[0].Tag != "v1.0.0" || p.Edits[0].Notes != "Not the notes\n" {
+		t.Fatal(p, err)
+	}
+
 	f.git("checkout", "-q", "-b", "move")
 	f.git("mv", "releases", "_releases")
 	f.write(".release-planner/config.yml", "release-notes-dir: _releases\n")
-	head := f.commit("Move the notes")
+	head = f.commit("Move the notes")
 	f.git("checkout", "-q", "main")
 	if p, err := Read(context.Background(), f.repo, moved, "main", head); err != nil || !p.Empty() {
 		t.Fatal(p, err)

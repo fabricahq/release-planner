@@ -193,6 +193,18 @@ func Load(root string) (Config, error) {
 // The leading underscore keeps it apart from the repository's own content.
 const DefaultNotesDir = "_releases"
 
+// NotesDirIn returns the release-notes-dir a config's content sets, or DefaultNotesDir when
+// it sets none. It reads nothing else, so it also reads configs this version would reject.
+func NotesDirIn(data []byte) string {
+	var c struct {
+		NotesDir string `yaml:"release-notes-dir"`
+	}
+	if yaml.Unmarshal(data, &c) != nil || c.NotesDir == "" {
+		return DefaultNotesDir
+	}
+	return strings.Trim(c.NotesDir, "/")
+}
+
 // RuleOff is the release-notes-rules setting that turns a rule off.
 const RuleOff = "off"
 

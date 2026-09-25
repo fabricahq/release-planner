@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/fabricahq/release-planner/internal/config"
 	"github.com/fabricahq/release-planner/internal/gitrepo"
 	"github.com/fabricahq/release-planner/internal/notes"
 	"github.com/fabricahq/release-planner/internal/semver"
@@ -106,12 +107,15 @@ func notesFiles(ctx context.Context, repo gitrepo.Repo, notesDir, commit string)
 type change struct{ status, name string }
 
 // diff lists the files head changes on top of commit. A tagged version's notes moved
-// unchanged, such as to a new notes directory, are not a change.
+// unchanged from the notes directory commit configures, such as to a new notes directory,
+// are not a change. Any other file moved into the notes directory adds that file.
 func diff(ctx context.Context, repo gitrepo.Repo, dir string, tags []string, commit, head string) ([]change, error) {
+	// Only exact renames: a file rewritten while moving is a change.
 	out, err := repo.Run(ctx, "diff", "--name-status", "-z", "--find-renames=100%", commit, head)
 	if err != nil {
 		return nil, err
 	}
+	var was string
 	var changes []change
 	fields := strings.Split(strings.TrimSuffix(out, "\x00"), "\x00")
 	for i := 0; i+1 < len(fields); i += 2 {
@@ -125,8 +129,15 @@ func diff(ctx context.Context, repo gitrepo.Repo, dir string, tags []string, com
 			return nil, fmt.Errorf("git diff: incomplete rename of %s", name)
 		}
 		to := fields[i+1]
-		if tag := NotesTag(dir, to); tag != "" && slices.Contains(tags, tag) && path.Base(name) == path.Base(to) {
-			continue
+		if tag := NotesTag(dir, to); tag != "" && slices.Contains(tags, tag) {
+			if was == "" {
+				// A config missing at commit, or unreadable, sets the default directory.
+				data, _ := repo.Run(ctx, "show", commit+":"+config.File)
+				was = config.NotesDirIn([]byte(data))
+			}
+			if NotesTag(was, name) == tag {
+				continue
+			}
 		}
 		changes = append(changes, change{"D", name}, change{"A", to})
 	}
