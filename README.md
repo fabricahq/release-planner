@@ -232,7 +232,7 @@ Everyone runs the version your config pins. Agents check `release-planner versio
 | `uninstall [--force]` | You | Deletes the generated files and the `AGENTS.md` section. Leaves `.release-planner/` and your notes. |
 | `guide [--default-style]` | Agent | Prints the release procedure for this version, or only the default release notes style. |
 | `inventory [--head <ref>] [--repository <owner/name>] [--offline]` | Agent | Lists the previous release, every commit since it with its pull request author's GitHub handle, the candidate next versions, and the lines that list each change, the new contributors, and the closing link in the notes. |
-| `validate --base <ref> [--head <ref>] [--ci]` | Agent and CI | Validates a release request and its notes, and prints the tag, commit, and notes to publish. Broken [release notes rules](#release-notes-rules) fail, or with `--ci` are warnings. In the Release workflow, it also warns when the `release` environment isn't set up as recommended. `validate --rules` lists the rules. |
+| `validate --base <ref> [--head <ref>] [--repository <owner/name>] [--ci]` | Agent and CI | Validates a release request and its notes, and prints the tag, commit, and notes to publish. Broken [release notes rules](#release-notes-rules) fail, or with `--ci` are warnings. In the Release workflow, it also warns when the `release` environment isn't set up as recommended. `validate --rules` lists the rules. |
 | `publish --plan <file> --commit <sha> --branch <name> [--assets <dir>]` | CI | Tags the approved commit and publishes the approved notes, with optional files staged on a draft and verified first. |
 | `version` | Anyone | Prints the running version. |
 

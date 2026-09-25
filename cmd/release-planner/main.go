@@ -251,18 +251,23 @@ func cmdInventory(ctx context.Context, args []string, out io.Writer) error {
 		return err
 	}
 	repo := gitrepo.Repo{Dir: *dir}
-	if *repository == "" {
-		if *repository, err = repo.GitHubRepository(ctx); err != nil {
-			return err
-		}
-	} else if !gitrepo.ValidRepository(*repository) {
+	if *repository != "" && !gitrepo.ValidRepository(*repository) {
 		return fmt.Errorf("--repository must be owner/name, not %q", *repository)
 	}
 	inv, err := plan.Take(ctx, repo, plan.Options{NotesDir: c.NotesDir, FirstVersion: c.FirstVersion}, *head)
 	if err != nil {
 		return err
 	}
-	if !*offline && len(inv.PullRequests) > 0 {
+	// Without a repository, the history is still useful: the links name a placeholder to
+	// replace, and pull request authors are left out.
+	known := true
+	if *repository == "" {
+		if *repository, err = repo.GitHubRepository(ctx); err != nil {
+			inv.Warnings = append(inv.Warnings, fmt.Sprintf("no GitHub repository (%v): links name %s, and pull request authors are missing; pass --repository owner/name", err, repositoryPlaceholder))
+			*repository, known = repositoryPlaceholder, false
+		}
+	}
+	if known && !*offline && len(inv.PullRequests) > 0 {
 		api := os.Getenv("GITHUB_API_URL")
 		if api == "" {
 			api = "https://api.github.com"
@@ -272,6 +277,9 @@ func cmdInventory(ctx context.Context, args []string, out io.Writer) error {
 	inv.AddEntries(*repository)
 	return printJSON(out, inv)
 }
+
+// repositoryPlaceholder stands in for owner/name in inventory's links when the repository is unknown.
+const repositoryPlaceholder = "<owner>/<name>"
 
 // githubToken finds a token for GitHub API reads: GITHUB_TOKEN, GH_TOKEN, or the GitHub CLI's
 // login. With none, requests are unauthenticated, which works for public repositories.
@@ -290,15 +298,19 @@ func githubToken(ctx context.Context) string {
 var fullSHA = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
 func cmdValidate(ctx context.Context, args []string, out io.Writer) error {
-	fs, dir := flags("validate", "validate --base <ref> [--head <ref>] [--out <file>] [--ci --event <name>] | validate --rules")
+	fs, dir := flags("validate", "validate --base <ref> [--head <ref>] [--repository owner/name] [--out <file>] [--ci --event <name>] | validate --rules")
 	base := fs.String("base", "", "commit before the release request")
 	head := fs.String("head", "HEAD", "commit containing the approved notes")
 	outFile := fs.String("out", "", "write the release plan to this file instead of standard output")
 	ci := fs.Bool("ci", false, "running in the Release workflow: write step outputs, enforce retry rules, and report release notes rules as warnings")
 	event := fs.String("event", "", "GitHub event name, with --ci")
 	listRules := fs.Bool("rules", false, "list the release notes rules")
+	repository := fs.String("repository", "", "GitHub repository the closing link must name, as owner/name (default: GITHUB_REPOSITORY with --ci, otherwise from the origin remote)")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *repository != "" && !gitrepo.ValidRepository(*repository) {
+		return fmt.Errorf("--repository must be owner/name, not %q", *repository)
 	}
 	if *listRules {
 		for _, r := range notes.Rules {
@@ -339,15 +351,17 @@ func cmdValidate(ctx context.Context, args []string, out io.Writer) error {
 			return err
 		}
 	}
-	// The closing link must point at this repository: in the workflow, the one it runs in;
-	// locally, origin's. Without either, the link's repository isn't checked.
-	var repository string
-	if *ci {
-		repository = os.Getenv("GITHUB_REPOSITORY")
-	} else {
-		repository, _ = repo.GitHubRepository(ctx)
+	// The closing link must point at this repository: the one given; in the workflow, the one it
+	// runs in; locally, origin's, which a fork's clone overrides with --repository. Without any,
+	// the link's repository isn't checked.
+	switch {
+	case *repository != "":
+	case *ci:
+		*repository = os.Getenv("GITHUB_REPOSITORY")
+	default:
+		*repository, _ = repo.GitHubRepository(ctx)
 	}
-	p, err := plan.Read(ctx, repo, plan.Options{NotesDir: c.NotesDir, FirstVersion: c.FirstVersion, RulesOff: c.RulesOff(), Repository: repository}, *base, *head)
+	p, err := plan.Read(ctx, repo, plan.Options{NotesDir: c.NotesDir, FirstVersion: c.FirstVersion, RulesOff: c.RulesOff(), Repository: *repository}, *base, *head)
 	if err != nil {
 		return err
 	}

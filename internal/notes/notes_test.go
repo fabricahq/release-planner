@@ -142,6 +142,11 @@ func TestFencedCodeIsNotAHeading(t *testing.T) {
 	if f := Check(notes, release, nil); len(f) != 0 {
 		t.Fatal(f)
 	}
+	// Tilde fences too, and a fence closes only with at least as many of its own character.
+	notes = strings.Replace(valid, "You can now log in without a browser. (#7)", "You can now log in:\n\n~~~~md\n## Pull Requests\n```\n~~~\n- example in #99\n~~~~", 1)
+	if f := Check(notes, release, nil); len(f) != 0 {
+		t.Fatal(f)
+	}
 }
 
 func TestFirstReleaseClosingLine(t *testing.T) {

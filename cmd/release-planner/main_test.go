@@ -328,10 +328,25 @@ func TestValidateFailsLocallyAndWarnsInCI(t *testing.T) {
 	if code, out, errOut := cli(t, "validate", "--dir", dir, "--base", base); code != 0 || !strings.Contains(out, `"tag": "v1.0.0"`) {
 		t.Fatalf("%d %s %s", code, out, errOut)
 	}
+	// --repository names the repository the closing link must point at, as in a fork's clone.
+	if code, _, errOut := cli(t, "validate", "--dir", dir, "--base", base, "--repository", "o/r"); code != 0 {
+		t.Fatalf("repository: %d %s", code, errOut)
+	}
+	if code, _, errOut := cli(t, "validate", "--dir", dir, "--base", base, "--repository", "fork/r"); code != 1 || !strings.Contains(errOut, "require-closing-link") {
+		t.Fatalf("other repository: %d %s", code, errOut)
+	}
+	if code, _, errOut := cli(t, "validate", "--dir", dir, "--base", base, "--repository", "o"); code != 1 || !strings.Contains(errOut, "--repository must be owner/name") {
+		t.Fatalf("bad repository: %d %s", code, errOut)
+	}
+	// With no origin remote, inventory still lists the history, with placeholder links.
+	code, out, errOut := cli(t, "inventory", "--dir", dir, "--offline")
+	if code != 0 || !strings.Contains(out, "https://github.com/<owner>/<name>/tree/v1.0.0") || !strings.Contains(out, "pass --repository owner/name") {
+		t.Fatalf("inventory: %d %s %s", code, out, errOut)
+	}
 
 	write("_releases/v1.0.0.md", "## ✨ New Features\n\n"+good)
 	git("commit", "-q", "-am", "Break a rule")
-	code, out, errOut := cli(t, "validate", "--dir", dir, "--base", base)
+	code, out, errOut = cli(t, "validate", "--dir", dir, "--base", base)
 	if code != 1 || out != "" || !strings.Contains(errOut, "_releases/v1.0.0.md breaks release notes rules:\n  line 1: no-empty-heading:") || !strings.Contains(errOut, "line 3: no-duplicate-heading:") {
 		t.Fatalf("local: %d %q %s", code, out, errOut)
 	}

@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -425,6 +426,27 @@ func TestTitledMergeCommitListsOnlyThePullRequest(t *testing.T) {
 	}
 	if !reflect.DeepEqual(listed, []string{"Initial #0", "Add the b file #12"}) {
 		t.Fatalf("listed %v", listed)
+	}
+}
+
+// Only a versioned notes file makes a commit a release request. Other files in the notes
+// directory, such as an index, are changes to release.
+func TestOnlyReleaseNotesAreNotChanges(t *testing.T) {
+	f := newFixture(t)
+	f.write("releases/index.md", "# Releases\n")
+	f.commit("Add a releases index")
+	f.write("releases/v9.9.9.md", "Notes\n")
+	f.commit("Release v9.9.9")
+	inv, err := Take(context.Background(), f.repo, opts, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var subjects []string
+	for _, c := range inv.Commits {
+		subjects = append(subjects, c.Subject)
+	}
+	if !slices.Contains(subjects, "Add a releases index") || slices.Contains(subjects, "Release v9.9.9") {
+		t.Fatalf("%v", subjects)
 	}
 }
 

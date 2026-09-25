@@ -203,14 +203,13 @@ func nothingToRelease(ctx context.Context, repo gitrepo.Repo, notesDir string, c
 	if err != nil {
 		return false
 	}
-	dir := strings.Trim(notesDir, "/") + "/"
 	files := strings.Split(strings.TrimSuffix(out, "\x00"), "\x00")
 	if len(files) == 1 && files[0] == "" {
 		// Empty: nothing to release, unless it's a pull request, which is always listed.
 		return c.PullRequest == 0
 	}
 	for _, f := range files {
-		if !strings.HasPrefix(f, dir) {
+		if NotesTag(notesDir, f) == "" {
 			return false
 		}
 	}

@@ -35,7 +35,7 @@ Run every command from the repository root, with the pinned version installed. E
 | `uninstall [--force]` | Maintainer | Deletes the generated files and the `AGENTS.md` section. |
 | `guide [--default-style]` | Agent | Prints the release procedure, or only the default release notes style. |
 | `inventory [--head <ref>] [--repository <owner/name>] [--offline]` | Agent | Prints JSON describing everything since the previous release, including each pull request author's GitHub handle and the lines that list each change in the notes. |
-| `validate --base <ref> [--head <ref>] [--out <file>] [--ci --event <name>]` | Agent, CI | Validates the release request between two commits and its notes, and prints the release plan as JSON. |
+| `validate --base <ref> [--head <ref>] [--repository <owner/name>] [--out <file>] [--ci --event <name>]` | Agent, CI | Validates the release request between two commits and its notes, and prints the release plan as JSON. |
 | `validate --rules` | Anyone | Lists the release notes rules. |
 | `publish --plan <file> --commit <sha> --branch <name> [--assets <dir>]` | CI | Tags the approved commit and publishes the release. Refuses unless the commit is a pull request merged into the branch. With `--assets`, uploads the directory's files to a draft, verifies GitHub's checksums for them, and publishes last. Needs `GITHUB_TOKEN` and `GITHUB_REPOSITORY`. |
 | `version` | Anyone | Prints the running version. |
@@ -98,7 +98,7 @@ If `policy.md` is missing or still contains `TODO:` prompts, stop and ask the ma
 - `closing` is the notes' last line. After a previous release, replace `<version>` with the version you chose.
 - `warnings` explains anything `inventory` couldn't look up, such as a handle when GitHub was unreachable. It never fails for that reason.
 
-To look up handles, `inventory` uses `GITHUB_TOKEN`, `GH_TOKEN`, or the GitHub CLI's login, in that order, or no token for a public repository. It reads the repository, for lookups and links, from the `origin` remote unless given `--repository`. Pass `--offline` to skip the lookups.
+To look up handles, `inventory` uses `GITHUB_TOKEN`, `GH_TOKEN`, or the GitHub CLI's login, in that order, or no token for a public repository. It reads the repository, for lookups and links, from the `origin` remote unless given `--repository`. Pass `--offline` to skip the lookups. Without a repository, the links name `<owner>/<name>` for you to replace.
 
 ## Notes
 
@@ -133,7 +133,7 @@ It then checks the notes against the release notes rules:
 | `list-every-change` | Every pull request and direct commit on the release branch from the previous tag to the head is listed exactly once under `## Pull Requests`, matched by `#N` or `/pull/N` and `/commit/<sha>`, and nothing else is. Uses only git, never the network. |
 | `require-closing-link` | Exactly one closing line: `**Full Changelog**: …/compare/<previous>...<version>`, or for a first release, `This is the first release. Browse the source at [<version>](…)`. |
 
-Without `--ci`, a broken rule fails, listing every finding with its rule, line, and message. With `--ci`, findings are GitHub warning annotations and step summary entries, and don't fail the run or block publishing, because the maintainer may break a rule on purpose. Rules turned off in `release-notes-rules` are skipped.
+Without `--ci`, a broken rule fails, listing every finding with its rule, line, and message. With `--ci`, findings are GitHub warning annotations and step summary entries, and don't fail the run or block publishing, because the maintainer may break a rule on purpose. Rules turned off in `release-notes-rules` are skipped. The closing link must name the repository given by `--repository`, or else `GITHUB_REPOSITORY` with `--ci`, or else the `origin` remote; in a fork's clone, pass the upstream repository.
 
 ## The release workflow
 

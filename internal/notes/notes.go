@@ -113,14 +113,18 @@ type document struct {
 func parse(text string) document {
 	doc := document{lines: strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")}
 	doc.fenced = make([]bool, len(doc.lines))
-	fenced := false
+	fence := "" // the open fence's delimiter, such as ``` or ~~~~
 	for i, line := range doc.lines {
-		if strings.HasPrefix(strings.TrimSpace(line), "```") {
-			fenced = !fenced
+		if fence != "" {
 			doc.fenced[i] = true
+			// A fence closes with at least as many of its character and nothing else.
+			if t := strings.TrimSpace(line); strings.HasPrefix(t, fence) && strings.Trim(t, fence[:1]) == "" {
+				fence = ""
+			}
 			continue
 		}
-		if fenced {
+		if t := strings.TrimSpace(line); strings.HasPrefix(t, "```") || strings.HasPrefix(t, "~~~") {
+			fence = t[:len(t)-len(strings.TrimLeft(t, t[:1]))]
 			doc.fenced[i] = true
 			continue
 		}
