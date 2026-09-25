@@ -80,7 +80,7 @@ Readers:
 4. Breaking changes that require them to update configuration or scripts
 
 ## Always and never
-- Always show the upgrade command.
+- Always give migration steps for a breaking change.
 - Never mention dependency updates unless they fix a security issue.
 ```
 

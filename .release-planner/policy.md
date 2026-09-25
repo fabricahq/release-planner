@@ -52,6 +52,6 @@ Describe each change once, in the section it fits best.
 
 ## Always and never
 
-- Always show the upgrade command: in the upgrade steps when a release has breaking changes, and otherwise in a `## Upgrade` section after the last change section.
+- Only a release with breaking changes gets upgrade steps. Focus them on what readers must change for those breaking changes, and include the install command there. Leave upgrade instructions out of every other release.
 - Never mention refactors or test-only changes.
 - Never link to headings within the notes. Headings start with emoji, so their anchors are fragile; refer to a section by its name instead.
