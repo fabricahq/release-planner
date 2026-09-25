@@ -339,7 +339,12 @@ func cmdValidate(ctx context.Context, args []string, out io.Writer) error {
 			return err
 		}
 	}
-	p, err := plan.Read(ctx, repo, plan.Options{NotesDir: c.NotesDir, FirstVersion: c.FirstVersion, ExcludeRules: c.ExcludeRules}, *base, *head)
+	// The closing link must point at this repository: the workflow's, or origin's locally.
+	repository := os.Getenv("GITHUB_REPOSITORY")
+	if repository == "" {
+		repository, _ = repo.GitHubRepository(ctx)
+	}
+	p, err := plan.Read(ctx, repo, plan.Options{NotesDir: c.NotesDir, FirstVersion: c.FirstVersion, ExcludeRules: c.ExcludeRules, Repository: repository}, *base, *head)
 	if err != nil {
 		return err
 	}

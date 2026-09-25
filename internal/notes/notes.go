@@ -25,6 +25,9 @@ type Change struct {
 type Release struct {
 	Version  string
 	Previous string
+	// Repository is the release's GitHub owner/name, for its closing link. When it's empty,
+	// the closing link's repository isn't checked.
+	Repository string
 	// Changes lists every pull request and direct commit from Previous to the release.
 	Changes []Change
 }
@@ -102,18 +105,23 @@ type heading struct {
 type document struct {
 	lines    []string
 	headings []heading
+	// fenced marks the lines inside fenced code blocks, fences included, by 0-based index.
+	fenced []bool
 }
 
 // parse reads the lines and headings of a notes file, skipping fenced code blocks.
 func parse(text string) document {
 	doc := document{lines: strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")}
+	doc.fenced = make([]bool, len(doc.lines))
 	fenced := false
 	for i, line := range doc.lines {
 		if strings.HasPrefix(strings.TrimSpace(line), "```") {
 			fenced = !fenced
+			doc.fenced[i] = true
 			continue
 		}
 		if fenced {
+			doc.fenced[i] = true
 			continue
 		}
 		level := len(line) - len(strings.TrimLeft(line, "#"))
@@ -269,13 +277,15 @@ func listEveryChange(doc document, r Release) []Finding {
 	listedPRs, listedCommits := map[int][]int{}, map[string][]int{}
 	var findings []Finding
 	for n := start; n <= end; n++ {
-		line := strings.TrimSpace(doc.lines[n-1])
-		if !strings.HasPrefix(line, "- ") && !strings.HasPrefix(line, "* ") {
+		// Entries are top-level bullets outside fenced code; nested bullets add detail.
+		line := doc.lines[n-1]
+		if doc.fenced[n-1] || (!strings.HasPrefix(line, "- ") && !strings.HasPrefix(line, "* ")) {
 			continue
 		}
 		// An entry ends with what it links to; a title may mention other numbers.
 		refs := reference.FindAllStringSubmatch(line, -1)
 		if len(refs) == 0 {
+			findings = append(findings, Finding{Line: n, Message: "this entry doesn't link a pull request or commit; use an entry line from release-planner inventory, or move the text above ## Pull Requests"})
 			continue
 		}
 		ref := refs[len(refs)-1]
@@ -290,6 +300,8 @@ func listEveryChange(doc document, r Release) []Finding {
 	wantPRs := map[int]bool{}
 	for _, c := range r.Changes {
 		switch {
+		case c.PullRequest != 0 && wantPRs[c.PullRequest]:
+			// A pull request merged more than once is one change.
 		case c.PullRequest != 0:
 			wantPRs[c.PullRequest] = true
 			switch lines := listedPRs[c.PullRequest]; len(lines) {
@@ -337,25 +349,35 @@ func short(sha string) string {
 }
 
 func requireClosingLink(doc document, r Release) []Finding {
-	want := "**Full Changelog**: "
-	suffix := "/compare/" + r.Previous + "..." + r.Version
-	if r.Previous == "" {
-		want = "This is the first release. Browse the source at [" + r.Version + "]("
-		suffix = "/tree/" + r.Version + ")."
+	// With the repository known, only its exact link counts; otherwise the label and the
+	// versions it names.
+	matches := func(line string) bool {
+		if r.Repository != "" {
+			return line == Closing(r.Repository, r.Previous, r.Version)
+		}
+		if r.Previous == "" {
+			return strings.HasPrefix(line, "This is the first release. Browse the source at ["+r.Version+"](") && strings.HasSuffix(line, "/tree/"+r.Version+").")
+		}
+		return strings.HasPrefix(line, "**Full Changelog**: ") && strings.HasSuffix(line, "/compare/"+r.Previous+"..."+r.Version)
 	}
 	var found, wrong []int
 	for i, line := range doc.lines {
 		line = strings.TrimSpace(line)
 		switch {
-		case strings.HasPrefix(line, want) && strings.HasSuffix(line, suffix):
+		case doc.fenced[i]:
+		case matches(line):
 			found = append(found, i+1)
 		case closingLine.MatchString(line):
 			wrong = append(wrong, i+1)
 		}
 	}
+	want := r.Version
+	if r.Repository != "" {
+		want = r.Repository + " " + r.Version
+	}
 	var findings []Finding
 	for _, n := range wrong {
-		findings = append(findings, Finding{Line: n, Message: fmt.Sprintf("this closing line doesn't match %s; copy the closing line from release-planner inventory", r.Version)})
+		findings = append(findings, Finding{Line: n, Message: fmt.Sprintf("this closing line doesn't match %s; copy the closing line from release-planner inventory", want)})
 	}
 	switch {
 	case len(found) == 0 && len(wrong) == 0:

@@ -40,6 +40,9 @@ type Options struct {
 	FirstVersion string
 	// ExcludeRules are notes rules to skip.
 	ExcludeRules []string
+	// Repository is the GitHub owner/name, for checking the notes' closing link, or "" to
+	// check it without the repository.
+	Repository string
 }
 
 // NotesTag returns the tag a notes path requests, or "" for any other file.
@@ -233,7 +236,7 @@ func Read(ctx context.Context, repo gitrepo.Repo, opts Options, base, head strin
 	if err != nil {
 		return empty, err
 	}
-	release := notes.Release{Version: tag, Previous: previous}
+	release := notes.Release{Version: tag, Previous: previous, Repository: opts.Repository}
 	for _, c := range commits {
 		if Listed(c) {
 			release.Changes = append(release.Changes, notes.Change{PullRequest: c.PullRequest, SHA: c.SHA})

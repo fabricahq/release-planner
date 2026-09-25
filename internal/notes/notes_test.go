@@ -88,8 +88,51 @@ func TestEachRule(t *testing.T) {
 // Only entries under ## Pull Requests list a change: a (#7) in the prose doesn't.
 func TestChangesCountOnlyUnderPullRequests(t *testing.T) {
 	notes := strings.Replace(valid, "- feat: add login command, fixing #3 by @octocat in #7\n", "- feat: add login command\n", 1)
-	if got := rules(Check(notes, release, nil)); !slices.Equal(got, []string{"list-every-change"}) {
+	// The bullet no longer links #7, so it's flagged, and #7 is missing.
+	if got := rules(Check(notes, release, nil)); !slices.Equal(got, []string{"list-every-change", "list-every-change"}) {
 		t.Fatal(got)
+	}
+}
+
+// Every top-level bullet under ## Pull Requests must link a change; nested bullets and fenced
+// code are neither entries nor findings.
+func TestPullRequestsEntriesMustLinkAChange(t *testing.T) {
+	at := strings.Index(valid, "\n\n## New Contributors")
+	todo := valid[:at] + "\n- TODO: review the previous draft" + valid[at:]
+	if got := rules(Check(todo, release, nil)); !slices.Equal(got, []string{"list-every-change"}) {
+		t.Fatal(got)
+	}
+	detail := valid[:at] + "\n  - A nested detail, with no link\n\n```md\n- example in #99\n```" + valid[at:]
+	if f := Check(detail, release, nil); len(f) != 0 {
+		t.Fatal(f)
+	}
+}
+
+// A pull request merged more than once is one change: listed once, and reported once if
+// it's missing.
+func TestPullRequestMergedTwiceIsOneChange(t *testing.T) {
+	twice := release
+	twice.Changes = append(append([]Change{}, release.Changes...), release.Changes[0])
+	if f := Check(valid, twice, nil); len(f) != 0 {
+		t.Fatal(f)
+	}
+	missing := strings.Replace(valid, "- feat: add login command, fixing #3 by @octocat in #7\n", "", 1)
+	got := rules(Check(missing, twice, nil))
+	if n := len(slices.DeleteFunc(slices.Clone(got), func(r string) bool { return r != "list-every-change" })); n != 1 {
+		t.Fatal(got)
+	}
+}
+
+// With the repository known, a closing link to another repository is wrong.
+func TestClosingLinkNamesThisRepository(t *testing.T) {
+	known := release
+	known.Repository = "octo/other"
+	if got := rules(Check(valid, known, nil)); !slices.Equal(got, []string{"require-closing-link"}) {
+		t.Fatal(got)
+	}
+	known.Repository = "octo/example"
+	if f := Check(valid, known, nil); len(f) != 0 {
+		t.Fatal(f)
 	}
 }
 
