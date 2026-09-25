@@ -3,15 +3,19 @@ title: Release Planner vs. other tools
 description: Which kind of release tool Release Planner is, how it compares with the others of its kind, and who should use something else.
 ---
 
-There are quite a few release automation tools, and they generally fall into three camps:
+Release automation tools generally fall into three camps:
 
-- **Computed release notes**, generated from commit messages or pull request titles.
-- **Written release notes**, written by a person or an agent, usually in a dedicated release pull request.
-- **Build and packaging tools**, which build and ship your software and leave the notes to something else.
+| Camp | How the notes get written | Examples |
+| --- | --- | --- |
+| Computed release notes | Generated from commit messages or pull request titles | semantic-release, release-please, git-cliff |
+| Written release notes | Written by a person or an agent, usually in a dedicated release pull request | Changesets, towncrier, **Release Planner** |
+| Build and packaging tools | Left to something else; these build and ship your software | GoReleaser |
 
-Release Planner is a **written release notes** tool, designed agent-first.
+Release Planner is a written release notes tool, designed agent-first:
 
-Your coding agent writes the notes for the release as a whole, following your [`policy.md`](/customize/policy/). Release Planner computes everything it can deterministically, such as every change since the last release, and checks the agent's notes against [release notes rules](/customize/release-notes-style/#release-notes-rules). It wraps this in a simple workflow for you: ask for a release, review the pull request, and merge to publish.
+- **Your agent writes** the notes for the whole release, following your [`policy.md`](/customize/policy/).
+- **Release Planner computes** everything it can deterministically, such as every change since the last release, and checks the agent's notes against [release notes rules](/customize/release-notes-style/#release-notes-rules).
+- **You review and merge** one pull request to publish.
 
 ## Release Planner vs. computed release notes tools
 
