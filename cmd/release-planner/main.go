@@ -447,6 +447,10 @@ func readMerged(ctx context.Context, repo gitrepo.Repo, c config.Config, opts pl
 			return empty, fmt.Errorf("fetching pull request #%d's head: %v", pr.Number, err)
 		}
 	}
+	// Plan with the notes directory the pull request merged under: a manual retry runs from the
+	// release branch's current checkout, which may have moved the notes since.
+	data, _ := repo.Run(ctx, "show", merged+":"+config.File)
+	opts.NotesDir = config.NotesDirIn([]byte(data))
 	p, err := plan.Read(ctx, repo, opts, merged+"^1", pr.Head)
 	if err != nil {
 		return empty, fmt.Errorf("pull request #%d: %v", pr.Number, err)

@@ -155,7 +155,7 @@ The generated workflow runs when a pull request changes `_releases/`, `.release-
 
 | Job | Runs | Permissions | What it does |
 | --- | --- | --- | --- |
-| **validate** | Always | `contents: read`, `actions: read`, `pull-requests: read` | Installs the pinned Release Planner, checks out the head with full history, runs `check`, then `validate --ci`: `--base`/`--head` on a pull request, `--merged` after the merge. Writes the release plan and step outputs, and uploads the plan as the `release-plan` artifact. |
+| **validate** | Always | `contents: read`, `actions: read`, `pull-requests: read` | Installs the pinned Release Planner, checks out the pull request's head, or the workflow's own commit after the merge and on a manual retry, with full history, runs `check`, then `validate --ci`: `--base`/`--head` on a pull request, `--merged` after the merge. Writes the release plan and step outputs, and uploads the plan as the `release-plan` artifact. |
 | **release-checks** | Optional; when validate says this run builds | Default; the workflow form gets the repository's secrets | Runs the [release checks](/customize/release-checks/) on the release commit. |
 | **release-assets** | Optional; when validate says this run builds | `contents: read`, no secrets | Calls the [build workflow](/customize/release-assets/) with `ref`, `tag`, and `version`; it uploads the `release-assets` artifact. |
 | **attest** | After release-assets | `contents: read`, `id-token: write`, `attestations: write` | Attests each asset's build provenance. Runs no repository code. |

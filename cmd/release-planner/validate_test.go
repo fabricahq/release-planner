@@ -114,6 +114,22 @@ func TestValidateAfterMergePlansTheReleaseCommit(t *testing.T) {
 	}
 }
 
+// A manual retry runs from the release branch's current checkout; it still plans the merge
+// with the notes directory it merged under.
+func TestValidateAfterMergeUsesTheNotesDirectoryItMergedUnder(t *testing.T) {
+	o := newOrigin(t, "")
+	merged := o.merge("merge")
+	o.git("mv", "_releases", "releases")
+	o.write(".release-planner/config.yml", "schema-version: 1\nversion: v0.1.0\nfirst-version: v1.0.0\nrelease-notes-dir: releases\n")
+	o.repo.commit("Move the release notes (#4)")
+	dir := o.checkout(t)
+	actionsFiles(t)
+	mergedAPI(t, o, merged, nil)
+	if p, out, errOut := validateMerged(t, dir, merged); p.Tag != "v1.0.0" || p.File != "_releases/v1.0.0.md" || p.Notes != "Approved notes\n" {
+		t.Fatalf("%+v\n%s %s", p, out, errOut)
+	}
+}
+
 func TestValidateAfterMergeRefusesWhatThePullRequestDidNotApprove(t *testing.T) {
 	o := newOrigin(t, "")
 	direct := o.git("rev-parse", "HEAD")
