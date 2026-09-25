@@ -50,10 +50,21 @@ release-notes-style:
   file: .release-planner/release-notes-style.md
   mode: append
 
-# Checks to run on the exact commit being released, before it's tagged.
+# Checks to run on the release commit, on the release pull request.
 # Default: none.
 release-checks:
   run: make smoke-test
+
+# Your workflow that builds the files to attach to each release.
+# Default: none; releases have no files.
+release-assets:
+  workflow: build-release.yml
+
+# Workflows in other repositories to run after each new stable release.
+# Default: none.
+downstream:
+  - repository: fabricahq/homebrew-tap
+    workflow: update-code-rules.yml
 
 # Release notes rules to turn off, by ID. List them with: release-planner validate --rules
 # Default: every rule is on.
@@ -61,7 +72,7 @@ release-notes-rules:
   no-long-heading: off
 ```
 
-For the details of the last three, see [Release notes style](/customize/release-notes-style/), [Release checks](/customize/release-checks/), and [Release notes rules](/customize/release-notes-style/#release-notes-rules).
+For the details of the last five, see [Release notes style](/customize/release-notes-style/), [Release checks](/customize/release-checks/), [Release assets](/customize/release-assets/), [Downstream workflows](/customize/downstream/), and [Release notes rules](/customize/release-notes-style/#release-notes-rules).
 
 ## Upgrade Release Planner
 

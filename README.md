@@ -23,10 +23,11 @@ Agents are good at the tedious part: reading every commit and pull request since
 1. **You tell your agent "let's release."**
 2. **The agent works out the next release.** It runs `release-planner guide` for the procedure and `release-planner inventory` for every change since the previous release, the candidate versions, and a ready-made line for each pull request with its author. Then it applies your release policy and picks the version.
 3. **The agent opens a release PR.** It writes `_releases/v<version>.md` in your release notes style, checks it with `release-planner validate`, and explains its choice of version in the PR.
-4. **You edit the notes and merge.** Change anything you like. Saving edits publishes nothing.
-5. **Merging publishes the release.** The generated Release workflow validates the request, runs any release checks you configured, tags the merged commit, and publishes the notes file word for word as the GitHub release.
+4. **The Release workflow checks the release on the pull request.** The release commit is the newest commit the release PR shares with your release branch. The workflow validates the request, runs any release checks and builds any release assets on the release commit, and keeps one status comment on the PR up to date.
+5. **You edit the notes and merge.** Change anything you like. Saving edits publishes nothing.
+6. **Merging publishes the release.** The workflow tags the release commit and publishes the notes file word for word as the GitHub release, with the files the PR built, then starts any downstream workflows.
 
-The tag is created only at that last step, on the exact commit you approved, so a version never exists without its approved notes.
+The tag is created only at that last step, on the release commit you approved, so a version never exists without its approved notes. To correct published notes later, edit the file in a new pull request; merging updates the release on GitHub.
 
 ## How do I set it up on a repository?
 
@@ -65,7 +66,8 @@ From the repository root:
    - Require pull requests for your release branch, with your CI as required status checks, and require branches to be up to date before merging (or use a merge queue). This is what guarantees that the commit you release was tested.
    - Block force pushes to and deletion of that branch.
    - Create an environment named `release` (Settings → Environments). Under **Deployment branches and tags**, add a branch rule for your release branch only. Leave **Required reviewers** off: the merge is the approval, and reviewers would make every release wait for a second approval in the Actions tab. The Release workflow warns on each release pull request if the environment is missing, doesn't allow your release branch, allows any branch, or requires reviewers.
-   - Turn on immutable releases, so published tags and releases can't be changed.
+   - If you use [downstream workflows](#downstream-workflows), create the `downstream` environment the same way, with the GitHub App's credentials.
+   - Turn on immutable releases, so published tags and files can't be changed. Notes stay editable.
 
 6. **Commit the files**, then tell your agent "let's release."
 
@@ -96,6 +98,8 @@ Everything in `.release-planner/` belongs to you; Release Planner never rewrites
 | `version` | required | The Release Planner version to use: a release tag, or a full commit SHA. Bumping it upgrades the GitHub Actions workflow (`.github/workflows/release-planner.yml`) and the agent guide together; run `release-planner install` after changing it. |
 | `first-version` | `v0.1.0` | The version your first release must use. |
 | `release-checks` | none | Optional release-only checks. See [Release checks](#release-checks). |
+| `release-assets` | none | Your workflow that builds the files attached to each release. See [Release assets](#release-assets). |
+| `downstream` | none | Workflows in other repositories to run after each new stable release. See [Downstream workflows](#downstream-workflows). |
 | `release-notes-rules` | every rule on | Release notes rules to turn off, by ID, such as `no-long-heading: off`. See [Release notes rules](#release-notes-rules). |
 | `release-notes-style` | none | Your own release notes style: `file`, the markdown file that holds it, and `mode`, `append` or `replace`. See [Release notes style](#release-notes-style). |
 | `release-notes-dir` | `_releases` | Where the release notes files live. |
@@ -110,7 +114,7 @@ Your required pull request checks already test what merges, including the releas
 - **A fresh vulnerability scan,** because advisories are published after code merges. For example: `govulncheck`, `npm audit`, or `osv-scanner`.
 - **Upgrade tests** from the previous release, or **slow suites** that don't run per PR: end-to-end, the full platform matrix, or benchmarks.
 
-The checks run on the exact commit being released, before anything is tagged. If they fail, nothing is published. Configure them one of two ways.
+The checks run on the release commit while the release PR is open, so a failure shows in its status comment before you approve. If they fail, nothing is published. After the merge, the release reuses the PR's result, or runs the checks again on the same commit if it can't. Configure them one of two ways.
 
 A Bash script, with optional toolchains. Any failing command stops the release:
 
@@ -129,7 +133,7 @@ release-checks:
   workflow: release-checks.yml
 ```
 
-The Release workflow calls it with the commit to check and your repository's secrets. It never receives the token that can write releases. The workflow must accept a `ref` input and check out that ref, because on a retry the release commit is not the latest commit. `install` and `check` fail if it can't be called this way:
+The Release workflow calls it with the commit to check and your repository's secrets. It never receives the token that can write releases. The workflow must accept a `ref` input and check out that ref, because the release commit is usually not the latest commit. `install` and `check` fail if it can't be called this way:
 
 ```yaml
 on:
@@ -145,6 +149,29 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
 ```
+
+### Release assets
+
+To attach files to each release, name a workflow that builds them:
+
+```yaml
+release-assets:
+  workflow: build-release.yml
+```
+
+The Release workflow calls it on the release PR with string inputs `ref` (the release commit), `tag`, and `version` (without the `v`), read-only and without secrets. It must check out `ref` and upload the files as one artifact named `release-assets`. An `attest` job then attests each file's build provenance, and the status comment lists the files with their SHA-256. When you merge, publishing verifies each file's attestation came from this repository's `release-planner.yml`, stages the files on a draft release, checks GitHub's checksums, and publishes last. If the PR's files are gone, the release builds them again from the release commit first. See the [docs](docs/src/content/docs/customize/release-assets.md) for an example.
+
+### Downstream workflows
+
+To start workflows in other repositories after each new stable release, such as a Homebrew formula update, list them:
+
+```yaml
+downstream:
+  - repository: fabricahq/homebrew-tap
+    workflow: update-code-rules.yml
+```
+
+Each needs a `workflow_dispatch` trigger with string inputs `tag` and `version`. A `downstream` job, in an environment named `downstream`, mints a GitHub App token for those repositories from the variable `DOWNSTREAM_APP_CLIENT_ID` and the secret `DOWNSTREAM_APP_PRIVATE_KEY`, and starts each workflow. Prereleases and notes edits start nothing. A failure doesn't affect the published release; the status comment shows each target's result. See the [docs](docs/src/content/docs/customize/downstream.md) to create the App.
 
 ### Release notes style
 
@@ -201,7 +228,7 @@ Whatever the style says, every release ends with the parts `inventory` writes: t
 | `list-every-change` | `## Pull Requests` lists every pull request and direct commit since the previous release exactly once, and nothing else. Entries are matched by number or commit, so you can edit their titles. |
 | `require-closing-link` | One closing line: the **Full Changelog** link, or for a first release, the link to its source. |
 
-When your agent runs `validate`, a broken rule fails, so the agent fixes it. In the Release workflow, a broken rule is a warning that doesn't block the release: you may break a rule on purpose. To stop checking a rule, turn it off in `config.yml`:
+When your agent runs `validate`, a broken rule fails, so the agent fixes it. In the Release workflow, a broken rule is a warning in the status comment that doesn't block the release: you may break a rule on purpose. To stop checking a rule, turn it off in `config.yml`:
 
 ```yaml
 release-notes-rules:
@@ -232,8 +259,10 @@ Everyone runs the version your config pins. Agents check `release-planner versio
 | `uninstall [--force]` | You | Deletes the generated files and the `AGENTS.md` section. Leaves `.release-planner/` and your notes. |
 | `guide [--default-style]` | Agent | Prints the release procedure for this version, or only the default release notes style. |
 | `inventory [--head <ref>] [--repository <owner/name>] [--offline]` | Agent | Lists the previous release, every commit since it with its pull request author's GitHub handle, the candidate next versions, and the lines that list each change, the new contributors, and the closing link in the notes. |
-| `validate --base <ref> [--head <ref>] [--repository <owner/name>] [--ci]` | Agent and CI | Validates a release request and its notes, and prints the tag, commit, and notes to publish. Broken [release notes rules](#release-notes-rules) fail, or with `--ci` are warnings. In the Release workflow, it also warns when the `release` environment isn't set up as recommended. `validate --rules` lists the rules. |
-| `publish --plan <file> --commit <sha> --branch <name> [--assets <dir>]` | CI | Tags the approved commit and publishes the approved notes, with optional files staged on a draft and verified first. |
+| `validate --base <ref> [--head <ref>] [--repository <owner/name>] [--ci]` | Agent and CI | Validates a release pull request against the release branch, and prints the tag, release commit, and notes to publish, and any notes edits. Broken [release notes rules](#release-notes-rules) fail, or with `--ci` are warnings. In the Release workflow, it also warns when the `release` or `downstream` environment isn't set up as recommended. `validate --ci --merged <sha>` plans the publication a merge approved. `validate --rules` lists the rules. |
+| `publish --plan <file> --branch <name> [--built-plan <file>] [--assets <dir> [--signer-workflow <path>]]` | CI | Tags the release commit and publishes the approved notes, with optional attested files staged on a draft and verified first, and replaces edited notes of published releases. |
+| `report --needs <json> --branch <name> (--pull-request <n> \| --merged <sha>)` | CI | Writes the release status comment on the release pull request. |
+| `downstream --tag <tag> --target <owner/name:workflow.yml>...` | CI | Starts downstream workflows for a new stable release. |
 | `version` | Anyone | Prints the running version. |
 
 ## Upgrading
@@ -249,22 +278,23 @@ release-planner install
 
 ### What does `validate` check before publishing?
 
-- Exactly one new or edited notes file per change.
+- The release commit: the newest commit the release PR shares with the release branch. The PR may change only release notes files on top of it.
+- At most one release request per PR, alongside any edits to published notes.
 - A SemVer 2.0.0 version with no build metadata, newer than every existing tag.
 - Your configured first version, if the repository has no releases yet.
 - Notes that aren't empty.
 
 It also checks the [release notes rules](#release-notes-rules), which warn without blocking the release.
 
-It also refuses to edit notes that are already tagged, and it won't let a new request skip an earlier one that never published. The publish step refuses to run if version tags changed after validation or if the previous release is still a draft, and afterward it verifies that the tag points to the approved commit.
+It also refuses to delete notes that are already tagged, and it won't let a new request skip an earlier one that never published. After the merge, it checks the merged notes are the ones the PR approved. The publish step refuses to run if version tags changed after validation or if the previous release is still a draft, and afterward it verifies that the tag points to the release commit.
 
 ### What if publication fails?
 
-Nothing is tagged until `validate` and your release checks pass. Re-run the failed workflow run, or start the Release workflow by hand with the **Base SHA** and **Approved head SHA** from the failed run's summary. A retry after a successful publication makes no changes. Published tags never move; fix problems in a new release.
+Nothing is tagged until `validate`, your release checks, and any asset build pass. The status comment names the failed job and mentions whoever merged. Use **Re-run failed jobs** on the failed run, or start the Release workflow by hand with `merged-commit` set to the commit the release PR merged as. A retry publishes the same release commit, and after a successful publication makes no changes. Published tags and files never move; fix problems in a new release. Notes can be corrected in a new PR.
 
 ### Can I publish binaries or other assets?
 
-The publisher supports it: `release-planner publish --assets <dir>` uploads the files to a draft release, verifies GitHub's checksums for them, and publishes last, because immutable releases freeze a release's files once it is published. Release Planner ships its own binaries this way. The generated workflow doesn't attach files yet; that's planned.
+Yes, with [release assets](#release-assets). They're built and attested on the release PR, then uploaded to a draft release, checked against GitHub's checksums, and published last, because immutable releases freeze a release's files once it is published.
 
 ### Why not release-please or semantic-release?
 

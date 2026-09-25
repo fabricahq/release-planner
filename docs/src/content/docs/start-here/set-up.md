@@ -49,12 +49,12 @@ In your repository settings on GitHub:
 
 - **Require pull requests** for your main branch, with your CI as required status checks, and **require branches to be up to date** before merging (or use a merge queue). This is what guarantees that the commit you release was tested.
 - **Block force pushes** to and deletion of the main branch.
-- **Create the `release` environment,** as described below.
-- **Turn on immutable releases**, so published releases and their tags can't be changed.
+- **Create the `release` environment,** as described below. If you use [downstream workflows](/customize/downstream/), also create the `downstream` environment.
+- **Turn on immutable releases**, so published tags and files can't be changed. Release notes stay editable.
 
 ### Create the `release` environment
 
-The jobs that sign and publish a release run in an environment named `release`. The environment makes sure those jobs run only from your main branch.
+The job that publishes a release runs in an environment named `release`. The environment makes sure it runs only from your main branch.
 
 1. Open **Settings → Environments** and choose **New environment**. Name it `release`.
 2. Under **Deployment branches and tags**, choose **Selected branches and tags**, then **Add deployment branch or tag rule**. Choose **Branch**, enter `main` (or your release branch), and save.

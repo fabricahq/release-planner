@@ -36,6 +36,8 @@ export default defineConfig({
         { label: 'Release policy', slug: 'customize/policy' },
         { label: 'Release notes style', slug: 'customize/release-notes-style' },
         { label: 'Release checks', slug: 'customize/release-checks' },
+        { label: 'Release assets', slug: 'customize/release-assets' },
+        { label: 'Downstream workflows', slug: 'customize/downstream' },
         { label: 'Configuration', slug: 'customize/configuration' },
       ] },
       { label: 'For agents', items: [{ label: 'How Release Planner works', slug: 'for-agents' }] },

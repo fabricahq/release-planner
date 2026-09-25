@@ -14,9 +14,9 @@ With Release Planner set up, here's how a new release happens:
 1. **You:** Ask for a release. Tell your agent "let's release."
 2. **Automated:** Release Planner gathers every commit and pull request merged since your last release and hands that list to your agent. The agent reads through the changes, works out what they mean for your users, and drafts the notes.
 3. **Automated:** Your agent opens a pull request titled **Release v1.1.0**. It contains the drafted release notes and explains why the agent chose that version.
-4. **You:** Review the notes and change anything you like. Nothing is published while the pull request is open.
+4. **You:** Review the notes and change anything you like. Nothing is published while the pull request is open. Meanwhile, the release workflow checks the release and builds any files it ships, and keeps a status comment on the pull request up to date.
 5. **You:** Merge the pull request. Merging is what approves and starts the release.
-6. **Automated:** A GitHub Actions workflow tags the commit you merged and publishes your new version on the repository's **Releases** page, with exactly the notes you approved.
+6. **Automated:** A GitHub Actions workflow tags the release commit, the commit your release pull request branched from, and publishes your new version on the repository's **Releases** page, with exactly the notes you approved and the files the pull request built.
 
 You do three things: ask, review, and merge. There's no changelog to maintain, no commit message conventions to follow, and no release checklist to remember.
 
