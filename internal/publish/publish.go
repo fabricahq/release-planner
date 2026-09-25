@@ -31,7 +31,10 @@ type Result struct {
 	URL string
 	// AlreadyPublished is true when a matching release existed and nothing was written.
 	AlreadyPublished bool
-	Edited           []Edited
+	// NotesChanged is true when that release's notes differ from the plan's, as a later
+	// approved notes edit leaves them. They are kept.
+	NotesChanged bool
+	Edited       []Edited
 }
 
 // Edited reports one release whose notes the plan edits.
@@ -184,7 +187,9 @@ func release(ctx context.Context, gh *GitHub, p plan.Plan, assets []File) (Resul
 	if err != nil {
 		return Result{}, err
 	}
-	if release != nil && (release.Name != p.Tag || normalize(release.Body) != normalize(p.Notes) || release.Prerelease != p.Prerelease) {
+	// Notes are editable after publication, so only a draft's must still be the plan's.
+	changed := release != nil && normalize(release.Body) != normalize(p.Notes)
+	if release != nil && (release.Name != p.Tag || changed && release.Draft || release.Prerelease != p.Prerelease) {
 		return Result{}, fmt.Errorf("an existing %s release differs from the approved notes; resolve it by hand", p.Tag)
 	}
 	if release != nil && release.Draft && existing == "" && release.TargetCommitish != commit {
@@ -192,11 +197,12 @@ func release(ctx context.Context, gh *GitHub, p plan.Plan, assets []File) (Resul
 		return Result{}, fmt.Errorf("an existing %s draft targets %s, not the release commit %s; delete the draft and retry", p.Tag, release.TargetCommitish, commit)
 	}
 	if release != nil && !release.Draft {
-		// A published release is immutable; accept it only if it is exactly what was approved.
+		// A published release's tag and assets are immutable; accept it only if they are
+		// exactly what was approved. Different notes are a later approved edit, so keep them.
 		if err := verifyAssets(ctx, gh, release, assets); err != nil {
 			return Result{}, fmt.Errorf("%s is already published, but %v", p.Tag, err)
 		}
-		return Result{URL: release.HTMLURL, AlreadyPublished: true}, verifyTag(ctx, gh, p.Tag, commit)
+		return Result{URL: release.HTMLURL, AlreadyPublished: true, NotesChanged: changed}, verifyTag(ctx, gh, p.Tag, commit)
 	}
 
 	switch {

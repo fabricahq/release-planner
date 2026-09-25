@@ -290,7 +290,7 @@ It also refuses to delete notes that are already tagged, and it won't let a new 
 
 ### What if publication fails?
 
-Nothing is tagged until `validate`, your release checks, and any asset build pass. The status comment names the failed job and mentions whoever merged. Use **Re-run failed jobs** on the failed run, or start the Release workflow by hand with `merged-commit` set to the commit the release PR merged as. A retry publishes the same release commit, and after a successful publication makes no changes. Published tags and files never move; fix problems in a new release. Notes can be corrected in a new PR.
+Nothing is tagged until `validate`, your release checks, and any asset build pass. The status comment names the failed job and mentions whoever merged. Use **Re-run failed jobs** on the failed run, or start the Release workflow by hand with `merged-commit` set to the commit the release PR merged as. A retry publishes the same release commit, and after a successful publication makes no changes, keeping any notes edited since. Published tags and files never move; fix problems in a new release. Notes can be corrected in a new PR.
 
 ### Can I publish binaries or other assets?
 

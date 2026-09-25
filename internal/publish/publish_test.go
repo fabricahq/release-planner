@@ -270,6 +270,28 @@ func TestRetryAfterPublicationMakesNoWrites(t *testing.T) {
 	}
 }
 
+// Retrying the original release after a later notes edit keeps the edited notes, but still
+// refuses other assets or a tag on another commit.
+func TestRetryAfterANotesEditKeepsTheNotes(t *testing.T) {
+	f := withPrevious()
+	if _, err := run(t, f, minor()); err != nil {
+		t.Fatal(err)
+	}
+	f.releases[1].Body = "## Corrected notes"
+	f.writes = nil
+	res, err := run(t, f, minor())
+	if err != nil || !res.AlreadyPublished || !res.NotesChanged || len(f.writes) != 0 || f.releases[1].Body != "## Corrected notes" {
+		t.Fatalf("%+v %v %v", res, err, f.writes)
+	}
+	if _, err := runWith(t, f, minor(), files(t, map[string]string{"a.tar.gz": "a"})); err == nil || !strings.Contains(err.Error(), "is already published, but") {
+		t.Fatal(err)
+	}
+	f.tags["v1.1.0"] = ref{"commit", other}
+	if _, err := run(t, f, minor()); err == nil || !strings.Contains(err.Error(), "already points to") {
+		t.Fatal(err)
+	}
+}
+
 func TestPublishesMatchingDraft(t *testing.T) {
 	f := withPrevious()
 	f.release("v1.1.0", true, "## Notes")

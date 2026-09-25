@@ -673,6 +673,8 @@ func cmdPublish(ctx context.Context, args []string, out io.Writer) error {
 	var summary strings.Builder
 	switch {
 	case p.Tag == "":
+	case res.AlreadyPublished && res.NotesChanged:
+		fmt.Fprintf(&summary, "%s is already published, and its notes have been edited since this release was approved; kept them: %s\n", p.Tag, res.URL)
 	case res.AlreadyPublished:
 		fmt.Fprintf(&summary, "%s is already published: %s\n", p.Tag, res.URL)
 	default:

@@ -175,6 +175,6 @@ The report job keeps one comment on the release pull request, found by the hidde
 
 ## Retrying a failed release
 
-Read the status comment, the failed run, and any existing tag or release before acting. Prefer **Re-run failed jobs** on the failed run: it reuses the same plan and files. For a manual retry, run the workflow on the release branch with `merged-commit` set to the full SHA of the commit the release pull request merged as; never another commit. It plans the same release commit, and reuses the pull request's run when it can; otherwise it builds the assets again, and publish refuses a draft that already holds different files.
+Read the status comment, the failed run, and any existing tag or release before acting. Prefer **Re-run failed jobs** on the failed run: it reuses the same plan and files. For a manual retry, run the workflow on the release branch with `merged-commit` set to the full SHA of the commit the release pull request merged as; never another commit. It plans the same release commit, and reuses the pull request's run when it can; otherwise it builds the assets again, and publish refuses a draft that already holds different files. A retry that finds the release already published checks its tag and files, and keeps its notes even if a later pull request edited them.
 
 Published tags and assets never move. If the run failed before tagging, fix the cause in a separate pull request, then correct the untagged notes in a new release pull request, whose release commit then includes the fix, or withdraw the request by deleting its file.
