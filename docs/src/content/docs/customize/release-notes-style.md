@@ -9,6 +9,7 @@ The release notes style tells the agent how to write the notes: which headings t
 
 Unless you change it, the agent:
 
+- describes only what your readers would notice or care about, leaving out how each change was built unless a detail helps them understand its value or act on it
 - organizes changes under these headings, in the order your [policy](/customize/policy/) gives, leaving out any that are empty:
   - ✨ New Features
   - ⬆️ Improvements
