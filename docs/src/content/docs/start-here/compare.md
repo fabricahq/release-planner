@@ -3,11 +3,13 @@ title: Release Planner vs. other tools
 description: Which kind of release tool Release Planner is, how it compares with the others of its kind, and who should use something else.
 ---
 
-There are quite a few release automation tools available today. They all streamline releasing and let you customize how, but they differ in the human workflow: how release notes are prepared, reviewed, and finalized. They broadly fall into one of three camps:
+There are quite a few release automation tools available today. They all streamline releasing and let you customize how, but they differ in the human workflow: how release notes are prepared, reviewed, and finalized.
+
+The approaches to human workflows broadly fall into three categories:
 
 - **Computed release notes**, generated from commit messages or pull request titles.
 - **Written release notes**, written by a person or an agent, usually in a dedicated release pull request.
-- **Build and packaging tools**, which build and ship your software and leave the notes to something else.
+- **Notes left to you**, as with build and packaging tools, which build and ship your software but don't prepare release notes.
 
 ## Where Release Planner fits
 
