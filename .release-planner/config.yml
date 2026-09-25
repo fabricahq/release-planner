@@ -7,7 +7,3 @@
 schema-version: 1
 version: v0.1.0
 first-version: v0.1.0
-
-# v0.1.0 was published from releases/, before the default became _releases, and the
-# planner never moves tagged notes. .github/workflows/release.yml watches the same path.
-notes-dir: releases

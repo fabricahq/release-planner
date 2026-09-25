@@ -265,3 +265,25 @@ func TestInventoryListsChangesSinceThePreviousRelease(t *testing.T) {
 		t.Fatalf("unmerged tag: %+v %v", inv, err)
 	}
 }
+
+// Moving published notes to a new notes directory, byte for byte, requests nothing. Changing
+// them on the way, or re-adding them for a tag the notes don't match, is still refused.
+func TestRelocatedTaggedNotesAreHistory(t *testing.T) {
+	f := newFixture(t)
+	f.write("releases/v1.0.0.md", "Published notes")
+	published := f.commit("Release v1.0.0")
+	f.git("tag", "v1.0.0", published)
+	moved := Options{NotesDir: "_releases", FirstVersion: "v1.0.0"}
+
+	f.git("mv", "releases", "_releases")
+	relocation := f.commit("Move notes")
+	if p, err := Read(context.Background(), f.repo, moved, published, relocation); err != nil || p.Tag != "" {
+		t.Fatal(p, err)
+	}
+
+	f.write("_releases/v1.0.0.md", "Rewritten while moving")
+	f.commit("Rewrite")
+	if _, err := Read(context.Background(), f.repo, moved, published, "HEAD"); err == nil || !strings.Contains(err.Error(), "already points to another commit") {
+		t.Fatal(err)
+	}
+}

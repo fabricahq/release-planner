@@ -88,6 +88,36 @@ func notesFiles(ctx context.Context, repo gitrepo.Repo, notesDir, commit string)
 	return files, nil
 }
 
+// relocated reports whether name, added at head for an already-published tag, is the tag's
+// own notes moved to another directory: byte-for-byte the file of the same name in the tagged
+// commit. That lets a repository change notes-dir without publishing anything. A retry, whose
+// tag points at head, is never a relocation.
+func relocated(ctx context.Context, repo gitrepo.Repo, tag, head, name string) (bool, error) {
+	target, err := repo.Resolve(ctx, "refs/tags/"+tag)
+	if err != nil {
+		return false, err
+	}
+	if target == head {
+		return false, nil
+	}
+	blob, err := repo.Run(ctx, "rev-parse", head+":"+name)
+	if err != nil {
+		return false, err
+	}
+	out, err := repo.Run(ctx, "ls-tree", "-r", "-z", target)
+	if err != nil {
+		return false, err
+	}
+	for _, entry := range strings.Split(out, "\x00") {
+		meta, file, ok := strings.Cut(entry, "\t")
+		fields := strings.Fields(meta)
+		if ok && len(fields) == 3 && fields[1] == "blob" && path.Base(file) == path.Base(name) && fields[2] == strings.TrimSpace(blob) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // Read validates the release request between base and head.
 //
 // Tagged requests are immutable; untagged ones can be corrected or withdrawn after a failed
@@ -124,6 +154,15 @@ func Read(ctx context.Context, repo gitrepo.Repo, opts Options, base, head strin
 		tag := NotesTag(dir, name)
 		if tag == "" {
 			continue
+		}
+		if status == "A" && slices.Contains(tags, tag) {
+			moved, err := relocated(ctx, repo, tag, head, name)
+			if err != nil {
+				return empty, err
+			}
+			if moved {
+				continue
+			}
 		}
 		if status != "A" {
 			// Published notes are history; later corrections belong in a new release. The one
