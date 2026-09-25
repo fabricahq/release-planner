@@ -21,9 +21,9 @@ Release Planner is a **written release notes** tool, designed agent-first:
 
 ## Release Planner vs. computed release notes tools
 
-Tools like semantic-release, release-please, and git-cliff compute the version and changelog from your commit messages, so nobody has to write notes. The notes are only as good as the commit messages, though.
+Tools like semantic-release, release-please, and git-cliff compute the version and changelog from your commit messages, so nobody has to write notes. The quality of the release notes ultimately depends on the quality of the commit messages.
 
-With Release Planner, your agent reads the pull requests themselves, so contributors don't need a commit convention, and the notes can group related changes and explain what they mean for your users. You review the version, the notes, and any built files in one pull request before anything is published.
+With Release Planner, your agent reads the pull requests themselves, so contributors don't need a commit convention, and the notes can group related changes and explain what they mean at a high level for your users. You review the version, the notes, and any built files in one pull request before anything is published.
 
 ## Release Planner vs. other written release notes tools
 
