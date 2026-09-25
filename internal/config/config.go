@@ -135,6 +135,10 @@ func Load(root string) (Config, error) {
 	return Parse(data, string(style))
 }
 
+// DefaultNotesDir is where release notes live when the config doesn't set notes-dir.
+// The leading underscore keeps it apart from the repository's own content.
+const DefaultNotesDir = "_releases"
+
 // Parse decodes a config, rejecting unknown keys so typos fail loudly, and applies defaults.
 // style is the content of the file release-notes-style names, or "" if it names none.
 func Parse(data []byte, style string) (Config, error) {
@@ -146,7 +150,7 @@ func Parse(data []byte, style string) (Config, error) {
 		c.FirstVersion = "v0.1.0"
 	}
 	if c.NotesDir == "" {
-		c.NotesDir = "releases"
+		c.NotesDir = DefaultNotesDir
 	}
 	if c.Branch == "" {
 		c.Branch = "main"
@@ -185,7 +189,7 @@ func (c Config) check() error {
 		add("first-version: %q is not a version such as v1.0.0", c.FirstVersion)
 	}
 	if clean := path.Clean(c.NotesDir); clean != c.NotesDir || path.IsAbs(clean) || clean == "." || strings.HasPrefix(clean, "..") || clean == Dir || strings.HasPrefix(clean, Dir+"/") {
-		add("notes-dir: use a relative directory inside the repository and outside %s, such as releases", Dir)
+		add("notes-dir: use a relative directory inside the repository and outside %s, such as %s", Dir, DefaultNotesDir)
 	}
 	if strings.ContainsAny(c.NotesDir, "*?[]!+\\") || strings.ContainsFunc(c.NotesDir, unicode.IsControl) {
 		add("notes-dir: %q has characters that GitHub path filters treat as patterns; use letters, digits, and punctuation such as - _ . /", c.NotesDir)

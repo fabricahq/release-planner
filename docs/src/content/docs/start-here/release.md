@@ -20,7 +20,7 @@ Use the link in the pull request description to edit the notes file on GitHub. R
 - the opening sentences say what matters most
 - nothing important is missing
 
-To change the version, ask the agent to redo the release for the version you want, or rename the file yourself, for example from `releases/v1.1.0.md` to `releases/v2.0.0.md`, and update the **Full Changelog** link at the end. You can also ask the agent to revise the notes; it keeps your edits.
+To change the version, ask the agent to redo the release for the version you want, or rename the file yourself, for example from `_releases/v1.1.0.md` to `_releases/v2.0.0.md`, and update the **Full Changelog** link at the end. You can also ask the agent to revise the notes; it keeps your edits.
 
 Saving edits publishes nothing.
 

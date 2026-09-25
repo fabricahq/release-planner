@@ -36,8 +36,8 @@ version: v0.1.0
 first-version: v1.0.0
 
 # Where the release notes files live, one per release.
-# Default: releases
-notes-dir: releases
+# Default: _releases
+notes-dir: _releases
 
 # The branch releases are published from.
 # Default: main
