@@ -63,4 +63,5 @@ The style is fully customizable. You can add your own rules on top of it, such a
 - [How it works](/start-here/how-it-works/)
 - [Set up a repository](/start-here/set-up/)
 - [Make a release](/start-here/release/)
+- [Release Planner vs. other tools](/start-here/compare/)
 - [Customize your releases](/customize/policy/)
