@@ -35,18 +35,23 @@ Readers:
 
 - Maintainers of repositories that use Release Planner, deciding whether to bump `version`
 
-They want to know what changes for them when they upgrade, including whether their generated files change.
+They want to know what they get from upgrading and what they have to change. Lead each entry with what a maintainer can now do or no longer has to worry about, then explain how it works. Keep command, flag, and JSON details short, and label details that matter only to people building on Release Planner, such as "For tool authors".
 
 ## Order of the release notes
 
+Start with the first section that has something to say. Don't put a summary or introduction above it.
+
 The notes present changes in this order, leaving out any with nothing to say:
 
-1. New features
-2. Improvements
-3. Bug fixes
-4. Breaking changes, with the upgrade steps
+1. New features: something maintainers can do or get that they couldn't before
+2. Improvements: existing behavior that works better, including new warnings and documentation. Give significant ones a `###` heading, and end the section with small ones in a bulleted `### Also in this release`.
+3. Bug fixes: the trigger, the previous wrong behavior, and the corrected result
+4. Breaking changes: one `###` entry per change, saying who is affected and what happens if they don't act, followed by numbered `### Upgrade steps`
+
+Describe each change once, in the section it fits best.
 
 ## Always and never
 
-- Always show the upgrade command.
+- Always show the upgrade command: in the upgrade steps when a release has breaking changes, and otherwise in a `## Upgrade` section after the last change section.
 - Never mention refactors or test-only changes.
+- Never link to headings within the notes. Headings start with emoji, so their anchors are fragile; refer to a section by its name instead.
