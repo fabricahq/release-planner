@@ -1,6 +1,6 @@
 # Prepare a release (Release Planner {{.Version}})
 
-The maintainer approves a release by merging a pull request that adds `{{.NotesDir}}/v<version>.md`. On merge, the Release workflow checks the request, runs any release checks the repository configured, tags that commit, and publishes the file word for word as the GitHub release. Your job is to open that pull request with accurate notes. You never tag, publish, or merge.
+The maintainer approves a release by merging a pull request that adds `{{.NotesDir}}/v<version>.md`. On merge, the Release workflow validates the request, runs any release checks the repository configured, tags that commit, and publishes the file word for word as the GitHub release. Your job is to open that pull request with accurate notes. You never tag, publish, or merge.
 
 Run every `release-planner` command in this guide with version {{.Version}}. If `release-planner version` prints anything else, install it:
 
@@ -8,13 +8,13 @@ Run every `release-planner` command in this guide with version {{.Version}}. If 
 {{.Install}}
 ```
 
-## 1. Read the release policy
+## 1. Read the policy and the style
 
-Read `{{.PolicyPath}}`. It says what counts as a breaking change, what makes a release major, minor, or patch, who reads the notes, the order the notes present changes in, and anything to always include or leave out. Where it differs from this guide, it wins. Write the notes for the readers it names, in the order it gives.
+Read `{{.PolicyPath}}`. It says what counts as a breaking change, what makes a release major, minor, or patch, who reads the notes, and the order the notes present changes in. Where it differs from this guide, it wins. If the file is missing, or still contains its `TODO:` prompts, stop: tell the maintainer the policy needs writing, and offer to draft it from the repository's history for their review.
 
-If the file is missing, or still contains its `TODO:` prompts, stop. Tell the maintainer the policy needs writing before you can choose a version, and offer to draft it from the repository's history for their review.
+Then read the release notes style at the end of this guide.
 
-## 2. Establish the range
+## 2. Take the inventory
 
 Fetch `{{.Branch}}` and tags, then run:
 
@@ -22,65 +22,65 @@ Fetch `{{.Branch}}` and tags, then run:
 release-planner inventory --head origin/{{.Branch}}
 ```
 
-It prints the previous release, every commit since it with its pull request number and its author's GitHub handle, and the candidate next versions. `warnings` lists anything it couldn't look up, such as a handle when GitHub was unreachable.
+It prints JSON: the previous release, the candidate versions, every commit since the previous release, and the raw material for the notes. Each change the notes must list has an `entry` line, `newContributors` have `entry` lines too, and `closing` is the notes' last line. `warnings` lists anything it couldn't look up on GitHub, such as an author's handle; take a missing handle from the pull request, for example with `gh pr view <number> --json author --jq .author.login`, never from the git author name.
 
-- If `pendingRequests` is not empty, an earlier release was approved but never published. Show the maintainer and resolve it before preparing another.
-- If `unmergedNewerTags` is not empty, a version tag exists that `{{.Branch}}` does not contain. Stop and ask.
-- List the repository's GitHub releases too. A draft release, or a tag without a published release, is unfinished work to resolve first.
+## 3. Resolve blockers
 
-## 3. Account for every change
+Stop and ask the maintainer before going further if:
 
-Read every commit in the inventory and the pull request each belongs to, including direct commits. Read the diffs, tests, and documentation needed to understand what changed for users. Build an inventory that maps every pull request or commit to a note, or to a reason for leaving it out. Account for reverts and superseded work. Internal refactors, CI changes, and tooling updates usually belong only in the inventory.
+- `pendingRequests` is not empty: an earlier release was approved but never published.
+- `unmergedNewerTags` is not empty: a version tag exists that `{{.Branch}}` does not contain.
+- The repository has a draft GitHub release, or a tag without a published release.
 
-## 4. Choose the version
+## 4. Read every change and choose the version
 
-Pick from the inventory's `candidates` using the policy. With no previous release, use `{{.FirstVersion}}`. Explain the choice in the pull request, and flag uncertainty instead of inventing compatibility guarantees.
+Read each pull request and direct commit: its description, and the diff, tests, and documentation needed to understand what changed for users. Decide what matters to the readers the policy names, and which `###` group of `## Pull Requests` each entry belongs in. Account for reverts and superseded work.
 
-## 5. Draft the notes
+Choose the version from `candidates` using the policy. With no previous release, use `{{.FirstVersion}}`. Flag uncertainty instead of inventing compatibility guarantees.
 
-Create a release branch, then run:
+## 5. Write the notes
 
-```sh
-release-planner draft <version>
-```
+Create a release branch and write `{{.NotesDir}}/<version>.md` in one pass, in this order:
 
-`draft` does the mechanical work, so you can spend yours on judgment. It checks the version again, then creates `{{.NotesDir}}/<version>.md` with the raw material for the notes:
+1. The sections the style and the policy call for. Start with the first heading; don't write an introduction.
+2. `## Pull Requests`: every `entry` line from the inventory, each once, as inventory wrote it, grouped under `###` headings as the style says.
+3. `## New Contributors`, if the inventory lists any: their `entry` lines.
+4. The `closing` line. After a previous release, replace `<version>` in it with your version.
 
-- a TODO opening line for you to replace
-- `## Pull Requests`: every pull request merged into `{{.Branch}}` and every direct commit, in merge order, as `- <title> by @<handle> in #<number>`
-- `## New Contributors`, when there are any: authors whose first contribution is in this release
-- the closing link: the **Full Changelog** comparison, or for a first release, a link to the tagged source
+Use absolute URLs for links to files and pages, because the notes render on the release page. Pull request numbers such as `#7` link automatically.
 
-It makes no choices about grouping or wording. Organize and write the notes as the release notes style below and the policy say. If `draft` couldn't reach GitHub, it prints warnings, and entries may lack handles: take a missing handle from the pull request, for example `gh pr view <number> --json author --jq .author.login`, and never guess one from the git author name. Whatever the style says:
-
-- Replace the TODO line, and don't leave empty headings. `plan` rejects both.
-- Keep `## Pull Requests`, listing every pull request and direct commit, and keep `## New Contributors` and the closing line as `draft` wrote them.
-- Use absolute URLs for links to files and pages, because the notes render on the release page. Pull request numbers such as `#7` link automatically.
-
-### Release notes style
-
-{{.StyleText}}
-
-## 6. Validate and open the pull request
+## 6. Validate
 
 Commit the notes, then run:
 
 ```sh
-release-planner plan --base origin/{{.Branch}} --head HEAD
+release-planner validate --base origin/{{.Branch}} --head HEAD
 ```
 
-It must print your version. Then open a pull request titled `Release <version>`. In its description:
+It checks the version and the notes against the release notes rules, and lists every rule the notes break, with its line; `release-planner validate --rules` describes them. Fix each finding by editing the file in place, commit, and rerun until it passes. Before you push, read the whole file from top to bottom, as a reader would.
+
+## 7. Open the pull request
+
+Open a pull request titled `Release <version>`. In its description:
 
 - Link to the notes file's editor: `https://github.com/<owner>/<repo>/edit/<branch>/{{.NotesDir}}/<version>.md`.
 - Say that saving edits publishes nothing, and that merging publishes the release.
-- Record the previous release, the analyzed commit on `{{.Branch}}`, the version you chose and why, and the full inventory.
+- Record the previous release, the analyzed commit on `{{.Branch}}`, the version you chose and why, and each pull request and commit you left out of the sections above, with why.
 
 Leave the pull request for the maintainer. Do not merge it.
 
-## 7. Revise on request
+## 8. Revise on request
 
-When asked to revise, fetch the release branch and keep the maintainer's edits. If `{{.Branch}}` has moved, add the new commits to the inventory and the notes, and bring the branch up to date. Keep other changes out of the release pull request. You are done when every change through the analyzed commit is accounted for and the pull request's checks pass.
+The Release workflow validates the pull request on every push. It shows rule findings as warnings, not failures, because the maintainer may break a rule on purpose.
+
+When asked to revise, fetch the release branch and keep the maintainer's edits. Edit the notes file in place. Never regenerate it, rewrite it from scratch, or paste one copy over another: that loses edits and leaves stale sections behind.
+
+If `{{.Branch}}` has moved, merge it into the release branch, rerun `inventory`, add the new `entry` lines to the right groups, and update the sections above them. Then validate and read the whole file again. Keep other changes out of the release pull request. You are done when every change through the analyzed commit is in the notes and the pull request's checks pass.
 
 ## Retry a failed release
 
-Read the failed Release run and any existing tag or release before acting. Prefer **Re-run all jobs** on that run. For a manual retry, run the Release workflow on `{{.Branch}}` with the **Base SHA** and **Approved head SHA** from the failed run's summary; never substitute the latest commit. Published tags and releases never move, so fix problems in a new release. If validation failed before tagging, fix the code in a separate pull request, then correct the untagged notes in a new release pull request, or withdraw the request by deleting its file.
+Read the failed Release run and any existing tag or release before acting. Prefer **Re-run all jobs** on that run. For a manual retry, run the Release workflow on `{{.Branch}}` with the **Base SHA** and **Approved head SHA** from the failed run's summary; never substitute the latest commit. Published tags and releases never move, so fix problems in a new release. If the run failed before tagging, fix the cause in a normal pull request, then correct the untagged notes in a new release pull request, or withdraw the request by deleting its file.
+
+## Release notes style
+
+{{.StyleText}}

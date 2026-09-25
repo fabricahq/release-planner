@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/fabricahq/release-planner/internal/gitrepo"
+	"github.com/fabricahq/release-planner/internal/notes"
 	"github.com/fabricahq/release-planner/internal/semver"
 )
 
@@ -27,42 +28,18 @@ type Plan struct {
 	Previous   string   `json:"previous"`
 	Notes      string   `json:"notes"`
 	Prerelease bool     `json:"prerelease"`
-}
 
-// DraftOpening starts every notes file that draft creates; the agent must replace it.
-const DraftOpening = "TODO: Open with one or two sentences on what this release means for its readers."
-
-// lintNotes rejects notes that still look like an unfinished draft.
-func lintNotes(name, notes string) error {
-	if strings.Contains(notes, DraftOpening) {
-		return fmt.Errorf("%s: replace the TODO opening line with the release summary", name)
-	}
-	lines := strings.Split(strings.ReplaceAll(notes, "\r\n", "\n"), "\n")
-	for i, line := range lines {
-		if !strings.HasPrefix(line, "## ") {
-			continue
-		}
-		empty := true
-		for _, next := range lines[i+1:] {
-			if strings.HasPrefix(next, "## ") {
-				break
-			}
-			if strings.TrimSpace(next) != "" {
-				empty = false
-				break
-			}
-		}
-		if empty {
-			return fmt.Errorf("%s: %q has no content; fill it in or delete it", name, line)
-		}
-	}
-	return nil
+	// File is the requested notes file, and Findings the rules its notes break.
+	File     string          `json:"-"`
+	Findings []notes.Finding `json:"-"`
 }
 
 // Options configures where requests live and which version starts the history.
 type Options struct {
 	NotesDir     string
 	FirstVersion string
+	// ExcludeRules are notes rules to skip.
+	ExcludeRules []string
 }
 
 // NotesTag returns the tag a notes path requests, or "" for any other file.
@@ -126,6 +103,7 @@ func relocated(ctx context.Context, repo gitrepo.Repo, tag, head, name string) (
 // publication. Versions must advance every existing tag, the first release must use the
 // configured first version, and a new request may not strand an earlier untagged one.
 // An existing tag is accepted only at head, so retries never move a published version.
+// The plan's Findings list the notes rules the notes break, which don't make the request invalid.
 func Read(ctx context.Context, repo gitrepo.Repo, opts Options, base, head string) (Plan, error) {
 	empty := Plan{Tags: []string{}}
 	base, err := repo.Resolve(ctx, base)
@@ -200,15 +178,12 @@ func Read(ctx context.Context, repo gitrepo.Repo, opts Options, base, head strin
 	if !ok {
 		return empty, fmt.Errorf("%s: name the file v<MAJOR>.<MINOR>.<PATCH>[-prerelease].md, without build metadata", requested)
 	}
-	notes, err := repo.Run(ctx, "show", head+":"+requested)
+	text, err := repo.Run(ctx, "show", head+":"+requested)
 	if err != nil {
 		return empty, err
 	}
-	if strings.TrimSpace(notes) == "" {
+	if strings.TrimSpace(text) == "" {
 		return empty, fmt.Errorf("release notes must not be empty")
-	}
-	if err := lintNotes(requested, notes); err != nil {
-		return empty, err
 	}
 
 	files, err := notesFiles(ctx, repo, dir, head)
@@ -254,6 +229,17 @@ func Read(ctx context.Context, repo gitrepo.Repo, opts Options, base, head strin
 	if previous != "" && !repo.IsAncestor(ctx, "refs/tags/"+previous, head) {
 		return empty, fmt.Errorf("previous release %s must be an ancestor of %s", previous, head)
 	}
+	commits, err := changes(ctx, repo, dir, previous, head)
+	if err != nil {
+		return empty, err
+	}
+	release := notes.Release{Version: tag, Previous: previous}
+	for _, c := range commits {
+		if Listed(c) {
+			release.Changes = append(release.Changes, notes.Change{PullRequest: c.PullRequest, SHA: c.SHA})
+		}
+	}
 	return Plan{Tags: observed, Tag: tag, Version: strings.TrimPrefix(tag, "v"), Commit: head,
-		Previous: previous, Notes: notes, Prerelease: current.IsPrerelease()}, nil
+		Previous: previous, Notes: text, Prerelease: current.IsPrerelease(),
+		File: requested, Findings: notes.Check(text, release, opts.ExcludeRules)}, nil
 }

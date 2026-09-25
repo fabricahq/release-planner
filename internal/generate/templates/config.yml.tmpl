@@ -17,7 +17,7 @@ first-version: {{.FirstVersion}}
 # the previous release, a fresh vulnerability scan, or a slow end-to-end suite.
 #
 # Either a Bash script, with optional go, node, and python toolchains:
-# validate:
+# release-checks:
 #   go: '1.27.x'
 #   run: |
 #     go install golang.org/x/vuln/cmd/govulncheck@latest
@@ -25,8 +25,12 @@ first-version: {{.FirstVersion}}
 #
 # Or one of your workflows, called with the commit to check and your repository's secrets.
 # It needs a workflow_call trigger with a string input named ref, and must check out that ref:
-# validate:
+# release-checks:
 #   workflow: release-checks.yml
+
+# Release notes rules to skip. release-planner validate checks the notes against every rule;
+# list them with: release-planner validate --rules
+# exclude-rules: [no-long-heading]
 
 # Your own release notes style, if you want one: a markdown file, and how it combines with
 # Release Planner's default style. append adds yours after the default; replace uses only yours.

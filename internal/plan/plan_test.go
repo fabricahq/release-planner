@@ -78,9 +78,6 @@ func TestReadValidatesReleaseRequests(t *testing.T) {
 		{"backwards", "v1.0.0", "Notes", "v1.1.0", "newer"},
 		{"prerelease-after-release", "v1.1.0-rc.1", "Notes", "v1.1.0", "newer"},
 		{"reused", "v1.0.0", "Notes", "v1.0.0", "another commit"},
-		{"unfinished draft", "v1.0.0", DraftOpening + "\n\n## Pull Requests\n\n- x\n", "", "replace the TODO opening"},
-		{"empty heading", "v1.0.0", "Summary.\n\n## ✨ New Features\n\n## Pull Requests\n\n- x\n", "", `"## ✨ New Features" has no content`},
-		{"empty last heading", "v1.0.0", "Summary.\n\n## Pull Requests\n\n", "", "has no content"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFixture(t)
@@ -247,7 +244,8 @@ func TestInventoryListsChangesSinceThePreviousRelease(t *testing.T) {
 	}
 	want := map[string]string{"patch": "v1.0.1", "minor": "v1.1.0", "major": "v2.0.0"}
 	if inv.Previous != "v1.0.0" || !reflect.DeepEqual(inv.Candidates, want) || !reflect.DeepEqual(inv.PullRequests, []int{7}) ||
-		!reflect.DeepEqual(inv.PendingRequests, []string{"releases/v1.1.0.md"}) || len(inv.Commits) != 2 {
+		!reflect.DeepEqual(inv.PendingRequests, []string{"releases/v1.1.0.md"}) || len(inv.Commits) != 1 {
+		// The Request v1.1.0 commit only adds notes, so it's the request, not a change to release.
 		t.Fatalf("later inventory: %+v", inv)
 	}
 	if c := inv.Commits[0]; c.Title != "Add the b file" || c.PullRequest != 7 || !c.OnBranch {
@@ -301,5 +299,106 @@ func TestRelocationNeedsOnePublishedFile(t *testing.T) {
 	moved := Options{NotesDir: "_releases", FirstVersion: "v1.0.0"}
 	if _, err := Read(context.Background(), f.repo, moved, published, "HEAD"); err == nil || !strings.Contains(err.Error(), "already points to another commit") {
 		t.Fatal(err)
+	}
+}
+
+// A release request's plan lists the notes rules its notes break, without failing.
+func TestReadReportsNotesFindings(t *testing.T) {
+	f := newFixture(t)
+	f.git("tag", "v1.0.0")
+	f.write("a.md", "a")
+	f.git("add", "-A")
+	f.git("commit", "-q", "-m", "Add a (#7)")
+	f.write("b.md", "b")
+	direct := f.commit("Tidy b")
+	notes := "## ✨ New Features\n\nA. (#7)\n\n## Pull Requests\n\n- Add a in #7\n- Tidy b in https://github.com/o/r/commit/" + direct[:7] + "\n\n**Full Changelog**: https://github.com/o/r/compare/v1.0.0...v1.1.0\n"
+	f.write("releases/v1.1.0.md", notes)
+	head := f.commit("Release v1.1.0")
+	p, err := f.plan(direct, head)
+	if err != nil || p.Tag != "v1.1.0" || p.File != "releases/v1.1.0.md" || len(p.Findings) != 0 {
+		t.Fatal(p, err)
+	}
+
+	f.write("releases/v1.1.0.md", strings.Replace(notes, "- Add a in #7\n", "", 1)+"\n## Empty\n")
+	head = f.commit("Break the notes")
+	p, err = f.plan(direct, head)
+	if err != nil || p.Tag != "v1.1.0" {
+		t.Fatal(p, err)
+	}
+	var got []string
+	for _, finding := range p.Findings {
+		got = append(got, finding.Rule)
+	}
+	want := []string{"no-empty-heading", "require-pull-requests-last", "require-pull-requests-last", "list-every-change"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, want %v: %v", got, want, p.Findings)
+	}
+	p, err = Read(context.Background(), f.repo, Options{NotesDir: "releases", FirstVersion: "v1.0.0", ExcludeRules: []string{"no-empty-heading", "require-pull-requests-last", "list-every-change", "require-closing-link"}}, direct, head)
+	if err != nil || len(p.Findings) != 0 {
+		t.Fatal(p.Findings, err)
+	}
+}
+
+// Main merged into a release pull request's branch brings its pull requests onto the release
+// branch; the commits inside a merged pull request stay off it.
+func TestChangesFollowMainMergedIntoTheReleaseBranch(t *testing.T) {
+	f := newFixture(t)
+	f.git("tag", "v1.0.0")
+	f.git("checkout", "-q", "-b", "feature")
+	f.write("a.md", "a")
+	f.commit("Work in progress")
+	f.git("checkout", "-q", "main")
+	f.git("merge", "-q", "--no-ff", "feature", "-m", "Merge pull request #7 from o/feature", "-m", "Add a")
+	f.git("checkout", "-q", "-b", "release")
+	f.write("releases/v1.1.0.md", "Notes")
+	f.commit("Release v1.1.0")
+	f.git("checkout", "-q", "main")
+	f.write("b.md", "b")
+	f.commit("Add b (#8)")
+	f.git("checkout", "-q", "release")
+	f.git("merge", "-q", "--no-ff", "main", "-m", "Merge branch 'main' into release")
+
+	inv, err := Take(context.Background(), f.repo, opts, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	inv.AddEntries("o/r")
+	var entries []string
+	for _, c := range inv.Commits {
+		if c.Entry != "" {
+			entries = append(entries, c.Entry)
+		}
+	}
+	if !reflect.DeepEqual(entries, []string{"- Add a in #7", "- Add b in #8"}) || !reflect.DeepEqual(inv.PullRequests, []int{7, 8}) {
+		t.Fatalf("%v %+v", entries, inv.Commits)
+	}
+	if inv.Closing != "**Full Changelog**: https://github.com/o/r/compare/v1.0.0...<version>" {
+		t.Fatal(inv.Closing)
+	}
+}
+
+func TestAddEntries(t *testing.T) {
+	inv := Inventory{Previous: "v1.0.0", Commits: []Commit{
+		{SHA: "1d7ee9b0000000000000000000000000000000000", Subject: "feat: add runes rules", Title: "feat: add runes rules"},
+		{SHA: "5ba22db0000000000000000000000000000000000", Subject: "Merge pull request #7 from example/svelte", Title: "feat(svelte): add a Svelte group", PullRequest: 7, OnBranch: true, AuthorHandle: "octocat", merge: true},
+		{SHA: "6c33d1e0000000000000000000000000000000000", Subject: "fix!: reject empty rule IDs (#9)", Title: "fix!: reject empty rule IDs", PullRequest: 9, OnBranch: true},
+		{SHA: "9c01ab30000000000000000000000000000000000", Subject: "Fix a typo", Title: "Fix a typo", OnBranch: true},
+		{SHA: "4e5f6a70000000000000000000000000000000000", Subject: "Merge branch 'main' into feature", Title: "Merge branch 'main' into feature", OnBranch: true, merge: true},
+	}}
+	inv.AddEntries("fabricahq/example")
+	var entries []string
+	for _, c := range inv.Commits {
+		entries = append(entries, c.Entry)
+	}
+	want := []string{"", "- feat(svelte): add a Svelte group by @octocat in #7", "- fix!: reject empty rule IDs in #9", "- Fix a typo in https://github.com/fabricahq/example/commit/9c01ab3", ""}
+	if !reflect.DeepEqual(entries, want) {
+		t.Fatalf("got %q", entries)
+	}
+
+	first := Inventory{Candidates: map[string]string{"first": "v1.0.0"}, NewContributors: []NewContributor{{Handle: "octocat", PullRequest: 7}}}
+	first.AddEntries("fabricahq/example")
+	if first.Closing != "This is the first release. Browse the source at [v1.0.0](https://github.com/fabricahq/example/tree/v1.0.0)." ||
+		first.NewContributors[0].Entry != "- @octocat made their first contribution in #7" {
+		t.Fatalf("%+v", first)
 	}
 }

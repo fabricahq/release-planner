@@ -13,6 +13,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/fabricahq/release-planner/internal/notes"
 	"github.com/fabricahq/release-planner/internal/semver"
 	"go.yaml.in/yaml/v3"
 )
@@ -49,8 +50,10 @@ type Config struct {
 	NotesDir string `yaml:"notes-dir"`
 	// Branch is the branch whose notes changes publish releases.
 	Branch            string            `yaml:"branch"`
-	Validate          Validate          `yaml:"validate"`
+	ReleaseChecks     ReleaseChecks     `yaml:"release-checks"`
 	ReleaseNotesStyle ReleaseNotesStyle `yaml:"release-notes-style"`
+	// ExcludeRules are release notes rules that release-planner validate skips.
+	ExcludeRules []string `yaml:"exclude-rules"`
 
 	// Style is the content of ReleaseNotesStyle.File, or "" when the repository has none.
 	Style string `yaml:"-"`
@@ -84,10 +87,10 @@ func (s *ReleaseNotesStyle) UnmarshalYAML(node *yaml.Node) error {
 // Set reports whether the config names a release notes style.
 func (s ReleaseNotesStyle) Set() bool { return s.File != "" || s.Mode != "" }
 
-// Validate describes optional release-only checks, run on the exact commit being released
+// ReleaseChecks describes optional release-only checks, run on the exact commit being released
 // before it is tagged. Checks every pull request already runs belong in required PR checks
 // instead. Set Run, a script, or Workflow, a reusable workflow; or neither.
-type Validate struct {
+type ReleaseChecks struct {
 	// Toolchains to set up before Run.
 	Go     string `yaml:"go"`
 	Node   string `yaml:"node"`
@@ -100,7 +103,7 @@ type Validate struct {
 }
 
 // Enabled reports whether the repository has release-only checks.
-func (v Validate) Enabled() bool { return v.Run != "" || v.Workflow != "" }
+func (v ReleaseChecks) Enabled() bool { return v.Run != "" || v.Workflow != "" }
 
 var (
 	commitSHA    = regexp.MustCompile(`^[0-9a-f]{40}$`)
@@ -155,7 +158,7 @@ func Parse(data []byte, style string) (Config, error) {
 	if c.Branch == "" {
 		c.Branch = "main"
 	}
-	c.Validate.Run = strings.TrimSpace(c.Validate.Run)
+	c.ReleaseChecks.Run = strings.TrimSpace(c.ReleaseChecks.Run)
 	c.Style = strings.TrimSpace(style)
 	return c, c.check()
 }
@@ -197,21 +200,26 @@ func (c Config) check() error {
 	if !branchName.MatchString(c.Branch) {
 		add("branch: %q is not a valid branch name", c.Branch)
 	}
-	for name, v := range map[string]string{"go": c.Validate.Go, "node": c.Validate.Node, "python": c.Validate.Python} {
+	for name, v := range map[string]string{"go": c.ReleaseChecks.Go, "node": c.ReleaseChecks.Node, "python": c.ReleaseChecks.Python} {
 		if v != "" && !toolVersion.MatchString(v) {
-			add("validate.%s: %q is not a version such as 1.27.x", name, v)
+			add("release-checks.%s: %q is not a version such as 1.27.x", name, v)
 		}
 	}
-	v := c.Validate
+	v := c.ReleaseChecks
 	switch {
 	case v.Run != "" && v.Workflow != "":
-		add("validate: set run or workflow, not both")
+		add("release-checks: set run or workflow, not both")
 	case v.Workflow != "" && (v.Go != "" || v.Node != "" || v.Python != ""):
-		add("validate: go, node, and python apply to run; set up toolchains in %s instead", v.Workflow)
+		add("release-checks: go, node, and python apply to run; set up toolchains in %s instead", v.Workflow)
 	case v.Workflow != "" && (!workflowFile.MatchString(v.Workflow) || v.Workflow == "release-planner.yml"):
-		add("validate.workflow: name a workflow file in .github/workflows, such as ci.yml")
+		add("release-checks.workflow: name a workflow file in .github/workflows, such as ci.yml")
 	case v.Run == "" && v.Workflow == "" && (v.Go != "" || v.Node != "" || v.Python != ""):
-		add("validate: toolchains are set but there is no run script")
+		add("release-checks: toolchains are set but there is no run script")
+	}
+	for _, id := range c.ExcludeRules {
+		if !notes.Known(id) {
+			add("exclude-rules: %q is not a release notes rule; run release-planner validate --rules to list them", id)
+		}
 	}
 	if s := c.ReleaseNotesStyle; s.Set() {
 		switch {

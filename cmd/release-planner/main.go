@@ -17,9 +17,9 @@ import (
 	"github.com/fabricahq/release-planner/internal/buildinfo"
 	"github.com/fabricahq/release-planner/internal/config"
 	"github.com/fabricahq/release-planner/internal/contributors"
-	"github.com/fabricahq/release-planner/internal/draft"
 	"github.com/fabricahq/release-planner/internal/generate"
 	"github.com/fabricahq/release-planner/internal/gitrepo"
+	"github.com/fabricahq/release-planner/internal/notes"
 	"github.com/fabricahq/release-planner/internal/plan"
 	"github.com/fabricahq/release-planner/internal/publish"
 	"github.com/fabricahq/release-planner/internal/semver"
@@ -35,11 +35,10 @@ Set up a repository:
 
 Prepare a release (agents):
   guide       Print the release procedure to follow
-  inventory   List changes since the previous release and the candidate versions
-  draft       Create the release notes file with its raw material: pull requests, authors, and links
+  inventory   List changes since the previous release, with the lines that list them in the notes
+  validate    Check a release request and its notes, and print what to publish
 
 Run in the Release workflow:
-  plan        Validate a release request and print what to publish
   publish     Tag the approved commit and publish the approved notes
 
 Other:
@@ -59,8 +58,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 	commands := map[string]func(context.Context, []string, io.Writer) error{
 		"init": cmdInit, "install": cmdInstall, "check": cmdCheck, "uninstall": cmdUninstall,
-		"guide": cmdGuide, "inventory": cmdInventory, "draft": cmdDraft,
-		"plan": cmdPlan, "publish": cmdPublish, "version": cmdVersion,
+		"guide": cmdGuide, "inventory": cmdInventory, "validate": cmdValidate,
+		"publish": cmdPublish, "version": cmdVersion,
 	}
 	cmd, ok := commands[args[0]]
 	if !ok {
@@ -242,7 +241,7 @@ func printJSON(out io.Writer, v any) error {
 func cmdInventory(ctx context.Context, args []string, out io.Writer) error {
 	fs, dir := flags("inventory", "inventory [--head <ref>] [--repository owner/name] [--offline]")
 	head := fs.String("head", "HEAD", "commit the release would tag")
-	repository := fs.String("repository", "", "GitHub repository to look up pull request authors in, as owner/name (default: from the origin remote)")
+	repository := fs.String("repository", "", "GitHub repository for links and pull request authors, as owner/name (default: from the origin remote)")
 	offline := fs.Bool("offline", false, "don't look up pull request authors on GitHub")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -252,34 +251,26 @@ func cmdInventory(ctx context.Context, args []string, out io.Writer) error {
 		return err
 	}
 	repo := gitrepo.Repo{Dir: *dir}
+	if *repository == "" {
+		if *repository, err = repo.GitHubRepository(ctx); err != nil {
+			return err
+		}
+	} else if !gitrepo.ValidRepository(*repository) {
+		return fmt.Errorf("--repository must be owner/name, not %q", *repository)
+	}
 	inv, err := plan.Take(ctx, repo, plan.Options{NotesDir: c.NotesDir, FirstVersion: c.FirstVersion}, *head)
 	if err != nil {
 		return err
 	}
 	if !*offline && len(inv.PullRequests) > 0 {
-		if gh, err := githubFor(ctx, repo, *repository); err != nil {
-			inv.Warnings = append(inv.Warnings, fmt.Sprintf("no pull request authors: %v", err))
-		} else {
-			contributors.Add(ctx, gh, &inv)
+		api := os.Getenv("GITHUB_API_URL")
+		if api == "" {
+			api = "https://api.github.com"
 		}
+		contributors.Add(ctx, &publish.GitHub{BaseURL: api, Token: githubToken(ctx), Repository: *repository}, &inv)
 	}
+	inv.AddEntries(*repository)
 	return printJSON(out, inv)
-}
-
-// githubFor returns a GitHub API client for looking up pull request authors in the repository,
-// read from the origin remote when not given.
-func githubFor(ctx context.Context, repo gitrepo.Repo, repository string) (*publish.GitHub, error) {
-	if repository == "" {
-		var err error
-		if repository, err = draft.Repository(ctx, repo); err != nil {
-			return nil, err
-		}
-	}
-	api := os.Getenv("GITHUB_API_URL")
-	if api == "" {
-		api = "https://api.github.com"
-	}
-	return &publish.GitHub{BaseURL: api, Token: githubToken(ctx), Repository: repository}, nil
 }
 
 // githubToken finds a token for GitHub API reads: GITHUB_TOKEN, GH_TOKEN, or the GitHub CLI's
@@ -296,59 +287,24 @@ func githubToken(ctx context.Context) string {
 	return ""
 }
 
-func cmdDraft(ctx context.Context, args []string, out io.Writer) error {
-	fs, dir := flags("draft", "draft [--repository owner/name] [--offline] <version>")
-	head := fs.String("head", "HEAD", "commit the release would tag")
-	repository := fs.String("repository", "", "GitHub repository for links and pull request authors, as owner/name (default: from the origin remote)")
-	offline := fs.Bool("offline", false, "don't look up pull request authors or new contributors on GitHub")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if fs.NArg() != 1 {
-		fs.Usage()
-		return fmt.Errorf("give exactly one version, such as v1.2.0")
-	}
-	c, err := config.Load(*dir)
-	if err != nil {
-		return err
-	}
-	repo := gitrepo.Repo{Dir: *dir}
-	if *repository == "" {
-		if *repository, err = draft.Repository(ctx, repo); err != nil {
-			return err
-		}
-	}
-	var gh contributors.GitHub
-	if !*offline {
-		client, err := githubFor(ctx, repo, *repository)
-		if err != nil {
-			return err
-		}
-		gh = client
-	}
-	name, warnings, err := draft.Write(ctx, repo, c, *repository, fs.Arg(0), *head, gh)
-	if err != nil {
-		return err
-	}
-	fmt.Fprintf(out, "created %s\n", name)
-	for _, w := range warnings {
-		fmt.Fprintf(out, "warning: %s. Fill in what's missing from the pull request.\n", w)
-	}
-	fmt.Fprintln(out, "Write the notes, delete empty headings, then run release-planner plan.")
-	return nil
-}
-
 var fullSHA = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
-func cmdPlan(ctx context.Context, args []string, out io.Writer) error {
-	fs, dir := flags("plan", "plan --base <ref> [--head <ref>] [--out <file>] [--ci --event <name>]")
+func cmdValidate(ctx context.Context, args []string, out io.Writer) error {
+	fs, dir := flags("validate", "validate --base <ref> [--head <ref>] [--out <file>] [--ci --event <name>] | validate --rules")
 	base := fs.String("base", "", "commit before the release request")
 	head := fs.String("head", "HEAD", "commit containing the approved notes")
-	outFile := fs.String("out", "", "write the plan to this file instead of standard output")
-	ci := fs.Bool("ci", false, "running in the Release workflow: write step outputs and enforce retry rules")
+	outFile := fs.String("out", "", "write the release plan to this file instead of standard output")
+	ci := fs.Bool("ci", false, "running in the Release workflow: write step outputs, enforce retry rules, and report release notes rules as warnings")
 	event := fs.String("event", "", "GitHub event name, with --ci")
+	listRules := fs.Bool("rules", false, "list the release notes rules")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *listRules {
+		for _, r := range notes.Rules {
+			fmt.Fprintf(out, "%-28s%s\n", r.ID, r.Description)
+		}
+		return nil
 	}
 	if *base == "" {
 		fs.Usage()
@@ -383,15 +339,27 @@ func cmdPlan(ctx context.Context, args []string, out io.Writer) error {
 			return err
 		}
 	}
-	p, err := plan.Read(ctx, repo, plan.Options{NotesDir: c.NotesDir, FirstVersion: c.FirstVersion}, *base, *head)
+	p, err := plan.Read(ctx, repo, plan.Options{NotesDir: c.NotesDir, FirstVersion: c.FirstVersion, ExcludeRules: c.ExcludeRules}, *base, *head)
 	if err != nil {
 		return err
+	}
+	// Locally, findings fail, so the agent fixes them. In the workflow they're warnings: the
+	// maintainer may break a rule on purpose, and merging approves the notes as written.
+	if len(p.Findings) > 0 && !*ci {
+		lines := make([]string, len(p.Findings))
+		for i, f := range p.Findings {
+			lines[i] = f.String()
+		}
+		return fmt.Errorf("%s breaks release notes rules:\n  %s\nEdit the file in place to fix each one, then rerun release-planner validate", p.File, strings.Join(lines, "\n  "))
 	}
 	if retry && p.Tag == "" {
 		return fmt.Errorf("the retry range contains no release request")
 	}
 	if *ci {
 		if err := appendEnvFile("GITHUB_OUTPUT", fmt.Sprintf("tag=%s\ncommit=%s\n", p.Tag, p.Commit)); err != nil {
+			return err
+		}
+		if err := warnAboutNotes(out, p, *outFile != ""); err != nil {
 			return err
 		}
 		if p.Tag != "" {
@@ -413,7 +381,7 @@ func cmdPlan(ctx context.Context, args []string, out io.Writer) error {
 		return err
 	}
 	if *outFile != "" && p.Tag != "" {
-		fmt.Fprintf(out, "Planned %s at %s.\n", p.Tag, p.Commit)
+		fmt.Fprintf(out, "Validated %s at %s.\n", p.Tag, p.Commit)
 	} else if *outFile != "" {
 		fmt.Fprintln(out, "No release requested.")
 	}
@@ -437,7 +405,7 @@ func appendEnvFile(name, content string) error {
 
 func cmdPublish(ctx context.Context, args []string, out io.Writer) error {
 	fs, _ := flags("publish", "publish --plan <file> --commit <sha> --branch <name> [--assets <dir>] [--repository owner/name]")
-	planFile := fs.String("plan", "", "plan written by release-planner plan")
+	planFile := fs.String("plan", "", "release plan written by release-planner validate --out")
 	commit := fs.String("commit", "", "approved commit from the plan job")
 	branch := fs.String("branch", "", "release branch; the commit must be a pull request merged into it")
 	repository := fs.String("repository", os.Getenv("GITHUB_REPOSITORY"), "GitHub repository, as owner/name")
@@ -481,6 +449,35 @@ func cmdPublish(ctx context.Context, args []string, out io.Writer) error {
 		fmt.Fprintf(out, "Published %s: %s\n", p.Tag, res.URL)
 	}
 	return appendEnvFile("GITHUB_STEP_SUMMARY", fmt.Sprintf("\nPublished %s\n", res.URL))
+}
+
+// warnAboutNotes reports the release notes rules the notes break without failing, as GitHub
+// warning annotations on standard output when the plan goes to a file, and in the step summary.
+func warnAboutNotes(out io.Writer, p plan.Plan, annotate bool) error {
+	if len(p.Findings) == 0 {
+		return nil
+	}
+	summary := fmt.Sprintf("\nRelease notes rules\n\n%s breaks these rules. They don't block the release; fix them if they're mistakes.\n\n", p.File)
+	for _, f := range p.Findings {
+		if annotate {
+			line := ""
+			if f.Line > 0 {
+				line = fmt.Sprintf(",line=%d", f.Line)
+			}
+			fmt.Fprintf(out, "::warning file=%s%s,title=%s::%s\n", escapeProperty(p.File), line, escapeProperty(f.Rule), escapeData(f.Message))
+		}
+		summary += "- " + f.String() + "\n"
+	}
+	return appendEnvFile("GITHUB_STEP_SUMMARY", summary)
+}
+
+// escapeData and escapeProperty encode text for a GitHub Actions workflow command.
+func escapeData(s string) string {
+	return strings.NewReplacer("%", "%25", "\r", "%0D", "\n", "%0A").Replace(s)
+}
+
+func escapeProperty(s string) string {
+	return strings.NewReplacer("%", "%25", "\r", "%0D", "\n", "%0A", ":", "%3A", ",", "%2C").Replace(s)
 }
 
 // releaseEnvironment is the environment the generated workflow publishes from.
