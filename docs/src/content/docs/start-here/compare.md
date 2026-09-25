@@ -3,7 +3,7 @@ title: Release Planner vs. other tools
 description: Which kind of release tool Release Planner is, how it compares with the others of its kind, and who should use something else.
 ---
 
-There are quite a few release automation tools available today, and they broadly fall into one of three camps:
+There are quite a few release automation tools available today. They all streamline releasing and let you customize how, but they differ in the human workflow: how release notes are prepared, reviewed, and finalized. They broadly fall into one of three camps:
 
 - **Computed release notes**, generated from commit messages or pull request titles.
 - **Written release notes**, written by a person or an agent, usually in a dedicated release pull request.
