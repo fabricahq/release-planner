@@ -11,7 +11,7 @@ Only two settings are required:
 
 ```yaml
 schema-version: 1   # the format of this file; always 1 for now
-version: v0.1.0     # the Release Planner version this repository uses
+version: v0.2.0     # the Release Planner version this repository uses
 ```
 
 Everything else has a sensible default, so many repositories never add more.
@@ -27,9 +27,9 @@ schema-version: 1
 # Required. The Release Planner version to use, as a release tag.
 # A full commit SHA also works; your workflow then builds Release Planner
 # from source with Go instead of downloading a release. Bumping it upgrades the
-# GitHub Actions workflow (.github/workflows/release-planner.yml), the agent guide,
-# and the release checks together; run release-planner install after changing it.
-version: v0.1.0
+# GitHub Actions workflow (.github/workflows/release-planner.yml) and the agent
+# guide together; run release-planner install after changing it.
+version: v0.2.0
 
 # The version your first release must use.
 # Default: v0.1.0
@@ -37,11 +37,11 @@ first-version: v1.0.0
 
 # Where the release notes files live, one per release.
 # Default: _releases
-notes-dir: _releases
+release-notes-dir: _releases
 
-# The branch releases are published from.
+# The branch that release pull requests merge into, and releases are published from.
 # Default: main
-branch: main
+release-branch: main
 
 # Your own release notes style: the markdown file that holds it, and whether
 # it adds to the default style (append) or replaces it (replace).
@@ -52,11 +52,16 @@ release-notes-style:
 
 # Checks to run on the exact commit being released, before it's tagged.
 # Default: none.
-validate:
+release-checks:
   run: make smoke-test
+
+# Release notes rules to turn off, by ID. List them with: release-planner validate --rules
+# Default: every rule is on.
+release-notes-rules:
+  no-long-heading: off
 ```
 
-For the details of the last two, see [Release notes style](/customize/release-notes-style/) and [Release checks](/customize/release-checks/).
+For the details of the last three, see [Release notes style](/customize/release-notes-style/), [Release checks](/customize/release-checks/), and [Release notes rules](/customize/release-notes-style/#release-notes-rules).
 
 ## Upgrade Release Planner
 
@@ -67,7 +72,7 @@ curl -fsSL https://raw.githubusercontent.com/fabricahq/release-planner/main/inst
 release-planner install
 ```
 
-One version pin covers everything: the workflow, the agent's instructions, and the release checks change together.
+One version pin covers everything: the workflow and the agent's instructions change together.
 
 ## Generated files
 

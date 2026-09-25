@@ -38,12 +38,12 @@ func yamlString(s string) string { return "'" + strings.ReplaceAll(s, "'", "''")
 
 type data struct {
 	config.Config
-	Module      string
-	Actions     any
-	Marker      string
-	ValidateRun string
-	PolicyPath  string
-	StyleText   string
+	Module           string
+	Actions          any
+	Marker           string
+	ReleaseChecksRun string
+	PolicyPath       string
+	StyleText        string
 	// IsRelease is true when the config pins a release tag, which ships binaries;
 	// a commit pin is built from source with Go.
 	IsRelease bool
@@ -55,9 +55,9 @@ type data struct {
 
 func render(name string, c config.Config, marker string) string {
 	var b bytes.Buffer
-	// Indent the validation script as a YAML block scalar under `run: |`.
+	// Indent the release checks script as a YAML block scalar under `run: |`.
 	var run strings.Builder
-	for i, line := range strings.Split(c.Validate.Run, "\n") {
+	for i, line := range strings.Split(c.ReleaseChecks.Run, "\n") {
 		if i > 0 {
 			run.WriteByte('\n')
 		}
@@ -65,7 +65,7 @@ func render(name string, c config.Config, marker string) string {
 			run.WriteString("          " + line)
 		}
 	}
-	d := data{Config: c, Module: Module, Actions: Actions, Marker: marker, ValidateRun: run.String(),
+	d := data{Config: c, Module: Module, Actions: Actions, Marker: marker, ReleaseChecksRun: run.String(),
 		PolicyPath: config.Policy, StyleText: style(c), IsRelease: IsRelease(c.Version), Install: InstallCommand(c.Version),
 		StartsBeforeOne: semver.MustParse(c.FirstVersion).Major == 0}
 	if err := parsed.ExecuteTemplate(&b, name, d); err != nil {

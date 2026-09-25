@@ -21,10 +21,10 @@ Agents are good at the tedious part: reading every commit and pull request since
 ## How does it work?
 
 1. **You tell your agent "let's release."**
-2. **The agent works out the next release.** It runs `release-planner guide` for the procedure and `release-planner inventory` for every change since the previous release and the candidate versions. Then it applies your release policy and picks the version.
-3. **The agent opens a release PR.** `release-planner draft` creates `_releases/v<version>.md` with the raw material: every pull request with its author, new contributors, and the closing link. The agent writes the notes in your release notes style and explains its choice of version in the PR.
+2. **The agent works out the next release.** It runs `release-planner guide` for the procedure and `release-planner inventory` for every change since the previous release, the candidate versions, and a ready-made line for each pull request with its author. Then it applies your release policy and picks the version.
+3. **The agent opens a release PR.** It writes `_releases/v<version>.md` in your release notes style, checks it with `release-planner validate`, and explains its choice of version in the PR.
 4. **You edit the notes and merge.** Change anything you like. Saving edits publishes nothing.
-5. **Merging publishes the release.** The generated Release workflow checks the request, runs any release checks you configured, tags the merged commit, and publishes the notes file word for word as the GitHub release.
+5. **Merging publishes the release.** The generated Release workflow validates the request, runs any release checks you configured, tags the merged commit, and publishes the notes file word for word as the GitHub release.
 
 The tag is created only at that last step, on the exact commit you approved, so a version never exists without its approved notes.
 
@@ -93,16 +93,17 @@ Everything in `.release-planner/` belongs to you; Release Planner never rewrites
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `schema-version` | required | The format of the file. Currently `1`. |
-| `version` | required | The Release Planner version to use: a release tag, or a full commit SHA. Bumping it upgrades the GitHub Actions workflow (`.github/workflows/release-planner.yml`), the agent guide, and the release checks together; run `release-planner install` after changing it. |
+| `version` | required | The Release Planner version to use: a release tag, or a full commit SHA. Bumping it upgrades the GitHub Actions workflow (`.github/workflows/release-planner.yml`) and the agent guide together; run `release-planner install` after changing it. |
 | `first-version` | `v0.1.0` | The version your first release must use. |
-| `validate` | none | Optional release-only checks. See [Release checks](#release-checks). |
+| `release-checks` | none | Optional release-only checks. See [Release checks](#release-checks). |
+| `release-notes-rules` | every rule on | Release notes rules to turn off, by ID, such as `no-long-heading: off`. See [Release notes rules](#release-notes-rules). |
 | `release-notes-style` | none | Your own release notes style: `file`, the markdown file that holds it, and `mode`, `append` or `replace`. See [Release notes style](#release-notes-style). |
-| `notes-dir` | `_releases` | Where the release notes files live. |
-| `branch` | `main` | The branch whose notes changes publish releases. |
+| `release-notes-dir` | `_releases` | Where the release notes files live. |
+| `release-branch` | `main` | The branch that release pull requests merge into, and releases are published from. |
 
 ### Release checks
 
-Your required pull request checks already test what merges, including the release PR, so a release doesn't need to run them again. Use `validate` only for checks your pull requests don't run, such as:
+Your required pull request checks already test what merges, including the release PR, so a release doesn't need to run them again. Use `release-checks` only for checks your pull requests don't run, such as:
 
 - **A smoke test of what you ship:** build the real package or binary from the release commit and use it the way a user would.
 - **An API compatibility check** against the previous release, which catches a breaking change released under a minor version. For example: `gorelease`, `cargo-semver-checks`, `buf breaking`, or an OpenAPI diff.
@@ -114,7 +115,7 @@ The checks run on the exact commit being released, before anything is tagged. If
 A Bash script, with optional toolchains. Any failing command stops the release:
 
 ```yaml
-validate:
+release-checks:
   go: '1.27.x'       # also node and python
   run: |
     go install golang.org/x/vuln/cmd/govulncheck@latest
@@ -124,7 +125,7 @@ validate:
 Or one of your own workflows, for checks that need secrets, service containers, other runners, or a matrix:
 
 ```yaml
-validate:
+release-checks:
   workflow: release-checks.yml
 ```
 
@@ -147,7 +148,7 @@ jobs:
 
 ### Release notes style
 
-The release notes style tells the agent how to write the notes: how to open, which headings to use, and how to write each entry. Release Planner's default style opens with one or two sentences on what the release means for its readers, then uses these headings, in the order your policy gives, leaving out any that are empty:
+The release notes style tells the agent how to write the notes: which headings to use, and how to write each entry. Release Planner's default style uses these headings, in the order your policy gives, leaving out any that are empty:
 
 - ✨ New Features
 - ⬆️ Improvements
@@ -179,14 +180,33 @@ For example, to append:
 Or to replace, using [Keep a Changelog](https://keepachangelog.com) headings:
 
 ```markdown
-- Open with one sentence naming the most important change.
 - Use only these headings, leaving out empty ones: `## Added`, `## Changed`, `## Deprecated`, `## Removed`, `## Fixed`, `## Security`.
 - Write one bullet per change, in the past tense, ending with the pull request link.
 ```
 
 List the same headings, in the order you want, under **Order of the release notes** in your policy.
 
-Whatever the style says, every release keeps the parts `draft` writes: the **Pull Requests** section listing every pull request with its author, grouped as the style says, any **New Contributors**, and the **Full Changelog** link (or, for a first release, a link to the tagged source).
+Whatever the style says, every release ends with the parts `inventory` writes: the **Pull Requests** section listing every pull request with its author, grouped as the style says, any **New Contributors**, and the **Full Changelog** link (or, for a first release, a link to the tagged source).
+
+### Release notes rules
+
+`release-planner validate` checks the notes against these rules. Run `release-planner validate --rules` to list them.
+
+| Rule | What it enforces |
+| --- | --- |
+| `no-empty-heading` | Every heading has content before the next heading at its level or above. |
+| `no-duplicate-heading` | No `##` heading appears twice, and no `###` heading appears twice under the same `##`. |
+| `no-long-heading` | `##` and `###` headings are at most 80 characters. |
+| `require-pull-requests-last` | One `## Pull Requests` section, which, with an optional `## New Contributors`, comes last, followed only by the closing line. |
+| `list-every-change` | `## Pull Requests` lists every pull request and direct commit since the previous release exactly once, and nothing else. Entries are matched by number or commit, so you can edit their titles. |
+| `require-closing-link` | One closing line: the **Full Changelog** link, or for a first release, the link to its source. |
+
+When your agent runs `validate`, a broken rule fails, so the agent fixes it. In the Release workflow, a broken rule is a warning that doesn't block the release: you may break a rule on purpose. To stop checking a rule, turn it off in `config.yml`:
+
+```yaml
+release-notes-rules:
+  no-long-heading: off
+```
 
 ## Write your release policy
 
@@ -211,9 +231,8 @@ Everyone runs the version your config pins. Agents check `release-planner versio
 | `check` | CI and you | Fails if a generated file is missing, stale, or edited by hand. Changes nothing. |
 | `uninstall [--force]` | You | Deletes the generated files and the `AGENTS.md` section. Leaves `.release-planner/` and your notes. |
 | `guide [--default-style]` | Agent | Prints the release procedure for this version, or only the default release notes style. |
-| `inventory [--head <ref>] [--offline]` | Agent | Lists the previous release, every commit since it with its pull request author's GitHub handle, and the candidate next versions. |
-| `draft <version>` | Agent | Checks the version and creates the notes file with every pull request and its author, new contributors, and the closing link. |
-| `plan --base <ref> [--head <ref>]` | CI and agent | Validates a release request and prints the tag, commit, and notes to publish. In the Release workflow, it also warns, without failing, when the `release` environment isn't set up as recommended. |
+| `inventory [--head <ref>] [--repository <owner/name>] [--offline]` | Agent | Lists the previous release, every commit since it with its pull request author's GitHub handle, the candidate next versions, and the lines that list each change, the new contributors, and the closing link in the notes. |
+| `validate --base <ref> [--head <ref>] [--repository <owner/name>] [--ci]` | Agent and CI | Validates a release request and its notes, and prints the tag, commit, and notes to publish. Broken [release notes rules](#release-notes-rules) fail, or with `--ci` are warnings. In the Release workflow, it also warns when the `release` environment isn't set up as recommended. `validate --rules` lists the rules. |
 | `publish --plan <file> --commit <sha> --branch <name> [--assets <dir>]` | CI | Tags the approved commit and publishes the approved notes, with optional files staged on a draft and verified first. |
 | `version` | Anyone | Prints the running version. |
 
@@ -228,18 +247,20 @@ release-planner install
 
 ## FAQs
 
-### What does the planner check before publishing?
+### What does `validate` check before publishing?
 
 - Exactly one new or edited notes file per change.
 - A SemVer 2.0.0 version with no build metadata, newer than every existing tag.
 - Your configured first version, if the repository has no releases yet.
-- Notes with no leftover draft prompt and no empty headings.
+- Notes that aren't empty.
 
-It also refuses to edit notes that are already tagged, and it won't let a new request skip an earlier one that never published. The publish step refuses to run if version tags changed after planning or if the previous release is still a draft, and afterward it verifies that the tag points to the approved commit.
+It also checks the [release notes rules](#release-notes-rules), which warn without blocking the release.
+
+It also refuses to edit notes that are already tagged, and it won't let a new request skip an earlier one that never published. The publish step refuses to run if version tags changed after validation or if the previous release is still a draft, and afterward it verifies that the tag points to the approved commit.
 
 ### What if publication fails?
 
-Nothing is tagged until the planner and your release checks pass. Re-run the failed workflow run, or start the Release workflow by hand with the **Base SHA** and **Approved head SHA** from the failed run's summary. A retry after a successful publication makes no changes. Published tags never move; fix problems in a new release.
+Nothing is tagged until `validate` and your release checks pass. Re-run the failed workflow run, or start the Release workflow by hand with the **Base SHA** and **Approved head SHA** from the failed run's summary. A retry after a successful publication makes no changes. Published tags never move; fix problems in a new release.
 
 ### Can I publish binaries or other assets?
 

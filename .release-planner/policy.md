@@ -9,7 +9,7 @@ A change is breaking when it changes any of these in a way that forces adopting 
 - Commands, their flags, exit codes, and JSON output
 - The keys in `.release-planner/config.yml` and what they mean
 - The generated files: their paths, their markers, and what the Release workflow does
-- The checks `plan` and `publish` enforce, which decide whether a release goes out
+- The checks `validate` and `publish` enforce, which decide whether a release goes out
 - The release archive names and the install script's options
 
 A change that makes `check` fail until adopters rerun `install` is expected on upgrade and is not breaking by itself.

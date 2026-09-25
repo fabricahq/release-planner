@@ -21,7 +21,7 @@ Release checks are for things your pull requests don't check:
 For simple checks, add a script to `.release-planner/config.yml`. Any failing command stops the release.
 
 ```yaml
-validate:
+release-checks:
   go: '1.27.x'       # optional toolchains: go, node, python
   run: |
     go install golang.org/x/vuln/cmd/govulncheck@latest
@@ -35,7 +35,7 @@ The script runs on a standard GitHub-hosted Linux runner, without your repositor
 For checks that need secrets, service containers, other runners, or a matrix, point to one of your own workflows:
 
 ```yaml
-validate:
+release-checks:
   workflow: release-checks.yml
 ```
 
@@ -61,4 +61,4 @@ jobs:
 
 `release-planner install` and `check` fail if the workflow can't be called this way.
 
-After changing `validate`, run `release-planner install` again and commit the result.
+After changing `release-checks`, run `release-planner install` again and commit the result.

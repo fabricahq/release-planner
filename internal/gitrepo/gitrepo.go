@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strings"
 )
 
@@ -50,3 +51,22 @@ func (r Repo) Tags(ctx context.Context) ([]string, error) {
 	out, err := r.Run(ctx, "tag", "--list", "v*")
 	return strings.Fields(out), err
 }
+
+var ownerName = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
+
+// GitHubRepository reads owner/name from the origin remote, for links to the repository.
+func (r Repo) GitHubRepository(ctx context.Context) (string, error) {
+	url, err := r.Run(ctx, "remote", "get-url", "origin")
+	if err != nil {
+		return "", fmt.Errorf("find the GitHub repository from the origin remote, or pass --repository owner/name: %v", err)
+	}
+	url = strings.TrimSuffix(strings.TrimSuffix(strings.TrimSpace(url), "/"), ".git")
+	parts := strings.FieldsFunc(url, func(r rune) bool { return r == '/' || r == ':' })
+	if len(parts) < 2 || !ValidRepository(parts[len(parts)-2]+"/"+parts[len(parts)-1]) {
+		return "", fmt.Errorf("could not read owner/name from origin %q; pass --repository owner/name", url)
+	}
+	return parts[len(parts)-2] + "/" + parts[len(parts)-1], nil
+}
+
+// ValidRepository reports whether s is a GitHub repository's owner/name.
+func ValidRepository(s string) bool { return ownerName.MatchString(s) }

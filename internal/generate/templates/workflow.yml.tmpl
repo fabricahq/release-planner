@@ -49,16 +49,17 @@ permissions:
 env:
   RELEASE_PLANNER_VERSION: {{.Version}}
 jobs:
-  # Check the generated files, then bind the notes change to one version and commit.
-  plan:
+  # Check the generated files, then validate the notes change and bind it to one version and
+  # commit. Release notes rules that the notes break are warnings, not failures.
+  validate:
     if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/{{.Branch}}'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       actions: read # to check the release environment's settings
     outputs:
-      tag: ${{"{{"}} steps.plan.outputs.tag {{"}}"}}
-      commit: ${{"{{"}} steps.plan.outputs.commit {{"}}"}}
+      tag: ${{"{{"}} steps.validate.outputs.tag {{"}}"}}
+      commit: ${{"{{"}} steps.validate.outputs.commit {{"}}"}}
     steps:
       - uses: {{.Actions.Checkout}}
         with:
@@ -69,63 +70,63 @@ jobs:
 {{- template "install" .}}
       - name: Check the generated release files
         run: release-planner check
-      - name: Plan the release
-        id: plan
+      - name: Validate the release request
+        id: validate
         env:
           EVENT: ${{"{{"}} github.event_name {{"}}"}}
           BASE: ${{"{{"}} inputs.base || github.event.pull_request.base.sha || github.event.before {{"}}"}}
           HEAD: ${{"{{"}} inputs.commit || github.event.pull_request.head.sha || github.sha {{"}}"}}
           GITHUB_TOKEN: ${{"{{"}} github.token {{"}}"}}
-        run: release-planner plan --ci --event "$EVENT" --base "$BASE" --head "$HEAD" --out "$RUNNER_TEMP/release-plan.json"
+        run: release-planner validate --ci --event "$EVENT" --base "$BASE" --head "$HEAD" --out "$RUNNER_TEMP/release-plan.json"
       - uses: {{.Actions.UploadArtifact}}
         with:
           name: release-plan
           path: ${{"{{"}} runner.temp {{"}}"}}/release-plan.json
           if-no-files-found: error
-{{if .Validate.Workflow}}
+{{if .ReleaseChecks.Workflow}}
   # Run this repository's release-only checks on the exact commit being released.
   # The called workflow gets the repository's secrets, but never the release-write token.
-  validate:
-    needs: plan
-    if: needs.plan.outputs.tag != ''
-    uses: ./.github/workflows/{{.Validate.Workflow}}
+  release-checks:
+    needs: validate
+    if: needs.validate.outputs.tag != ''
+    uses: ./.github/workflows/{{.ReleaseChecks.Workflow}}
     with:
-      ref: ${{"{{"}} needs.plan.outputs.commit {{"}}"}}
+      ref: ${{"{{"}} needs.validate.outputs.commit {{"}}"}}
     secrets: inherit
-{{else if .Validate.Run}}
+{{else if .ReleaseChecks.Run}}
   # Run this repository's release-only checks on the exact commit being released.
-  validate:
-    needs: plan
-    if: needs.plan.outputs.tag != ''
+  release-checks:
+    needs: validate
+    if: needs.validate.outputs.tag != ''
     runs-on: ubuntu-latest
     steps:
       - uses: {{.Actions.Checkout}}
         with:
-          ref: ${{"{{"}} needs.plan.outputs.commit {{"}}"}}
+          ref: ${{"{{"}} needs.validate.outputs.commit {{"}}"}}
           persist-credentials: false
-{{- if .Validate.Go}}
+{{- if .ReleaseChecks.Go}}
       - uses: {{.Actions.SetupGo}}
         with:
-          go-version: '{{.Validate.Go}}'
+          go-version: '{{.ReleaseChecks.Go}}'
 {{- end}}
-{{- if .Validate.Node}}
+{{- if .ReleaseChecks.Node}}
       - uses: {{.Actions.SetupNode}}
         with:
-          node-version: '{{.Validate.Node}}'
+          node-version: '{{.ReleaseChecks.Node}}'
 {{- end}}
-{{- if .Validate.Python}}
+{{- if .ReleaseChecks.Python}}
       - uses: {{.Actions.SetupPython}}
         with:
-          python-version: '{{.Validate.Python}}'
+          python-version: '{{.ReleaseChecks.Python}}'
 {{- end}}
       - name: Run the release checks
         run: |
-{{.ValidateRun}}
+{{.ReleaseChecksRun}}
 {{end}}
-  # The only job that can write. It runs the pinned Release Planner release and no repository code.
+  # The only job that can write. It runs the pinned Release Planner version and no repository code.
   publish:
-    needs: {{if .Validate.Enabled}}[plan, validate]{{else}}[plan]{{end}}
-    if: needs.plan.outputs.tag != '' && github.event_name != 'pull_request' && github.ref == 'refs/heads/{{.Branch}}'
+    needs: {{if .ReleaseChecks.Enabled}}[validate, release-checks]{{else}}[validate]{{end}}
+    if: needs.validate.outputs.tag != '' && github.event_name != 'pull_request' && github.ref == 'refs/heads/{{.Branch}}'
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -144,5 +145,5 @@ jobs:
       - name: Tag the approved commit and publish the approved notes
         env:
           GITHUB_TOKEN: ${{"{{"}} github.token {{"}}"}}
-          COMMIT: ${{"{{"}} needs.plan.outputs.commit {{"}}"}}
+          COMMIT: ${{"{{"}} needs.validate.outputs.commit {{"}}"}}
         run: release-planner publish --plan "$RUNNER_TEMP/plan/release-plan.json" --commit "$COMMIT" --branch {{.Branch}}

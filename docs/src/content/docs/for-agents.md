@@ -34,9 +34,9 @@ Run every command from the repository root, with the pinned version installed. E
 | `check` | CI, maintainer | Exits 1 if a generated file is missing, stale, or edited by hand. Writes nothing. |
 | `uninstall [--force]` | Maintainer | Deletes the generated files and the `AGENTS.md` section. |
 | `guide [--default-style]` | Agent | Prints the release procedure, or only the default release notes style. |
-| `inventory [--head <ref>] [--repository <owner/name>] [--offline]` | Agent | Prints JSON describing everything since the previous release, including each pull request author's GitHub handle. |
-| `draft [--repository <owner/name>] [--offline] <version>` | Agent | Checks the version and creates the notes file with its raw material: every pull request with its author, new contributors, and the closing link. |
-| `plan --base <ref> [--head <ref>] [--out <file>]` | CI, agent | Validates the release request between two commits and prints the plan as JSON. |
+| `inventory [--head <ref>] [--repository <owner/name>] [--offline]` | Agent | Prints JSON describing everything since the previous release, including each pull request author's GitHub handle and the lines that list each change in the notes. |
+| `validate --base <ref> [--head <ref>] [--repository <owner/name>] [--out <file>] [--ci --event <name>]` | Agent, CI | Validates the release request between two commits and its notes, and prints the release plan as JSON. |
+| `validate --rules` | Anyone | Lists the release notes rules. |
 | `publish --plan <file> --commit <sha> --branch <name> [--assets <dir>]` | CI | Tags the approved commit and publishes the release. Refuses unless the commit is a pull request merged into the branch. With `--assets`, uploads the directory's files to a draft, verifies GitHub's checksums for them, and publishes last. Needs `GITHUB_TOKEN` and `GITHUB_REPOSITORY`. |
 | `version` | Anyone | Prints the running version. |
 
@@ -74,9 +74,13 @@ If `policy.md` is missing or still contains `TODO:` prompts, stop and ask the ma
     { "sha": "1d7ee9b…", "author": "Ada", "subject": "Add Svelte runes rules",
       "title": "Add Svelte runes rules", "onBranch": false },
     { "sha": "5ba22db…", "author": "Ada", "subject": "Merge pull request #7 from example/svelte",
-      "title": "Add a Svelte group", "pullRequest": 7, "authorHandle": "ada", "onBranch": true }
+      "title": "Add a Svelte group", "pullRequest": 7, "authorHandle": "ada", "onBranch": true,
+      "entry": "- Add a Svelte group by @ada in #7" }
   ],
-  "newContributors": [{ "handle": "ada", "pullRequest": 7 }],
+  "newContributors": [
+    { "handle": "ada", "pullRequest": 7, "entry": "- @ada made their first contribution in #7" }
+  ],
+  "closing": "**Full Changelog**: https://github.com/example/rules/compare/v1.0.0...<version>",
   "warnings": []
 }
 ```
@@ -85,49 +89,59 @@ If `policy.md` is missing or still contains `TODO:` prompts, stop and ask the ma
 - `pendingRequests` lists notes files without a tag: a release that was approved but never published. Resolve these before preparing another release.
 - `unmergedNewerTags` lists version tags newer than `previous` that the head doesn't contain. Stop and ask.
 - `title` is the pull request's title for merge and squash commits, read from the merge commit's body or the squash subject.
-- `onBranch` is true for commits made directly on the release branch: pull request merges and direct commits. The others are commits inside merged branches.
+- `onBranch` is true for commits made directly on the release branch: pull request merges and direct commits, including those brought in by merging the release branch into a release pull request's branch. The others are commits inside merged pull requests.
+- Commits that change only the notes directory, such as a release request and its merge, are left out.
 - `author` is the git author name, not a GitHub handle. `authorHandle` is the pull request author's GitHub handle, which `inventory` looks up on GitHub for each pull request.
 - `newContributors` lists each author with no commits in the previous release, with the first pull request in this release that is theirs. In a first release, every author is new. Bots are left out.
+- `entry` is the line that lists a change under `## Pull Requests`: `- <title> by @<handle> in #<number>` for each pull request merged into the release branch, without ` by @<handle>` when the handle is unknown, and `- <title> in <commit URL>` for each direct commit. Merges of other branches have none.
+- `newContributors` entries are the lines for `## New Contributors`.
+- `closing` is the notes' last line. After a previous release, replace `<version>` with the version you chose.
 - `warnings` explains anything `inventory` couldn't look up, such as a handle when GitHub was unreachable. It never fails for that reason.
 
-To look up handles, `inventory` uses `GITHUB_TOKEN`, `GH_TOKEN`, or the GitHub CLI's login, in that order, or no token for a public repository. It reads the repository from the `origin` remote unless given `--repository`. Pass `--offline` to skip the lookups.
+To look up handles, `inventory` uses `GITHUB_TOKEN`, `GH_TOKEN`, or the GitHub CLI's login, in that order, or no token for a public repository. It reads the repository, for lookups and links, from the `origin` remote unless given `--repository`. Pass `--offline` to skip the lookups. Without a repository, the links name `<owner>/<name>` for you to replace.
 
-## Drafts
+## Notes
 
-`draft` does everything about the notes that can be worked out deterministically, so the agent spends its effort on judgment: what the changes mean, how to group them, and how to say it. `draft <version>` checks the version, then creates `_releases/<version>.md` containing:
+The agent writes `_releases/<version>.md` in one pass: the sections the release notes style and policy call for, with no introduction; then `## Pull Requests`, with every `entry` from `inventory` grouped under `###` headings; then `## New Contributors`, if any; then the `closing` line. Titles in entries can be edited; the pull request number or commit link must stay.
 
-1. A placeholder opening line starting `TODO: Open with one or two sentences`.
-2. `## Pull Requests`: each pull request merged into the release branch and each direct commit, in merge order, as `- <title> by @<handle> in #<number>`, or `- <title> in <commit URL>` for a direct commit.
-3. `## New Contributors`, when there are any: `- @<handle> made their first contribution in #<number>` for each author with no commits in the previous release, credited for their first pull request listed above, in merge order. In a first release, every author is new. Bots are left out.
-4. A closing line: `**Full Changelog**: <compare link>`, or for a first release, a link to the tagged source.
+To revise the notes, edit the file in place. Never regenerate it or paste one copy over another. If the release branch moved, merge it into the release pull request's branch, rerun `inventory`, and add the new entries.
 
-`draft` makes no choices about grouping or wording, and it leaves pull request numbers such as `#7` for GitHub to link. The agent replaces the placeholder, writes the notes, and organizes the Pull Requests entries as the release notes style says, keeping every entry. The default style groups them by conventional-commit type.
+## What `validate` checks
 
-`draft` looks up handles and new contributors on GitHub, as `inventory` does. A failed lookup prints a warning after `created`, and leaves the handle out rather than failing; fill it in from the pull request. Pass `--offline` to skip the lookups. `draft` refuses a version that isn't newer than every tag, a first release that doesn't match `first-version`, an existing file, or an unpublished earlier request. It reads the GitHub repository from the `origin` remote unless given `--repository`.
-
-## What `plan` checks
-
-`plan` compares two commits and finds the release request between them. It fails, and nothing is published, when:
+`validate` compares two commits and finds the release request between them. It fails, and nothing is published, when:
 
 - more than one notes file was added or changed
 - a notes file for an already-tagged version changed (published notes are immutable)
 - the filename isn't a SemVer 2.0.0 version with a leading `v`, or has build metadata
-- the notes are empty, still contain the draft placeholder, or have a `##` heading with nothing under it
+- the notes are empty
 - another notes file exists without a tag (a pending request)
 - the version isn't newer than every existing version tag
 - there are no releases yet and the version isn't `first-version`
 - the version's tag already exists on a different commit
 - the previous release isn't an ancestor of the head
 
-A range with no notes change produces a plan with an empty `tag`, meaning no release was requested. Run `plan --base origin/<branch> --head HEAD` before opening the release pull request; it must print the intended version.
+A range with no notes change produces a plan with an empty `tag`, meaning no release was requested. Run `validate --base origin/<branch> --head HEAD` after committing the notes, and before opening the release pull request; it must print the intended version.
+
+It then checks the notes against the release notes rules:
+
+| Rule | What it enforces |
+| --- | --- |
+| `no-empty-heading` | Every heading has content before the next heading at its level or above. |
+| `no-duplicate-heading` | No `##` heading appears twice, and no `###` heading appears twice under the same `##`. |
+| `no-long-heading` | `##` and `###` headings are at most 80 characters. |
+| `require-pull-requests-last` | Exactly one `## Pull Requests`; it and an optional `## New Contributors` are the last `##` sections, followed only by the closing line. |
+| `list-every-change` | Every pull request and direct commit on the release branch from the previous tag to the head is listed exactly once under `## Pull Requests`, matched by `#N` or `/pull/N` and `/commit/<sha>`, and nothing else is. Uses only git, never the network. |
+| `require-closing-link` | Exactly one closing line: `**Full Changelog**: …/compare/<previous>...<version>`, or for a first release, `This is the first release. Browse the source at [<version>](…)`. |
+
+Without `--ci`, a broken rule fails, listing every finding with its rule, line, and message. With `--ci`, findings are GitHub warning annotations and step summary entries, and don't fail the run or block publishing, because the maintainer may break a rule on purpose. Rules turned off in `release-notes-rules` are skipped. The closing link must name the repository given by `--repository`, or else `GITHUB_REPOSITORY` with `--ci`, or else the `origin` remote; in a fork's clone, pass the upstream repository.
 
 ## The release workflow
 
 The generated workflow runs when a pull request changes `_releases/`, `.release-planner/`, or the workflow itself, and when a notes file lands on the release branch.
 
-1. **plan** (read-only): installs the pinned Release Planner, checks out the head with full history, runs `check`, then `plan`. For a release tag pin, installing downloads the release, verifies the build attestation of its `SHA256SUMS`, and checks the archive against it; a commit SHA pin is built from source with Go. For a release request, it also checks the `release` environment's settings and warns, without failing, if the environment doesn't exist yet, lets any branch deploy, doesn't let the release branch deploy, or requires reviewers. On a pull request, this is the whole run: it validates the request without publishing.
-2. **validate** (optional): runs the repository's [release checks](/customize/release-checks/) on the planned commit.
-3. **publish**: the only job with permission to write. It runs Release Planner at the pinned version and none of the repository's code. Before writing, it confirms that the version tags haven't changed since planning, that the previous release is published, and that any existing tag or release matches the plan. It then creates the tag and release, and afterward verifies that the tag points to the approved commit. If a matching release is already published, it changes nothing.
+1. **validate** (read-only): installs the pinned Release Planner, checks out the head with full history, runs `check`, then `validate --ci`, which writes the release plan and reports broken release notes rules as warnings. For a release tag pin, installing downloads the release, verifies the build attestation of its `SHA256SUMS`, and checks the archive against it; a commit SHA pin is built from source with Go. For a release request, it also checks the `release` environment's settings and warns, without failing, if the environment doesn't exist yet, lets any branch deploy, doesn't let the release branch deploy, or requires reviewers. On a pull request, this is the whole run: it validates the request without publishing.
+2. **release-checks** (optional): runs the repository's [release checks](/customize/release-checks/) on the planned commit.
+3. **publish**: the only job with permission to write. It runs Release Planner at the pinned version and none of the repository's code. Before writing, it confirms that the version tags haven't changed since validation, that the previous release is published, and that any existing tag or release matches the plan. It then creates the tag and release, and afterward verifies that the tag points to the approved commit. If a matching release is already published, it changes nothing.
 
 The publish job uses the `release` environment and runs one publication at a time across the repository.
 
@@ -135,4 +149,4 @@ The publish job uses the `release` environment and runs one publication at a tim
 
 Read the failed run and any existing tag or release before acting. Prefer **Re-run all jobs** on the failed run. For a manual retry, run the workflow on the release branch with the **Base SHA** and **Approved head SHA** from the failed run's summary; never substitute the latest commit.
 
-Published tags and releases never move. If validation failed before tagging, fix the problem in a separate pull request, then correct the untagged notes in a new release pull request, or withdraw the request by deleting its file.
+Published tags and releases never move. If the run failed before tagging, fix the cause in a separate pull request, then correct the untagged notes in a new release pull request, or withdraw the request by deleting its file.

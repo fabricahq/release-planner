@@ -3,22 +3,21 @@ title: Release notes style
 description: Change how the agent writes release notes.
 ---
 
-The release notes style tells the agent how to write the notes: how to open, which headings to use, and how to write each entry.
+The release notes style tells the agent how to write the notes: which headings to use, and how to write each entry.
 
 ## The default style
 
 Unless you change it, the agent:
 
-- opens with one or two sentences on what the release means for its readers
 - organizes changes under these headings, in the order your [policy](/customize/policy/) gives, leaving out any that are empty:
   - ✨ New Features
   - ⬆️ Improvements
   - 🐛 Squashed Bugs
-  - ⛓️‍💥 Breaking Changes, also mentioned in the opening sentences
+  - ⛓️‍💥 Breaking Changes
 - gives significant changes their own subheading, and uses bullets for small ones
 - ends every entry with the pull requests it covers, such as (#7) or (#7, #9)
 - groups related commits into one entry
-- lists every pull request under **Pull Requests** as `<title> by @<handle> in #<number>`, grouped under ✨ Features, 🐛 Bug Fixes, 📖 Documentation, 🤖 CI, and 🧹 Chores
+- lists every pull request under **Pull Requests** as `<title> by @<handle> in #<number>`, grouped under ✨ Features, 🐛 Bug Fixes, 📖 Documentation, 🤖 CI, and 🧹 Chores by reading each pull request
 
 To see the exact text the agent follows, run:
 
@@ -68,7 +67,6 @@ Keep the default headings, and add rules specific to your project:
 Use [Keep a Changelog](https://keepachangelog.com) headings instead of the defaults:
 
 ```markdown
-- Open with one sentence naming the most important change.
 - Use only these headings, leaving out empty ones:
   `## Added`, `## Changed`, `## Deprecated`, `## Removed`, `## Fixed`, `## Security`.
 - Write one bullet per change, in the past tense, ending with the pull request link.
@@ -84,4 +82,24 @@ release-planner guide --default-style > .release-planner/release-notes-style.md
 
 ## What every release keeps
 
-Whatever your style says, the notes end with a **Pull Requests** section listing every pull request with its author, any **New Contributors**, and a **Full Changelog** link (or, for a first release, a link to the released source). Your style decides how the pull requests are grouped. The release workflow also rejects notes that still contain the draft's placeholder line or have empty headings.
+Whatever your style says, the notes end with a **Pull Requests** section listing every pull request with its author, any **New Contributors**, and a **Full Changelog** link (or, for a first release, a link to the released source). Your style decides how the pull requests are grouped.
+
+## Release notes rules
+
+`release-planner validate` checks every release's notes against these rules, whatever your style says:
+
+| Rule | What it enforces |
+| --- | --- |
+| `no-empty-heading` | Every heading has content under it. |
+| `no-duplicate-heading` | No `##` heading appears twice, and no `###` heading appears twice in the same section. |
+| `no-long-heading` | `##` and `###` headings are at most 80 characters. |
+| `require-pull-requests-last` | One **Pull Requests** section, which, with **New Contributors**, comes last, followed only by the closing line. |
+| `list-every-change` | **Pull Requests** lists every pull request and direct commit in the release exactly once, and nothing else. You can edit the titles. |
+| `require-closing-link` | One closing line: the **Full Changelog** link, or for a first release, the link to its source. |
+
+When your agent checks its notes, a broken rule stops it until it fixes the notes. When you merge, a broken rule is only a warning in the release workflow's run, so you can break one on purpose. To stop checking a rule, turn it off in `.release-planner/config.yml`:
+
+```yaml
+release-notes-rules:
+  no-long-heading: off
+```

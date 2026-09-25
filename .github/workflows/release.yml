@@ -20,15 +20,15 @@ on:
 permissions:
   contents: read
 jobs:
-  plan:
+  validate:
     if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       actions: read # to check the release environment's settings
     outputs:
-      tag: ${{ steps.plan.outputs.tag }}
-      commit: ${{ steps.plan.outputs.commit }}
+      tag: ${{ steps.validate.outputs.tag }}
+      commit: ${{ steps.validate.outputs.commit }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -39,14 +39,14 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
-      - name: Plan the release
-        id: plan
+      - name: Validate the release request
+        id: validate
         env:
           EVENT: ${{ github.event_name }}
           BASE: ${{ inputs.base || github.event.pull_request.base.sha || github.event.before }}
           HEAD: ${{ inputs.commit || github.event.pull_request.head.sha || github.sha }}
           GITHUB_TOKEN: ${{ github.token }}
-        run: go run ./cmd/release-planner plan --ci --event "$EVENT" --base "$BASE" --head "$HEAD" --out "$RUNNER_TEMP/release-plan.json"
+        run: go run ./cmd/release-planner validate --ci --event "$EVENT" --base "$BASE" --head "$HEAD" --out "$RUNNER_TEMP/release-plan.json"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-plan
@@ -56,14 +56,14 @@ jobs:
   # Pull request checks already tested this commit. At release, rescan for advisories
   # published since merge, then build the release binaries and the publisher without
   # write credentials.
-  validate:
-    needs: plan
-    if: needs.plan.outputs.tag != ''
+  release-checks:
+    needs: validate
+    if: needs.validate.outputs.tag != ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.plan.outputs.commit }}
+          ref: ${{ needs.validate.outputs.commit }}
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -72,7 +72,7 @@ jobs:
       - run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
       - name: Build the release archives
         env:
-          TAG: ${{ needs.plan.outputs.tag }}
+          TAG: ${{ needs.validate.outputs.tag }}
         run: go run ./cmd/package-binaries --version "$TAG" --output "$RUNNER_TEMP/release-assets"
       - run: go build -o "$RUNNER_TEMP/publisher/release-planner" ./cmd/release-planner
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -89,7 +89,7 @@ jobs:
   # Sign the checksum manifest, so installs can verify the archives came from this workflow.
   # This job checks out no source and cannot write to the repository.
   attest:
-    needs: [plan, validate]
+    needs: [validate, release-checks]
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: release
@@ -109,8 +109,8 @@ jobs:
   # The only job that can write. It runs the publisher built from the approved commit,
   # stages the archives on a draft, verifies them, and publishes last.
   publish:
-    needs: [plan, validate, attest]
-    if: needs.plan.outputs.tag != '' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: [validate, release-checks, attest]
+    if: needs.validate.outputs.tag != '' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -135,7 +135,7 @@ jobs:
       - name: Tag the approved commit and publish the release with its binaries
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          COMMIT: ${{ needs.plan.outputs.commit }}
+          COMMIT: ${{ needs.validate.outputs.commit }}
         run: |
           chmod +x "$RUNNER_TEMP/bin/release-planner"
           "$RUNNER_TEMP/bin/release-planner" publish --plan "$RUNNER_TEMP/plan/release-plan.json" --commit "$COMMIT" --branch main --assets "$RUNNER_TEMP/release-assets"

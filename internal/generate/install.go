@@ -259,11 +259,11 @@ func planInstall(root string, c config.Config, force bool) ([]write, Problems, e
 		writes = append(writes, write{change: change, content: content})
 	}
 
-	if c.Validate.Workflow != "" {
-		if problem, err := callableWorkflow(root, c.Validate.Workflow); err != nil {
+	if c.ReleaseChecks.Workflow != "" {
+		if problem, err := callableWorkflow(root, c.ReleaseChecks.Workflow); err != nil {
 			return nil, nil, err
 		} else if problem != "" {
-			problems = append(problems, Problem{".github/workflows/" + c.Validate.Workflow, problem})
+			problems = append(problems, Problem{".github/workflows/" + c.ReleaseChecks.Workflow, problem})
 		}
 	}
 
@@ -277,11 +277,11 @@ func planInstall(root string, c config.Config, force bool) ([]write, Problems, e
 	return writes, problems, nil
 }
 
-// callableWorkflow checks that validate.workflow can be called with the commit to check.
+// callableWorkflow checks that release-checks.workflow can be called with the commit to check.
 func callableWorkflow(root, name string) (string, error) {
 	data, ok, err := readFile(root, ".github/workflows/"+name)
 	if err != nil || !ok {
-		return "missing; validate.workflow in " + config.File + " names it", err
+		return "missing; release-checks.workflow in " + config.File + " names it", err
 	}
 	var wf struct {
 		On any `yaml:"on"`
