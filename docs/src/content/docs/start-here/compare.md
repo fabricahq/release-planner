@@ -9,7 +9,7 @@ There are a _lot_ of release automation tools available, and they generally fall
 - **Written release notes.** With these tools, a person or an agent writes the notes instead of generating them from commit metadata, and you kick off the release with a simple step, such as merging a dedicated "release" pull request.
 - **Build and packaging tools.** These tools build, package, and distribute your software, and leave the notes to something else.
 
-Release Planner is a **written release notes** tool, but designed for an agent-centric workflow. Instead of asking every contributor to write a note, you ask your coding agent for a release. Release Planner computes the facts deterministically, such as every change since the last release and the candidate versions, and checks the notes against [release notes rules](/customize/release-notes-style/#release-notes-rules). Your agent picks the version, writes the notes, and opens a release pull request, following the instructions in your [`policy.md`](/customize/policy/). You edit and approve.
+Release Planner is a **written release notes** tool, but designed for an agent-centric workflow. Instead of assembling notes from one entry per pull request, your coding agent writes the notes for the release as a whole, from everything that went into it. Release Planner computes the facts deterministically, such as every change since the last release and the candidate versions, and checks the notes against [release notes rules](/customize/release-notes-style/#release-notes-rules). Your agent picks the version, writes the notes, and opens a release pull request, following the instructions in your [`policy.md`](/customize/policy/). You edit and approve.
 
 ## Release Planner vs. computed release notes tools
 
