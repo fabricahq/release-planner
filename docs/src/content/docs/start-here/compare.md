@@ -29,7 +29,7 @@ With Release Planner, your agent reads the pull requests themselves, so contribu
 
 Tools like Changesets and towncrier have each pull request author write a short note, and collect the notes into a release.
 
-With Release Planner, contributors write nothing extra. At release time, your agent writes the notes for the whole release, guided by your [release policy](/customize/policy/): who reads your notes, what counts as a breaking change, how to choose the version, and what to always or never mention. The notes read as one release rather than a list of fragments. You still have the final say: change anything in the release pull request before you merge it.
+With Release Planner, contributors write nothing extra. At release time, your agent writes the notes for the whole release, guided by your [release policy](/customize/policy/). The notes read as one release rather than a list of fragments. You still have the final say: change anything in the release pull request before you merge it.
 
 ## Release Planner vs. build and packaging tools
 
