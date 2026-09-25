@@ -297,9 +297,10 @@ jobs:
           GITHUB_TOKEN: ${{"{{"}} github.token {{"}}"}}
           NEEDS: ${{"{{"}} toJSON(needs) {{"}}"}}
           PULL_REQUEST: ${{"{{"}} github.event.pull_request.number {{"}}"}}
+          HEAD_SHA: ${{"{{"}} github.event.pull_request.head.sha {{"}}"}}
           HEAD_REF: ${{"{{"}} github.event.pull_request.head.ref {{"}}"}}
           HEAD_REPOSITORY: ${{"{{"}} github.event.pull_request.head.repo.full_name {{"}}"}}
           MERGED: ${{"{{"}} inputs.merged-commit || github.sha {{"}}"}}
         run: |
-          if [ -n "$PULL_REQUEST" ]; then target=(--pull-request "$PULL_REQUEST" --head-ref "$HEAD_REF" --head-repository "$HEAD_REPOSITORY"); else target=(--merged "$MERGED"); fi
+          if [ -n "$PULL_REQUEST" ]; then target=(--pull-request "$PULL_REQUEST" --head-sha "$HEAD_SHA" --head-ref "$HEAD_REF" --head-repository "$HEAD_REPOSITORY"); else target=(--merged "$MERGED"); fi
           release-planner report --needs "$NEEDS" --branch {{.Branch}} --plan "$RUNNER_TEMP/plan/release-plan.json"{{if .ReleaseAssets.Workflow}} --assets "$RUNNER_TEMP/release-assets"{{end}}{{range .Downstream}} --downstream {{.Repository}}:{{.Workflow}}{{end}} "${target[@]}"

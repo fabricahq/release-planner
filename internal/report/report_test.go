@@ -3,6 +3,7 @@ package report
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -414,6 +415,8 @@ type fakePullRequest struct {
 	comments []publish.Comment
 	writes   []string
 	denied   bool
+	head     string
+	closed   bool
 }
 
 func (f *fakePullRequest) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -424,7 +427,8 @@ func (f *fakePullRequest) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_ = json.Unmarshal(data, &sent)
 	switch {
 	case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/pulls/7":
-		_ = json.NewEncoder(w).Encode(map[string]any{"body": f.body, "merged": true})
+		state := map[bool]string{false: "open", true: "closed"}[f.closed]
+		_ = json.NewEncoder(w).Encode(map[string]any{"body": f.body, "state": state, "head": map[string]string{"sha": f.head}})
 	case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/issues/7/comments":
 		_ = json.NewEncoder(w).Encode(f.comments)
 	case f.denied:
@@ -460,10 +464,10 @@ func TestSplice(t *testing.T) {
 		"text around":  {"Above " + SummaryStart + "old" + SummaryEnd + why + StatusStart + "old" + StatusEnd + "\r\n  below\n", "Above " + summary + why + section + "\r\n  below\n"},
 		"old format":   {"**[✏️ Edit the release notes](x)**\r\n\r\n" + why + "\n" + StatusStart + "\n### Release status\n\nold\n\n" + StatusEnd, summary + "\n\n**[✏️ Edit the release notes](x)**\r\n\r\n" + why + "\n" + section},
 		"summary only": {SummaryStart + "\nold\n" + SummaryEnd + "\n\n" + why, summary + "\n\n" + why + "\n" + section},
-		// A block whose end marker was deleted runs to the next block, or to the end.
-		"summary end lost":  {SummaryStart + "\nold\n" + why + StatusStart + "old" + StatusEnd, summary + section},
-		"status end lost":   {SummaryStart + SummaryEnd + why + StatusStart + "\nold", summary + why + section},
-		"both ends lost":    {SummaryStart + "\nold\n" + why + StatusStart + "\nold", summary + section},
+		// A start marker whose end marker was deleted is dropped, and its old text kept.
+		"summary end lost":  {SummaryStart + "\nold\n" + why + StatusStart + "old" + StatusEnd, summary + "\n\n\nold\n" + why + section},
+		"status end lost":   {SummaryStart + SummaryEnd + why + StatusStart + "\nold", summary + why + "\nold\n\n" + section},
+		"both ends lost":    {SummaryStart + "\nold\n" + why + StatusStart + "\nold", summary + "\n\n\nold\n" + why + "\nold\n\n" + section},
 		"first of two ends": {SummaryStart + SummaryEnd + why + StatusStart + "\nold\n" + StatusEnd + "\nb " + StatusEnd, summary + why + section + "\nb " + StatusEnd},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -486,13 +490,13 @@ func TestUpdateEditsOnlyTheBlocks(t *testing.T) {
 	ctx := context.Background()
 	first := Blocks{Summary: "### Release status\n\nfirst\n", Status: "#### Jobs\n"}
 
-	if changed, err := Update(ctx, gh, 7, Blocks{}, true); changed || err != nil || len(f.writes) != 0 {
+	if changed, err := Update(ctx, gh, 7, "", Blocks{}, true); changed || err != nil || len(f.writes) != 0 {
 		t.Fatal(changed, err, f.writes)
 	}
-	if changed, err := Update(ctx, gh, 7, first, false); changed || err != nil || len(f.writes) != 0 {
+	if changed, err := Update(ctx, gh, 7, "", first, false); changed || err != nil || len(f.writes) != 0 {
 		t.Fatal("added blocks it wasn't asked to", err, f.writes)
 	}
-	if changed, err := Update(ctx, gh, 7, first, true); !changed || err != nil {
+	if changed, err := Update(ctx, gh, 7, "", first, true); !changed || err != nil {
 		t.Fatal(changed, err)
 	}
 	if want := SummaryStart + "\n### Release status\n\nfirst\n" + SummaryEnd + "\n\n" + why + "\n" + StatusStart + "\n#### Jobs\n" + StatusEnd; *f.body != want {
@@ -502,16 +506,16 @@ func TestUpdateEditsOnlyTheBlocks(t *testing.T) {
 	// The maintainer edits the description around the blocks.
 	edited := strings.Replace(*f.body, why, "Why v1.2.0? Because.\r\n\r\nAnd more.\r\n", 1) + "\r\nAfter\r\n"
 	f.body = &edited
-	if changed, err := Update(ctx, gh, 7, first, false); changed || err != nil || len(f.writes) != 1 {
+	if changed, err := Update(ctx, gh, 7, "", first, false); changed || err != nil || len(f.writes) != 1 {
 		t.Fatal("rewrote unchanged blocks", changed, err, f.writes)
 	}
-	if changed, err := Update(ctx, gh, 7, Blocks{Summary: "second\n", Status: "#### Jobs\n\nsecond\n"}, false); !changed || err != nil {
+	if changed, err := Update(ctx, gh, 7, "", Blocks{Summary: "second\n", Status: "#### Jobs\n\nsecond\n"}, false); !changed || err != nil {
 		t.Fatal(changed, err)
 	}
 	if want := SummaryStart + "\nsecond\n" + SummaryEnd + "\n\nWhy v1.2.0? Because.\r\n\r\nAnd more.\r\n\n" + StatusStart + "\n#### Jobs\n\nsecond\n" + StatusEnd + "\r\nAfter\r\n"; *f.body != want {
 		t.Fatalf("%q", *f.body)
 	}
-	if changed, err := Update(ctx, gh, 7, Blocks{}, false); !changed || err != nil ||
+	if changed, err := Update(ctx, gh, 7, "", Blocks{}, false); !changed || err != nil ||
 		!strings.HasPrefix(*f.body, SummaryStart+"\nThis pull request no longer requests a release or edits release notes.\n"+SummaryEnd+"\n\nWhy v1.2.0? Because.") ||
 		!strings.HasSuffix(*f.body, StatusStart+"\n"+StatusEnd+"\r\nAfter\r\n") {
 		t.Fatal(changed, err, *f.body)
@@ -520,18 +524,42 @@ func TestUpdateEditsOnlyTheBlocks(t *testing.T) {
 	// An old description with only the status block gets the summary too, even without create.
 	old := why + "\n" + StatusStart + "\n### Release status\n\nold\n\n" + StatusEnd
 	f.body = &old
-	if changed, err := Update(ctx, gh, 7, first, false); !changed || err != nil || *f.body != SummaryStart+"\n### Release status\n\nfirst\n"+SummaryEnd+"\n\n"+why+"\n"+StatusStart+"\n#### Jobs\n"+StatusEnd {
+	if changed, err := Update(ctx, gh, 7, "", first, false); !changed || err != nil || *f.body != SummaryStart+"\n### Release status\n\nfirst\n"+SummaryEnd+"\n\n"+why+"\n"+StatusStart+"\n#### Jobs\n"+StatusEnd {
 		t.Fatalf("%v %v %q", changed, err, *f.body)
 	}
 
 	f.body = nil
-	if changed, err := Update(ctx, gh, 7, first, true); !changed || err != nil || *f.body != SummaryStart+"\n### Release status\n\nfirst\n"+SummaryEnd+"\n\n"+StatusStart+"\n#### Jobs\n"+StatusEnd {
+	if changed, err := Update(ctx, gh, 7, "", first, true); !changed || err != nil || *f.body != SummaryStart+"\n### Release status\n\nfirst\n"+SummaryEnd+"\n\n"+StatusStart+"\n#### Jobs\n"+StatusEnd {
 		t.Fatal(changed, err, *f.body)
 	}
 
 	f.body, f.denied = &why, true
-	if _, err := Update(ctx, gh, 7, first, true); err == nil || !strings.Contains(err.Error(), "403") {
+	if _, err := Update(ctx, gh, 7, "", first, true); err == nil || !strings.Contains(err.Error(), "403") {
 		t.Fatal(err)
+	}
+}
+
+func TestUpdateSkipsASupersededRun(t *testing.T) {
+	why := "Why v1.2.0? Minor.\n"
+	f := &fakePullRequest{body: &why, head: "h2"}
+	gh := serve(t, f)
+	ctx := context.Background()
+	blocks := Blocks{Summary: "sum\n", Status: "stat\n"}
+
+	if changed, err := Update(ctx, gh, 7, "h1", blocks, true); changed || !errors.Is(err, ErrSuperseded) || len(f.writes) != 0 {
+		t.Fatal("an older head's run wrote", changed, err, f.writes)
+	}
+	f.closed = true
+	if changed, err := Update(ctx, gh, 7, "h2", blocks, true); changed || !errors.Is(err, ErrSuperseded) || len(f.writes) != 0 {
+		t.Fatal("a pull request run wrote after the merge", changed, err, f.writes)
+	}
+	// The merge's run passes no head, and reports on the merged pull request.
+	if changed, err := Update(ctx, gh, 7, "", blocks, true); !changed || err != nil {
+		t.Fatal(changed, err)
+	}
+	f.closed = false
+	if changed, err := Update(ctx, gh, 7, "h2", Blocks{Summary: "new\n", Status: "stat\n"}, true); !changed || err != nil {
+		t.Fatal("the current head's run didn't write", changed, err)
 	}
 }
 

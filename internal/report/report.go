@@ -6,6 +6,7 @@ package report
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -376,17 +377,27 @@ func size(n int64) string {
 	return fmt.Sprintf("%d B", n)
 }
 
+// ErrSuperseded says a pull request run's report was skipped because a newer commit or the
+// merge has replaced what the run checked.
+var ErrSuperseded = errors.New("the pull request has moved on from the commit this run checked")
+
 // Update writes the blocks into the pull request's description, and reports whether it
 // changed the description. It adds missing blocks, the summary at the start and the status at
 // the end, only if create is true or the description already has one, and never changes the
 // text outside the blocks. Empty blocks leave a description without blocks alone, and say
-// existing ones are out of date.
-func Update(ctx context.Context, gh *publish.GitHub, number int, blocks Blocks, create bool) (bool, error) {
+// existing ones are out of date. A pull request run passes the head commit it checked, and
+// writes nothing, returning ErrSuperseded, once the pull request has a newer head or is
+// merged or closed, so a slow run can't replace a newer run's status.
+func Update(ctx context.Context, gh *publish.GitHub, number int, head string, blocks Blocks, create bool) (bool, error) {
 	// Read the description just before writing it, so a maintainer's edit is less likely to be lost.
-	body, err := gh.PullRequestBody(ctx, number)
+	d, err := gh.PullRequestDescription(ctx, number)
 	if err != nil {
 		return false, err
 	}
+	if head != "" && (d.Head != head || !d.Open) {
+		return false, ErrSuperseded
+	}
+	body := d.Body
 	found := strings.Contains(body, SummaryStart) || strings.Contains(body, StatusStart)
 	switch {
 	case !found && (blocks == Blocks{} || !create):
@@ -403,18 +414,25 @@ func Update(ctx context.Context, gh *publish.GitHub, number int, blocks Blocks, 
 
 // splice returns body with each block's content replaced, or with a missing summary inserted
 // at the start and a missing status appended at the end, each a blank line from the rest. A
-// block whose end marker was deleted runs to the next block, or to the end of body.
+// start marker without its end marker no longer bounds any text the report owns, so splice
+// removes just that marker and adds a new block, keeping the old text: a maintainer's text
+// might follow the marker.
 func splice(body string, blocks Blocks) string {
+	body = dropUnclosed(body, SummaryStart, SummaryEnd)
+	body = dropUnclosed(body, StatusStart, StatusEnd)
+
 	summary := SummaryStart + "\n" + blocks.Summary + SummaryEnd
 	if i := strings.Index(body, SummaryStart); i >= 0 {
-		body = body[:i] + summary + rest(body[i+len(SummaryStart):], SummaryEnd, StatusStart)
+		j := i + len(SummaryStart) + strings.Index(body[i+len(SummaryStart):], SummaryEnd)
+		body = body[:i] + summary + body[j+len(SummaryEnd):]
 	} else {
 		body = summary + "\n\n" + body
 	}
 
 	status := StatusStart + "\n" + blocks.Status + StatusEnd
 	if i := strings.Index(body, StatusStart); i >= 0 {
-		return body[:i] + status + rest(body[i+len(StatusStart):], StatusEnd, "")
+		j := i + len(StatusStart) + strings.Index(body[i+len(StatusStart):], StatusEnd)
+		return body[:i] + status + body[j+len(StatusEnd):]
 	}
 	switch {
 	case strings.HasSuffix(body, "\n\n") || strings.HasSuffix(body, "\r\n\r\n"):
@@ -426,18 +444,13 @@ func splice(body string, blocks Blocks) string {
 	return body + status
 }
 
-// rest returns what follows a block's old content: the text after its end marker, or, when
-// the end marker is missing, the text from the next marker, or nothing.
-func rest(after, end, next string) string {
-	if j := strings.Index(after, end); j >= 0 {
-		return after[j+len(end):]
+// dropUnclosed removes the start marker from body if no end marker follows it.
+func dropUnclosed(body, start, end string) string {
+	i := strings.Index(body, start)
+	if i < 0 || strings.Contains(body[i+len(start):], end) {
+		return body
 	}
-	if next != "" {
-		if j := strings.Index(after, next); j >= 0 {
-			return after[j:]
-		}
-	}
-	return ""
+	return body[:i] + body[i+len(start):]
 }
 
 // Failure writes the comment that tells whoever merged the pull request which job failed, or

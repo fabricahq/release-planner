@@ -17,10 +17,11 @@ import (
 )
 
 func cmdReport(ctx context.Context, args []string, out io.Writer) error {
-	fs, _ := flags("report", "report --needs <json> --branch <name> (--pull-request <number> [--head-ref <branch>] [--head-repository <owner/name>] | --merged <sha>) [--plan <file>] [--assets <dir>] [--downstream <owner/name:workflow.yml>...]")
+	fs, _ := flags("report", "report --needs <json> --branch <name> (--pull-request <number> [--head-sha <sha>] [--head-ref <branch>] [--head-repository <owner/name>] | --merged <sha>) [--plan <file>] [--assets <dir>] [--downstream <owner/name:workflow.yml>...]")
 	needs := fs.String("needs", "", "the Release workflow's needs context, as JSON")
 	branch := fs.String("branch", "", "release branch")
 	number := fs.String("pull-request", "", "the release pull request, in its own run")
+	headSHA := fs.String("head-sha", "", "the pull request's head commit this run checked; the report skips writing once the pull request moves on")
 	headRef := fs.String("head-ref", "", "the pull request's branch, for the link that edits its notes")
 	headRepository := fs.String("head-repository", "", "the repository of the pull request's branch, if it's a fork")
 	merged := fs.String("merged", "", "after the merge: the commit the release pull request merged as")
@@ -122,7 +123,15 @@ func cmdReport(ctx context.Context, args []string, out io.Writer) error {
 	// New blocks wait for a plan in the pull request, so an ordinary change whose settings
 	// fail validation isn't taken for a release. After the merge, every failure is reported.
 	create := s.Merged || s.Plan != nil
-	switch changed, err := report.Update(ctx, gh, pr, blocks, create); {
+	head := ""
+	if !s.Merged {
+		head = *headSHA
+	}
+	switch changed, err := report.Update(ctx, gh, pr, head, blocks, create); {
+	case errors.Is(err, report.ErrSuperseded):
+		// A newer run, or the merge's run, reports on the pull request instead.
+		fmt.Fprintf(out, "Left the description of #%d alone: it has a newer commit than %s, or it's merged or closed.\n", pr, head)
+		return nil
 	case err != nil:
 		// A fork's pull request gets a read-only token; the step summary still has the report.
 		fmt.Fprintf(out, "::warning title=Release status::Couldn't update the release status in the description of #%d: %s\n", pr, escapeData(err.Error()))

@@ -58,6 +58,13 @@ func TestReportWritesTheStatusInTheDescription(t *testing.T) {
 		t.Fatal("commented on an open pull request", api.requests)
 	}
 
+	// A run for an older head leaves the newer run's status alone.
+	api = newAPI(t, map[string]any{"GET /pulls/7": map[string]any{"body": description, "state": "open", "head": map[string]string{"sha": strings.Repeat("d", 40)}}})
+	code, out, errOut = cli(t, "report", "--needs", needs, "--branch", "main", "--pull-request", "7", "--head-sha", strings.Repeat("c", 40), "--plan", file)
+	if code != 0 || !strings.Contains(out, "Left the description of #7 alone") || strings.Contains(strings.Join(api.requests, " "), "PATCH") {
+		t.Fatalf("%d %s %s %v", code, out, errOut, api.requests)
+	}
+
 	// Without a plan, a failure on a pull request isn't taken for a release.
 	api = newAPI(t, map[string]any{"GET /pulls/7": map[string]any{"body": "Fix a typo"}})
 	missing := filepath.Join(t.TempDir(), "release-plan.json")

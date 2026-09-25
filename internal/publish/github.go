@@ -541,18 +541,32 @@ func (g *GitHub) CreateComment(ctx context.Context, number int, body string) err
 	return err
 }
 
-// PullRequestBody returns a pull request's description.
-func (g *GitHub) PullRequestBody(ctx context.Context, number int) (string, error) {
+// Description is a pull request's description, with what it takes to tell whether a run
+// still reports on the pull request's current state.
+type Description struct {
+	Body string
+	// Head is the pull request's head commit, and Open is false once it's merged or closed.
+	Head string
+	Open bool
+}
+
+// PullRequestDescription returns a pull request's description and its head commit.
+func (g *GitHub) PullRequestDescription(ctx context.Context, number int) (Description, error) {
 	var pr struct {
-		Body *string `json:"body"`
+		Body  *string `json:"body"`
+		State string  `json:"state"`
+		Head  struct {
+			SHA string `json:"sha"`
+		} `json:"head"`
 	}
 	if _, err := g.do(ctx, http.MethodGet, fmt.Sprintf("/pulls/%d", number), nil, &pr); err != nil {
-		return "", fmt.Errorf("get pull request #%d in %s: %v", number, g.Repository, err)
+		return Description{}, fmt.Errorf("get pull request #%d in %s: %v", number, g.Repository, err)
 	}
-	if pr.Body == nil {
-		return "", nil
+	d := Description{Head: pr.Head.SHA, Open: pr.State == "open"}
+	if pr.Body != nil {
+		d.Body = *pr.Body
 	}
-	return *pr.Body, nil
+	return d, nil
 }
 
 // UpdatePullRequestBody replaces a pull request's description, open or merged.
