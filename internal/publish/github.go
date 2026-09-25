@@ -284,9 +284,17 @@ func (g *GitHub) AssetDigest(ctx context.Context, a Asset) (string, error) {
 	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// MergedPullRequest returns the number of the pull request into branch that the commit
-// merged, or 0 if the commit isn't a pull request's merge, squash, or rebase result.
-func (g *GitHub) MergedPullRequest(ctx context.Context, commit, branch string) (int, error) {
+// PullRequest is a merged pull request.
+type PullRequest struct {
+	Number int
+	// Head is the pull request's head commit, and HeadRepository the owner/name it came from.
+	Head, HeadRepository string
+	MergedBy             string
+}
+
+// MergedPullRequest returns the pull request into branch that the commit merged, or nil if
+// the commit isn't a pull request's merge, squash, or rebase result.
+func (g *GitHub) MergedPullRequest(ctx context.Context, commit, branch string) (*PullRequest, error) {
 	var pulls []struct {
 		Number         int     `json:"number"`
 		MergedAt       *string `json:"merged_at"`
@@ -295,15 +303,41 @@ func (g *GitHub) MergedPullRequest(ctx context.Context, commit, branch string) (
 			Ref string `json:"ref"`
 		} `json:"base"`
 	}
-	if _, err := g.do(ctx, http.MethodGet, "/commits/"+commit+"/pulls?per_page=100", nil, &pulls); err != nil {
-		return 0, err
+	_, err := g.do(ctx, http.MethodGet, "/commits/"+commit+"/pulls?per_page=100", nil, &pulls)
+	if errors.As(err, new(errNotFound)) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
 	}
 	for _, p := range pulls {
-		if p.MergedAt != nil && p.MergeCommitSHA == commit && p.Base.Ref == branch {
-			return p.Number, nil
+		if p.MergedAt == nil || p.MergeCommitSHA != commit || p.Base.Ref != branch {
+			continue
 		}
+		var pr struct {
+			Head struct {
+				SHA  string `json:"sha"`
+				Repo *struct {
+					FullName string `json:"full_name"`
+				} `json:"repo"`
+			} `json:"head"`
+			MergedBy *struct {
+				Login string `json:"login"`
+			} `json:"merged_by"`
+		}
+		if _, err := g.do(ctx, http.MethodGet, fmt.Sprintf("/pulls/%d", p.Number), nil, &pr); err != nil {
+			return nil, fmt.Errorf("get pull request #%d in %s: %v", p.Number, g.Repository, err)
+		}
+		merged := &PullRequest{Number: p.Number, Head: pr.Head.SHA}
+		if pr.Head.Repo != nil {
+			merged.HeadRepository = pr.Head.Repo.FullName
+		}
+		if pr.MergedBy != nil {
+			merged.MergedBy = pr.MergedBy.Login
+		}
+		return merged, nil
 	}
-	return 0, nil
+	return nil, nil
 }
 
 // PullRequestAuthor returns the GitHub handle of the pull request's author.
@@ -433,28 +467,31 @@ func branchRule(pattern, branch string) bool {
 	return err == nil && matched
 }
 
-// EnvironmentDocs explains how to set up the release environment.
-const EnvironmentDocs = "https://release-planner.fabricahq.com/start-here/set-up/#create-the-release-environment"
+// Pages that explain how to set up the release and downstream environments.
+const (
+	EnvironmentDocs           = "https://release-planner.fabricahq.com/start-here/set-up/#create-the-release-environment"
+	DownstreamEnvironmentDocs = "https://release-planner.fabricahq.com/customize/downstream/#set-up-the-downstream-environment"
+)
 
-// EnvironmentWarnings explains how the release environment differs from the recommended
-// setup: it exists, only the release branch can deploy to it, and the merge is the only
-// approval. The differences are warnings, not errors, because a repository may choose them.
-func EnvironmentWarnings(name, branch string, env *Environment) []string {
+// EnvironmentWarnings explains how an environment differs from the recommended setup, which
+// docs describes: it exists, only the release branch can deploy to it, and the merge is the
+// only approval. The differences are warnings, not errors, because a repository may choose them.
+func EnvironmentWarnings(name, branch, docs string, env *Environment) []string {
 	if env == nil {
-		return []string{fmt.Sprintf("The %s environment doesn't exist. GitHub will create it on the first release with no deployment branch rule, so a workflow on any branch could publish. Create it with a branch rule for your release branch: %s", name, EnvironmentDocs)}
+		return []string{fmt.Sprintf("The %s environment doesn't exist. GitHub will create it the first time a job uses it with no deployment branch rule, so a workflow on any branch could use it. Create it with a branch rule for your release branch: %s", name, docs)}
 	}
 	var warnings []string
 	switch policy := env.DeploymentBranchPolicy; {
 	case policy == nil:
-		warnings = append(warnings, fmt.Sprintf("The %s environment has no deployment branch rule, so a workflow on any branch could publish. Add a branch rule for your release branch: %s", name, EnvironmentDocs))
+		warnings = append(warnings, fmt.Sprintf("The %s environment has no deployment branch rule, so a workflow on any branch could use it. Add a branch rule for your release branch: %s", name, docs))
 	case policy.ProtectedBranches && !env.BranchProtected:
-		warnings = append(warnings, fmt.Sprintf("The %s environment allows only protected branches, and %s isn't protected, so releases can't publish. Protect %s, or add a branch rule for it: %s", name, branch, branch, EnvironmentDocs))
+		warnings = append(warnings, fmt.Sprintf("The %s environment allows only protected branches, and %s isn't protected, so its jobs can't run. Protect %s, or add a branch rule for it: %s", name, branch, branch, docs))
 	case policy.CustomBranchPolicies && !slices.ContainsFunc(env.BranchRules, func(rule string) bool { return branchRule(rule, branch) }):
-		warnings = append(warnings, fmt.Sprintf("The %s environment's branch rules don't include %s, so releases can't publish. Add a branch rule for %s: %s", name, branch, branch, EnvironmentDocs))
+		warnings = append(warnings, fmt.Sprintf("The %s environment's branch rules don't include %s, so its jobs can't run. Add a branch rule for %s: %s", name, branch, branch, docs))
 	}
 	for _, rule := range env.ProtectionRules {
 		if rule.Type == "required_reviewers" {
-			warnings = append(warnings, fmt.Sprintf("The %s environment requires reviewers, so every release waits for a second approval after the merge. Merging the release pull request is the approval; remove the reviewers unless you want both: %s", name, EnvironmentDocs))
+			warnings = append(warnings, fmt.Sprintf("The %s environment requires reviewers, so every release waits for a second approval after the merge. Merging the release pull request is the approval; remove the reviewers unless you want both: %s", name, docs))
 		}
 	}
 	return warnings
@@ -468,4 +505,195 @@ func (g *GitHub) PublishDraft(ctx context.Context, id int64, commit string, make
 		"draft": false, "target_commitish": commit, "make_latest": latest(makeLatest),
 	}, &r)
 	return &r, err
+}
+
+// UpdateNotes replaces a release's notes, leaving its tag and assets as they are.
+func (g *GitHub) UpdateNotes(ctx context.Context, id int64, notes string) error {
+	_, err := g.do(ctx, http.MethodPatch, fmt.Sprintf("/releases/%d", id), map[string]any{"body": notes}, nil)
+	return err
+}
+
+// Comment is a comment on an issue or pull request.
+type Comment struct {
+	ID   int64  `json:"id"`
+	Body string `json:"body"`
+}
+
+// Comments lists the comments on an issue or pull request.
+func (g *GitHub) Comments(ctx context.Context, number int) ([]Comment, error) {
+	var all []Comment
+	target := fmt.Sprintf("/issues/%d/comments?per_page=100", number)
+	for target != "" {
+		var page []Comment
+		next, err := g.do(ctx, http.MethodGet, target, nil, &page)
+		if err != nil {
+			return nil, fmt.Errorf("list the comments on #%d in %s: %v", number, g.Repository, err)
+		}
+		all = append(all, page...)
+		target = next
+	}
+	return all, nil
+}
+
+// CreateComment comments on an issue or pull request.
+func (g *GitHub) CreateComment(ctx context.Context, number int, body string) error {
+	_, err := g.do(ctx, http.MethodPost, fmt.Sprintf("/issues/%d/comments", number), map[string]string{"body": body}, nil)
+	return err
+}
+
+// Description is a pull request's description, with what it takes to tell whether a run
+// still reports on the pull request's current state.
+type Description struct {
+	Body string
+	// Head is the pull request's head commit, and Open is false once it's merged or closed.
+	Head string
+	Open bool
+}
+
+// PullRequestDescription returns a pull request's description and its head commit.
+func (g *GitHub) PullRequestDescription(ctx context.Context, number int) (Description, error) {
+	var pr struct {
+		Body  *string `json:"body"`
+		State string  `json:"state"`
+		Head  struct {
+			SHA string `json:"sha"`
+		} `json:"head"`
+	}
+	if _, err := g.do(ctx, http.MethodGet, fmt.Sprintf("/pulls/%d", number), nil, &pr); err != nil {
+		return Description{}, fmt.Errorf("get pull request #%d in %s: %v", number, g.Repository, err)
+	}
+	d := Description{Head: pr.Head.SHA, Open: pr.State == "open"}
+	if pr.Body != nil {
+		d.Body = *pr.Body
+	}
+	return d, nil
+}
+
+// UpdatePullRequestBody replaces a pull request's description, open or merged.
+func (g *GitHub) UpdatePullRequestBody(ctx context.Context, number int, body string) error {
+	_, err := g.do(ctx, http.MethodPatch, fmt.Sprintf("/pulls/%d", number), map[string]string{"body": body}, nil)
+	return err
+}
+
+// Run is a workflow run.
+type Run struct {
+	ID             int64  `json:"id"`
+	HeadSHA        string `json:"head_sha"`
+	Event          string `json:"event"`
+	Conclusion     string `json:"conclusion"`
+	HeadRepository struct {
+		FullName string `json:"full_name"`
+	} `json:"head_repository"`
+}
+
+// SuccessfulPullRequestRuns lists the successful pull request runs of a workflow file, such
+// as release-planner.yml, for a head commit, newest first.
+func (g *GitHub) SuccessfulPullRequestRuns(ctx context.Context, workflow, head string) ([]Run, error) {
+	var page struct {
+		Runs []Run `json:"workflow_runs"`
+	}
+	query := url.Values{"head_sha": {head}, "event": {"pull_request"}, "status": {"success"}, "per_page": {"100"}}
+	if _, err := g.do(ctx, http.MethodGet, "/actions/workflows/"+url.PathEscape(workflow)+"/runs?"+query.Encode(), nil, &page); err != nil {
+		return nil, fmt.Errorf("list the %s runs for %s in %s: %v", workflow, head, g.Repository, err)
+	}
+	return page.Runs, nil
+}
+
+// Artifacts lists the names of a workflow run's artifacts that haven't expired.
+func (g *GitHub) Artifacts(ctx context.Context, run int64) ([]string, error) {
+	var names []string
+	target := fmt.Sprintf("/actions/runs/%d/artifacts?per_page=100", run)
+	for target != "" {
+		var page struct {
+			Artifacts []struct {
+				Name    string `json:"name"`
+				Expired bool   `json:"expired"`
+			} `json:"artifacts"`
+		}
+		next, err := g.do(ctx, http.MethodGet, target, nil, &page)
+		if err != nil {
+			return nil, fmt.Errorf("list the artifacts of run %d in %s: %v", run, g.Repository, err)
+		}
+		for _, a := range page.Artifacts {
+			if !a.Expired {
+				names = append(names, a.Name)
+			}
+		}
+		target = next
+	}
+	return names, nil
+}
+
+// ArtifactID returns the ID of a workflow run's unexpired artifact with the name, or 0 if it
+// has none.
+func (g *GitHub) ArtifactID(ctx context.Context, run int64, name string) (int64, error) {
+	var page struct {
+		Artifacts []struct {
+			ID      int64  `json:"id"`
+			Name    string `json:"name"`
+			Expired bool   `json:"expired"`
+		} `json:"artifacts"`
+	}
+	query := url.Values{"name": {name}, "per_page": {"100"}}
+	if _, err := g.do(ctx, http.MethodGet, fmt.Sprintf("/actions/runs/%d/artifacts?%s", run, query.Encode()), nil, &page); err != nil {
+		return 0, fmt.Errorf("list the artifacts of run %d in %s: %v", run, g.Repository, err)
+	}
+	for _, a := range page.Artifacts {
+		if a.Name == name && !a.Expired {
+			return a.ID, nil
+		}
+	}
+	return 0, nil
+}
+
+// RunJob is one job of a workflow run, at its latest attempt.
+type RunJob struct {
+	Name       string `json:"name"`
+	Conclusion string `json:"conclusion"`
+	URL        string `json:"html_url"`
+	RunAttempt int    `json:"run_attempt"`
+}
+
+// Jobs lists a workflow run's jobs, each at its latest attempt, which stands after Re-run
+// failed jobs, in the order the API lists them.
+func (g *GitHub) Jobs(ctx context.Context, run int64) ([]RunJob, error) {
+	var jobs []RunJob
+	index := map[string]int{}
+	target := fmt.Sprintf("/actions/runs/%d/jobs?filter=all&per_page=100", run)
+	for target != "" {
+		var page struct {
+			Jobs []RunJob `json:"jobs"`
+		}
+		next, err := g.do(ctx, http.MethodGet, target, nil, &page)
+		if err != nil {
+			return nil, fmt.Errorf("list the jobs of run %d in %s: %v", run, g.Repository, err)
+		}
+		for _, j := range page.Jobs {
+			switch i, ok := index[j.Name]; {
+			case !ok:
+				index[j.Name] = len(jobs)
+				jobs = append(jobs, j)
+			case j.RunAttempt > jobs[i].RunAttempt:
+				jobs[i] = j
+			}
+		}
+		target = next
+	}
+	return jobs, nil
+}
+
+// DispatchWorkflow runs a workflow that has a workflow_dispatch trigger on the repository's
+// default branch, with the given inputs.
+func (g *GitHub) DispatchWorkflow(ctx context.Context, workflow string, inputs map[string]string) error {
+	var repo struct {
+		DefaultBranch string `json:"default_branch"`
+	}
+	if _, err := g.do(ctx, http.MethodGet, "", nil, &repo); err != nil {
+		return fmt.Errorf("get %s: %v", g.Repository, err)
+	}
+	body := map[string]any{"ref": repo.DefaultBranch, "inputs": inputs}
+	if _, err := g.do(ctx, http.MethodPost, "/actions/workflows/"+url.PathEscape(workflow)+"/dispatches", body, nil); err != nil {
+		return fmt.Errorf("run %s in %s: %v", workflow, g.Repository, err)
+	}
+	return nil
 }

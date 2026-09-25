@@ -90,50 +90,29 @@ func TestMissingConfigPointsToInit(t *testing.T) {
 	}
 }
 
-// A release pull request whose base branch moved on after it branched still validates the
-// notes it adds, rather than failing because the base tip isn't in its history.
+// A release pull request's release commit is where it branched from the release branch,
+// however far the branch has moved on, in the workflow and locally.
 func TestValidatePullRequestAfterBaseMoved(t *testing.T) {
-	dir := t.TempDir()
-	git := func(args ...string) string {
-		t.Helper()
-		cmd := exec.Command("git", append([]string{"-c", "commit.gpgsign=false"}, args...)...)
-		cmd.Dir = dir
-		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com")
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("git %v: %v: %s", args, err, out)
-		}
-		return strings.TrimSpace(string(out))
-	}
-	write := func(name, body string) {
-		t.Helper()
-		if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, name)), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	git("init", "-q", "-b", "main")
-	write(".release-planner/config.yml", "schema-version: 1\nversion: v0.1.0\nfirst-version: v1.0.0\n")
-	git("add", "-A")
-	git("commit", "-q", "-m", "Adopt Release Planner")
-	git("checkout", "-q", "-b", "release")
-	write("_releases/v1.0.0.md", "The first release.\n")
-	git("add", "-A")
-	git("commit", "-q", "-m", "Release v1.0.0")
-	head := git("rev-parse", "HEAD")
-	git("checkout", "-q", "main")
-	write("README.md", "Moved on\n")
-	git("add", "-A")
-	git("commit", "-q", "-m", "Unrelated change")
-	base := git("rev-parse", "HEAD")
+	r := newRepo(t)
+	r.write(".release-planner/config.yml", "schema-version: 1\nversion: v0.1.0\nfirst-version: v1.0.0\nrelease-notes-rules:\n  require-pull-requests-last: off\n  require-closing-link: off\n")
+	adopted := r.commit("Adopt Release Planner")
+	r.git("checkout", "-q", "-b", "release")
+	r.write("_releases/v1.0.0.md", "The first release.\n")
+	head := r.commit("Release v1.0.0")
+	r.git("checkout", "-q", "main")
+	r.write("README.md", "Moved on\n")
+	base := r.commit("Unrelated change")
 
-	if code, out, errOut := cli(t, "validate", "--dir", dir, "--ci", "--event", "pull_request", "--base", base, "--head", head); code != 0 || !strings.Contains(out, `"tag": "v1.0.0"`) {
-		t.Fatalf("%d %s %s", code, out, errOut)
+	actionsFiles(t)
+	for _, args := range [][]string{
+		{"validate", "--dir", r.dir, "--ci", "--base", base, "--head", head},
+		{"validate", "--dir", r.dir, "--base", "main", "--head", head},
+	} {
+		if code, out, errOut := cli(t, args...); code != 0 || !strings.Contains(out, `"tag": "v1.0.0"`) || !strings.Contains(out, `"commit": "`+adopted+`"`) {
+			t.Fatalf("%v: %d %s %s", args, code, out, errOut)
+		}
 	}
-	// Outside a pull request, the range must still be exact.
-	if code, _, errOut := cli(t, "validate", "--dir", dir, "--base", base, "--head", head); code == 0 || !strings.Contains(errOut, "ancestor") {
+	if code, _, errOut := cli(t, "validate", "--dir", r.dir, "--merged", head); code != 1 || !strings.Contains(errOut, "pass --ci") {
 		t.Fatalf("%d %s", code, errOut)
 	}
 }
@@ -280,11 +259,11 @@ func TestValidateWarnsAboutAnUnprotectedReleaseEnvironment(t *testing.T) {
 	git("commit", "-q", "-m", "Release v1.0.0")
 
 	out := filepath.Join(t.TempDir(), "plan.json")
-	code, stdout, errOut := cli(t, "validate", "--dir", dir, "--ci", "--event", "push", "--base", base, "--head", "HEAD", "--out", out)
+	code, stdout, errOut := cli(t, "validate", "--dir", dir, "--ci", "--base", base, "--head", "HEAD", "--out", out)
 	if code != 0 {
 		t.Fatalf("%d %s", code, errOut)
 	}
-	if !strings.Contains(stdout, "::warning title=Release environment::The release environment has no deployment branch rule") {
+	if !strings.Contains(stdout, "::warning title=Release settings::The release environment has no deployment branch rule") {
 		t.Fatalf("no annotation: %q", stdout)
 	}
 	if data, _ := os.ReadFile(summary); !strings.Contains(string(data), "no deployment branch rule") {
@@ -347,7 +326,7 @@ func TestValidateFailsLocallyAndWarnsInCI(t *testing.T) {
 	write("_releases/v1.0.0.md", "## ✨ New Features\n\n"+good)
 	git("commit", "-q", "-am", "Break a rule")
 	code, out, errOut = cli(t, "validate", "--dir", dir, "--base", base)
-	if code != 1 || out != "" || !strings.Contains(errOut, "_releases/v1.0.0.md breaks release notes rules:\n  line 1: no-empty-heading:") || !strings.Contains(errOut, "line 3: no-duplicate-heading:") {
+	if code != 1 || out != "" || !strings.Contains(errOut, "the notes break release notes rules:\n  _releases/v1.0.0.md: line 1: no-empty-heading:") || !strings.Contains(errOut, "line 3: no-duplicate-heading:") {
 		t.Fatalf("local: %d %q %s", code, out, errOut)
 	}
 
@@ -356,11 +335,11 @@ func TestValidateFailsLocallyAndWarnsInCI(t *testing.T) {
 	t.Setenv("GITHUB_STEP_SUMMARY", summary)
 	t.Setenv("GITHUB_OUTPUT", filepath.Join(t.TempDir(), "output"))
 	planFile := filepath.Join(t.TempDir(), "plan.json")
-	code, out, errOut = cli(t, "validate", "--dir", dir, "--ci", "--event", "push", "--base", base, "--head", "HEAD", "--out", planFile)
+	code, out, errOut = cli(t, "validate", "--dir", dir, "--ci", "--base", base, "--head", "HEAD", "--out", planFile)
 	if code != 0 || !strings.Contains(out, "::warning file=_releases/v1.0.0.md,line=1,title=no-empty-heading::") || !strings.Contains(out, "Validated v1.0.0") {
 		t.Fatalf("ci: %d %s %s", code, out, errOut)
 	}
-	if data, _ := os.ReadFile(summary); !strings.Contains(string(data), "- line 3: no-duplicate-heading:") {
+	if data, _ := os.ReadFile(summary); !strings.Contains(string(data), "- _releases/v1.0.0.md: line 3: no-duplicate-heading:") {
 		t.Fatalf("summary: %s", data)
 	}
 	if data, _ := os.ReadFile(planFile); !strings.Contains(string(data), `"tag": "v1.0.0"`) {

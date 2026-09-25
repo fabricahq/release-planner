@@ -20,8 +20,12 @@ import (
 )
 
 const (
+	// approved is the release commit, and head and merged the release pull request's head
+	// and the commit it merged as.
 	approved = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	other    = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	head     = "cccccccccccccccccccccccccccccccccccccccc"
+	merged   = "dddddddddddddddddddddddddddddddddddddddd"
 )
 
 type ref struct{ typ, sha string }
@@ -46,17 +50,18 @@ type fakeGitHub struct {
 
 // pull is a pull request as the commits/{sha}/pulls endpoint lists it for commit.
 type pull struct {
-	commit, merge, base string
-	mergedAt            *string
+	commit, merge, base, head string
+	mergedAt                  *string
 }
 
 func newFake() *fakeGitHub {
 	return &fakeGitHub{tags: map[string]ref{}, annotated: map[string]string{}, targets: map[int64]string{}, content: map[int64][]byte{}, pageSize: 100,
-		pulls: map[int]pull{7: {commit: approved, merge: approved, base: "main", mergedAt: &mergedAt}}}
+		pulls: map[int]pull{7: {commit: merged, merge: merged, base: "main", head: head, mergedAt: &mergedAt}}}
 }
 
 func (f *fakeGitHub) release(tag string, draft bool, body string) {
-	f.releases = append(f.releases, Release{ID: int64(len(f.releases) + 1), TagName: tag, Name: tag, Body: body, Draft: draft, TargetCommitish: approved})
+	f.releases = append(f.releases, Release{ID: int64(len(f.releases) + 1), TagName: tag, Name: tag, Body: body, Draft: draft, TargetCommitish: approved,
+		HTMLURL: "https://github.com/fabricahq/example/releases/tag/" + tag})
 }
 
 func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -79,6 +84,10 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		send(pulls)
+	case r.Method == http.MethodGet && strings.HasPrefix(path, "/pulls/"):
+		var number int
+		fmt.Sscanf(strings.TrimPrefix(path, "/pulls/"), "%d", &number)
+		send(map[string]any{"head": map[string]any{"sha": f.pulls[number].head, "repo": map[string]string{"full_name": "fabricahq/example"}}, "merged_by": map[string]string{"login": "mona"}})
 	case r.Method == http.MethodPost && strings.HasSuffix(path, "/assets"):
 		var id int64
 		fmt.Sscanf(strings.TrimPrefix(path, "/releases/"), "%d", &id)
@@ -154,8 +163,14 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fmt.Sscanf(strings.TrimPrefix(path, "/releases/"), "%d", &id)
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
-		f.writes = append(f.writes, "publish draft")
 		rel := &f.releases[id-1]
+		if notes, ok := body["body"].(string); ok {
+			f.writes = append(f.writes, "edit "+rel.TagName)
+			rel.Body = notes
+			send(f.view(*rel))
+			return
+		}
+		f.writes = append(f.writes, "publish draft")
 		rel.Draft = false
 		// Like GitHub, a target in the request replaces the draft's own.
 		target := rel.TargetCommitish
@@ -195,11 +210,12 @@ func runWith(t *testing.T, f *fakeGitHub, p plan.Plan, assets []File) (Result, e
 		t.Cleanup(f.server.Close)
 	}
 	gh := &GitHub{BaseURL: f.server.URL, Token: "token", Repository: "fabricahq/example", HTTP: f.server.Client()}
-	return Publish(context.Background(), gh, p, approved, "main", assets)
+	return Publish(context.Background(), gh, p, "main", assets)
 }
 
 func minor() plan.Plan {
-	return plan.Plan{Tags: []string{"v1.0.0"}, Tag: "v1.1.0", Version: "1.1.0", Commit: approved, Previous: "v1.0.0", Notes: "## Notes\n"}
+	return plan.Plan{Tags: []string{"v1.0.0"}, Tag: "v1.1.0", Version: "1.1.0", Commit: approved, Previous: "v1.0.0", Notes: "## Notes\n",
+		Head: head, PullRequest: 7, Merged: merged}
 }
 
 func withPrevious() *fakeGitHub {
@@ -225,7 +241,7 @@ func TestCreatesTagAndRelease(t *testing.T) {
 
 func TestPublishesAFirstRelease(t *testing.T) {
 	f := newFake()
-	if _, err := run(t, f, plan.Plan{Tags: []string{}, Tag: "v1.0.0", Commit: approved, Notes: "First"}); err != nil {
+	if _, err := run(t, f, plan.Plan{Tags: []string{}, Tag: "v1.0.0", Commit: approved, Notes: "First", Head: head, PullRequest: 7, Merged: merged}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -251,6 +267,28 @@ func TestRetryAfterPublicationMakesNoWrites(t *testing.T) {
 	res, err := run(t, f, minor())
 	if err != nil || !res.AlreadyPublished || len(f.writes) != 0 {
 		t.Fatalf("%+v %v %v", res, err, f.writes)
+	}
+}
+
+// Retrying the original release after a later notes edit keeps the edited notes, but still
+// refuses other assets or a tag on another commit.
+func TestRetryAfterANotesEditKeepsTheNotes(t *testing.T) {
+	f := withPrevious()
+	if _, err := run(t, f, minor()); err != nil {
+		t.Fatal(err)
+	}
+	f.releases[1].Body = "## Corrected notes"
+	f.writes = nil
+	res, err := run(t, f, minor())
+	if err != nil || !res.AlreadyPublished || !res.NotesChanged || len(f.writes) != 0 || f.releases[1].Body != "## Corrected notes" {
+		t.Fatalf("%+v %v %v", res, err, f.writes)
+	}
+	if _, err := runWith(t, f, minor(), files(t, map[string]string{"a.tar.gz": "a"})); err == nil || !strings.Contains(err.Error(), "is already published, but") {
+		t.Fatal(err)
+	}
+	f.tags["v1.1.0"] = ref{"commit", other}
+	if _, err := run(t, f, minor()); err == nil || !strings.Contains(err.Error(), "already points to") {
+		t.Fatal(err)
 	}
 }
 
@@ -289,15 +327,20 @@ func TestRefusesUnsafePublication(t *testing.T) {
 		"tags changed":      {func(f *fakeGitHub) { f.tags["v1.2.0"] = ref{"commit", other} }, nil, "changed since planning"},
 		"draft previous":    {func(f *fakeGitHub) { f.releases[0].Draft = true }, nil, "publish v1.0.0 first"},
 		"missing previous":  {func(f *fakeGitHub) { f.releases = nil }, nil, "publish v1.0.0 first"},
-		"commit mismatch":   {nil, func(p *plan.Plan) { p.Commit = other }, "does not match"},
+		"short commit":      {nil, func(p *plan.Plan) { p.Commit = "aaaaaaa" }, "not a full commit SHA"},
 		"no release":        {nil, func(p *plan.Plan) { p.Tag = "" }, "requests no release"},
+		"not merged":        {nil, func(p *plan.Plan) { p.Merged = "" }, "names no merged pull request"},
+		"other head":        {nil, func(p *plan.Plan) { p.Head = other }, "not the planned #7"},
+		"other pull":        {nil, func(p *plan.Plan) { p.PullRequest = 8 }, "not the planned #8"},
 		"direct push":       {func(f *fakeGitHub) { f.pulls = nil }, nil, "a direct push publishes nothing"},
-		"unmerged pull":     {func(f *fakeGitHub) { f.pulls = map[int]pull{7: {commit: approved, merge: approved, base: "main"}} }, nil, "a direct push publishes nothing"},
+		"unmerged pull": {func(f *fakeGitHub) {
+			f.pulls = map[int]pull{7: {commit: merged, merge: merged, base: "main", head: head}}
+		}, nil, "a direct push publishes nothing"},
 		"other base": {func(f *fakeGitHub) {
-			f.pulls = map[int]pull{7: {commit: approved, merge: approved, base: "dev", mergedAt: &mergedAt}}
+			f.pulls = map[int]pull{7: {commit: merged, merge: merged, base: "dev", head: head, mergedAt: &mergedAt}}
 		}, nil, "a direct push publishes nothing"},
 		"commit in a pull": {func(f *fakeGitHub) {
-			f.pulls = map[int]pull{7: {commit: approved, merge: other, base: "main", mergedAt: &mergedAt}}
+			f.pulls = map[int]pull{7: {commit: merged, merge: other, base: "main", head: head, mergedAt: &mergedAt}}
 		}, nil, "a direct push publishes nothing"},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -317,6 +360,38 @@ func TestRefusesUnsafePublication(t *testing.T) {
 				t.Fatalf("a refused publication wrote: %v", f.writes)
 			}
 		})
+	}
+}
+
+// A notes edit replaces only the body of a published release, and does nothing when the
+// release already has the notes.
+func TestEditsPublishedNotes(t *testing.T) {
+	f := withPrevious()
+	edit := plan.Plan{Tags: []string{}, Head: head, PullRequest: 7, Merged: merged, Edits: []plan.Edit{{Tag: "v1.0.0", File: "_releases/v1.0.0.md", Notes: "Corrected"}}}
+	res, err := run(t, f, edit)
+	if err != nil || len(res.Edited) != 1 || !res.Edited[0].Changed || res.Edited[0].URL != "https://github.com/fabricahq/example/releases/tag/v1.0.0" {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if strings.Join(f.writes, ",") != "edit v1.0.0" || f.releases[0].Body != "Corrected" || f.tags["v1.0.0"].sha != other {
+		t.Fatalf("writes %v releases %+v", f.writes, f.releases)
+	}
+	f.writes = nil
+	if res, err := run(t, f, edit); err != nil || res.Edited[0].Changed || len(f.writes) != 0 {
+		t.Fatalf("repeat: %+v %v %v", res, err, f.writes)
+	}
+
+	// With a release, the release publishes first, then the edit.
+	both := minor()
+	both.Edits = []plan.Edit{{Tag: "v1.0.0", Notes: "Corrected again"}}
+	f.writes = nil
+	if _, err := run(t, f, both); err != nil || strings.Join(f.writes, ",") != "create v1.1.0,edit v1.0.0" {
+		t.Fatalf("%v %v", err, f.writes)
+	}
+
+	f.releases[0].Draft = true
+	f.writes = nil
+	if _, err := run(t, f, edit); err == nil || !strings.Contains(err.Error(), "no published release") || len(f.writes) != 0 {
+		t.Fatalf("draft: %v %v", err, f.writes)
 	}
 }
 
@@ -507,7 +582,7 @@ func TestEnvironmentWarningsExplainRiskySettings(t *testing.T) {
 		"unprotected":             {env(protectedOnly, nil, false), []string{"main isn't protected"}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			got := EnvironmentWarnings("release", "main", tc.env)
+			got := EnvironmentWarnings("release", "main", EnvironmentDocs, tc.env)
 			if len(got) != len(tc.want) {
 				t.Fatalf("got %q, want %d warnings", got, len(tc.want))
 			}

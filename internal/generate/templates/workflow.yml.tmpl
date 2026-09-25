@@ -25,23 +25,20 @@
 {{- end}}
 {{- end -}}
 name: Release
-# Notes changes in a PR are validated; a notes change on {{.Branch}} approves publication,
-# so ordinary changes never create releases.
+# A pull request that adds or edits release notes is validated, checked, and built before it
+# merges, and blocks at the start and end of its description report the release's status. Merging it
+# into {{.Branch}} approves publication, so ordinary changes never create releases.
 on:
   push:
     branches: [{{yamlString .Branch}}]
     paths: [{{yamlString (printf "%s/v*.md" .NotesDir)}}]
   pull_request:
     paths: [{{yamlString (printf "%s/**" .NotesDir)}}, '.release-planner/**', '.github/workflows/release-planner.yml']
-  # Retry a failed publication with both endpoints of the original approved push.
+  # Retry a failed publication by naming the commit the release pull request merged as.
   workflow_dispatch:
     inputs:
-      commit:
-        description: 'Approved head SHA from the original failed run summary'
-        required: true
-        type: string
-      base:
-        description: 'Base SHA from the original failed run summary'
+      merged-commit:
+        description: 'Full SHA of the commit the release pull request merged as on {{.Branch}}'
         required: true
         type: string
 permissions:
@@ -49,55 +46,70 @@ permissions:
 env:
   RELEASE_PLANNER_VERSION: {{.Version}}
 jobs:
-  # Check the generated files, then validate the notes change and bind it to one version and
-  # commit. Release notes rules that the notes break are warnings, not failures.
+  # Check the generated files, then validate the release pull request and bind it to one
+  # release commit: the newest commit the pull request shares with {{.Branch}}. Release notes
+  # rules that the notes break are warnings, not failures. After the merge, it also finds the
+  # pull request's run, whose checks and assets the release reuses.
   validate:
     if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/{{.Branch}}'
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      actions: read # to check the release environment's settings
+      actions: read # to check the environments' settings and find the pull request's run
+      pull-requests: read # to find the merged pull request
     outputs:
       tag: ${{"{{"}} steps.validate.outputs.tag {{"}}"}}
+      version: ${{"{{"}} steps.validate.outputs.version {{"}}"}}
       commit: ${{"{{"}} steps.validate.outputs.commit {{"}}"}}
+      publish: ${{"{{"}} steps.validate.outputs.publish {{"}}"}}
+      build: ${{"{{"}} steps.validate.outputs.build {{"}}"}}
+      build-run: ${{"{{"}} steps.validate.outputs.build-run {{"}}"}}
     steps:
       - uses: {{.Actions.Checkout}}
         with:
-          # Version ordering and retries need the full history and tags.
+          # Version ordering and the release commit need the full history and tags.
           fetch-depth: 0
-          ref: ${{"{{"}} inputs.commit || github.event.pull_request.head.sha || github.sha {{"}}"}}
+          ref: ${{"{{"}} github.event.pull_request.head.sha || inputs.merged-commit || github.sha {{"}}"}}
           persist-credentials: false
 {{- template "install" .}}
       - name: Check the generated release files
         run: release-planner check
-      - name: Validate the release request
+      - name: Validate the release pull request
         id: validate
         env:
-          EVENT: ${{"{{"}} github.event_name {{"}}"}}
-          BASE: ${{"{{"}} inputs.base || github.event.pull_request.base.sha || github.event.before {{"}}"}}
-          HEAD: ${{"{{"}} inputs.commit || github.event.pull_request.head.sha || github.sha {{"}}"}}
           GITHUB_TOKEN: ${{"{{"}} github.token {{"}}"}}
-        run: release-planner validate --ci --event "$EVENT" --base "$BASE" --head "$HEAD" --out "$RUNNER_TEMP/release-plan.json"
+          BASE: ${{"{{"}} github.event.pull_request.base.sha {{"}}"}}
+          HEAD: ${{"{{"}} github.event.pull_request.head.sha {{"}}"}}
+          HEAD_REPOSITORY: ${{"{{"}} github.event.pull_request.head.repo.full_name {{"}}"}}
+          MERGED: ${{"{{"}} inputs.merged-commit || github.sha {{"}}"}}
+        run: |
+          if [ -n "$HEAD" ]; then
+            release-planner validate --ci --base "$BASE" --head "$HEAD" --head-repository "$HEAD_REPOSITORY" --out "$RUNNER_TEMP/release-plan.json"
+          else
+            release-planner validate --ci --merged "$MERGED" --out "$RUNNER_TEMP/release-plan.json"
+          fi
       - uses: {{.Actions.UploadArtifact}}
         with:
           name: release-plan
           path: ${{"{{"}} runner.temp {{"}}"}}/release-plan.json
           if-no-files-found: error
 {{if .ReleaseChecks.Workflow}}
-  # Run this repository's release-only checks on the exact commit being released.
-  # The called workflow gets the repository's secrets, but never the release-write token.
+  # Run this repository's release-only checks on the release commit: on the pull request, or
+  # after the merge if the pull request's run can't be reused. The called workflow gets the
+  # repository's secrets, but never the release-write token.
   release-checks:
     needs: validate
-    if: needs.validate.outputs.tag != ''
+    if: needs.validate.outputs.build == 'true'
     uses: ./.github/workflows/{{.ReleaseChecks.Workflow}}
     with:
       ref: ${{"{{"}} needs.validate.outputs.commit {{"}}"}}
     secrets: inherit
 {{else if .ReleaseChecks.Run}}
-  # Run this repository's release-only checks on the exact commit being released.
+  # Run this repository's release-only checks on the release commit: on the pull request, or
+  # after the merge if the pull request's run can't be reused.
   release-checks:
     needs: validate
-    if: needs.validate.outputs.tag != ''
+    if: needs.validate.outputs.build == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: {{.Actions.Checkout}}
@@ -123,15 +135,58 @@ jobs:
         run: |
 {{.ReleaseChecksRun}}
 {{end}}
-  # The only job that can write. It runs the pinned Release Planner version and no repository code.
+{{- if .ReleaseAssets.Workflow}}
+  # Build the release assets from the release commit, with read-only access and no secrets.
+  # The called workflow uploads them as one artifact named release-assets.
+  release-assets:
+    needs: validate
+    if: needs.validate.outputs.build == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/{{.ReleaseAssets.Workflow}}
+    with:
+      ref: ${{"{{"}} needs.validate.outputs.commit {{"}}"}}
+      tag: ${{"{{"}} needs.validate.outputs.tag {{"}}"}}
+      version: ${{"{{"}} needs.validate.outputs.version {{"}}"}}
+
+  # Attest each asset's build provenance, so publish can check the files came from this
+  # workflow. This job runs no repository code.
+  attest:
+    needs: [validate, release-assets]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: {{.Actions.DownloadArtifact}}
+        with:
+          name: release-assets
+          path: ${{"{{"}} runner.temp {{"}}"}}/release-assets
+      - uses: {{.Actions.AttestBuildProvenance}}
+        with:
+          subject-path: '${{"{{"}} runner.temp {{"}}"}}/release-assets/*'
+{{end}}
+  # The only job that can write, and only after the merge. It runs the pinned Release Planner
+  # version and no repository code. It tags the release commit and publishes the approved
+  # notes, or replaces the notes of published releases.
+{{- if .ReleaseAssets.Workflow}}
+  # It verifies each asset's attestation, stages the assets on a draft, and publishes last.
+{{- end}}
   publish:
-    needs: {{if .ReleaseChecks.Enabled}}[validate, release-checks]{{else}}[validate]{{end}}
-    if: needs.validate.outputs.tag != '' && github.event_name != 'pull_request' && github.ref == 'refs/heads/{{.Branch}}'
+    needs: [{{.Needs}}]
+    if: >-
+      !cancelled() && github.event_name != 'pull_request' && needs.validate.outputs.publish == 'true'
+      && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
     runs-on: ubuntu-latest
     environment: release
     permissions:
       contents: write
-      pull-requests: read # to confirm the commit is a merged pull request
+      pull-requests: read # to confirm the merged pull request
+      actions: read # to download the pull request's run's artifacts
+{{- if .ReleaseAssets.Workflow}}
+      attestations: read # to verify the assets' build attestations
+{{- end}}
     # Serialize publication so competing releases cannot race.
     concurrency:
       group: release-publication
@@ -142,8 +197,110 @@ jobs:
         with:
           name: release-plan
           path: ${{"{{"}} runner.temp {{"}}"}}/plan
-      - name: Tag the approved commit and publish the approved notes
+      # The run that checked and built the release: the pull request's, or this one.
+      - uses: {{.Actions.DownloadArtifact}}
+        if: needs.validate.outputs.tag != ''
+        with:
+          name: release-plan
+          path: ${{"{{"}} runner.temp {{"}}"}}/built
+          run-id: ${{"{{"}} needs.validate.outputs.build-run {{"}}"}}
+          github-token: ${{"{{"}} github.token {{"}}"}}
+{{- if .ReleaseAssets.Workflow}}
+      - uses: {{.Actions.DownloadArtifact}}
+        if: needs.validate.outputs.tag != ''
+        with:
+          name: release-assets
+          path: ${{"{{"}} runner.temp {{"}}"}}/release-assets
+          run-id: ${{"{{"}} needs.validate.outputs.build-run {{"}}"}}
+          github-token: ${{"{{"}} github.token {{"}}"}}
+{{- end}}
+      - name: Publish the approved release
         env:
           GITHUB_TOKEN: ${{"{{"}} github.token {{"}}"}}
-          COMMIT: ${{"{{"}} needs.validate.outputs.commit {{"}}"}}
-        run: release-planner publish --plan "$RUNNER_TEMP/plan/release-plan.json" --commit "$COMMIT" --branch {{.Branch}}
+        run: release-planner publish --plan "$RUNNER_TEMP/plan/release-plan.json" --built-plan "$RUNNER_TEMP/built/release-plan.json" --branch {{.Branch}}{{if .ReleaseAssets.Workflow}} --assets "$RUNNER_TEMP/release-assets" --signer-workflow .github/workflows/release-planner.yml{{end}}
+{{- if .Downstream}}
+
+  # After a new stable release, run the workflows that depend on it in other repositories,
+  # with a GitHub App token limited to them. Nothing here can change the release. One job
+  # per target, so Re-run failed jobs runs only the targets that failed.
+  downstream:
+    name: downstream (${{"{{"}} matrix.target {{"}}"}})
+    needs: [validate, publish]
+    if: needs.publish.result == 'success' && needs.validate.outputs.tag != '' && !contains(needs.validate.outputs.version, '-')
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [{{range $i, $d := .Downstream}}{{if $i}}, {{end}}{{yamlString (printf "%s:%s" $d.Repository $d.Workflow)}}{{end}}]
+    runs-on: ubuntu-latest
+    environment: downstream
+    permissions:
+      contents: read
+    steps:
+      - name: Check the downstream GitHub App settings
+        env:
+          CLIENT_ID: ${{"{{"}} vars.DOWNSTREAM_APP_CLIENT_ID {{"}}"}}
+          HAS_KEY: ${{"{{"}} secrets.DOWNSTREAM_APP_PRIVATE_KEY != '' {{"}}"}}
+        run: |
+          if [ -z "$CLIENT_ID" ] || [ "$HAS_KEY" != true ]; then
+            echo "::error title=Downstream::Set the DOWNSTREAM_APP_CLIENT_ID variable and the DOWNSTREAM_APP_PRIVATE_KEY secret in the downstream environment: {{.DownstreamDocs}}"
+            exit 1
+          fi
+      - uses: {{.Actions.CreateGitHubAppToken}}
+        id: token
+        with:
+          client-id: ${{"{{"}} vars.DOWNSTREAM_APP_CLIENT_ID {{"}}"}}
+          private-key: ${{"{{"}} secrets.DOWNSTREAM_APP_PRIVATE_KEY {{"}}"}}
+          owner: {{yamlString .DownstreamOwner}}
+          repositories: {{yamlString (join .DownstreamRepositories ",")}}
+          permission-actions: write
+{{- template "install" .}}
+      - name: Run the downstream workflow
+        env:
+          GITHUB_TOKEN: ${{"{{"}} steps.token.outputs.token {{"}}"}}
+          TAG: ${{"{{"}} needs.validate.outputs.tag {{"}}"}}
+          TARGET: ${{"{{"}} matrix.target {{"}}"}}
+        run: release-planner downstream --tag "$TAG" --target "$TARGET"
+{{- end}}
+
+  # Keep the summary at the start of the release pull request's description and the status at
+  # its end up to date, from its checks through publication, whatever failed. After the merge, a
+  # failure also gets a comment that mentions whoever merged, since editing a description
+  # notifies no one.
+  report:
+    needs: [{{.Needs}}, publish{{if .Downstream}}, downstream{{end}}]
+    if: always() && needs.validate.result != 'skipped'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read # to download and link the build run's assets and link each job{{if .Downstream}} and read each downstream job's result{{end}}
+      pull-requests: write # to edit the description's release status and comment on a failure
+    steps:
+{{- template "install" .}}
+      # Missing when validation failed; the report says which job did.
+      - uses: {{.Actions.DownloadArtifact}}
+        continue-on-error: true
+        with:
+          name: release-plan
+          path: ${{"{{"}} runner.temp {{"}}"}}/plan
+{{- if .ReleaseAssets.Workflow}}
+      - uses: {{.Actions.DownloadArtifact}}
+        if: needs.validate.outputs.tag != ''
+        continue-on-error: true
+        with:
+          name: release-assets
+          path: ${{"{{"}} runner.temp {{"}}"}}/release-assets
+          run-id: ${{"{{"}} needs.validate.outputs.build-run {{"}}"}}
+          github-token: ${{"{{"}} github.token {{"}}"}}
+{{- end}}
+      - name: Report the release status
+        env:
+          GITHUB_TOKEN: ${{"{{"}} github.token {{"}}"}}
+          NEEDS: ${{"{{"}} toJSON(needs) {{"}}"}}
+          PULL_REQUEST: ${{"{{"}} github.event.pull_request.number {{"}}"}}
+          HEAD_SHA: ${{"{{"}} github.event.pull_request.head.sha {{"}}"}}
+          HEAD_REF: ${{"{{"}} github.event.pull_request.head.ref {{"}}"}}
+          HEAD_REPOSITORY: ${{"{{"}} github.event.pull_request.head.repo.full_name {{"}}"}}
+          MERGED: ${{"{{"}} inputs.merged-commit || github.sha {{"}}"}}
+        run: |
+          if [ -n "$PULL_REQUEST" ]; then target=(--pull-request "$PULL_REQUEST" --head-sha "$HEAD_SHA" --head-ref "$HEAD_REF" --head-repository "$HEAD_REPOSITORY"); else target=(--merged "$MERGED"); fi
+          release-planner report --needs "$NEEDS" --branch {{.Branch}} --plan "$RUNNER_TEMP/plan/release-plan.json"{{if .ReleaseAssets.Workflow}} --assets "$RUNNER_TEMP/release-assets"{{end}}{{range .Downstream}} --downstream {{.Repository}}:{{.Workflow}}{{end}} "${target[@]}"

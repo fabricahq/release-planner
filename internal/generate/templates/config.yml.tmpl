@@ -11,10 +11,10 @@ version: {{.Version}}
 # The version your first release must use.
 first-version: {{.FirstVersion}}
 
-# Optional release-only checks, run on the exact commit being released, before it is
-# tagged. Your required pull request checks already test what merges, so use this only for
-# checks they don't run: a smoke test of what you ship, an API compatibility check against
-# the previous release, a fresh vulnerability scan, or a slow end-to-end suite.
+# Optional release-only checks, run on the release commit on the release pull request,
+# before you approve it. Your required pull request checks already test what merges, so use
+# this only for checks they don't run: a smoke test of what you ship, an API compatibility
+# check against the previous release, a fresh vulnerability scan, or a slow end-to-end suite.
 #
 # Either a Bash script, with optional go, node, and python toolchains:
 # release-checks:
@@ -27,6 +27,20 @@ first-version: {{.FirstVersion}}
 # It needs a workflow_call trigger with a string input named ref, and must check out that ref:
 # release-checks:
 #   workflow: release-checks.yml
+
+# Optional files to attach to each release, built from the release commit on the release
+# pull request by one of your workflows, then attested and published when you merge. It
+# needs a workflow_call trigger with string inputs ref, tag, and version; it must check out
+# ref and upload the files as one artifact named release-assets. It gets no secrets.
+# release-assets:
+#   workflow: build-release.yml
+
+# Optional workflows in other repositories to run after each new stable release, with
+# inputs tag and version, such as one that updates a Homebrew formula. They run with a
+# GitHub App token from the downstream environment.
+# downstream:
+#   - repository: your-org/homebrew-tap
+#     workflow: update-formula.yml
 
 # Release notes rules to turn off. release-planner validate checks the notes against every rule;
 # list them with: release-planner validate --rules

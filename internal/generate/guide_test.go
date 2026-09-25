@@ -31,7 +31,10 @@ func TestGuideRendersTheConfiguredSettings(t *testing.T) {
 		"write `docs/releases/<version>.md` in one pass",
 		"release-planner validate --base origin/trunk --head HEAD\n",
 		"Never regenerate it, rewrite it from scratch, or paste one copy over another",
-		"If `trunk` has moved, merge it into the release branch, rerun `inventory`",
+		"create your release branch from `origin/trunk`. Its tip is the release commit.",
+		"release-planner inventory --head \"$(git merge-base HEAD origin/trunk)\"",
+		"Open a pull request that edits only `docs/releases/<version>.md` of the published version",
+		"with **merged-commit** set to the full SHA of the commit the release pull request merged as",
 		"## Release notes style\n\n" + strings.TrimSpace(DefaultStyle()) + "\n",
 	} {
 		if !strings.Contains(guide, want) {

@@ -7,7 +7,7 @@ This page is the reference for agents working in a repository that uses Release 
 
 ## Start here
 
-When asked to make a release, draft or revise release notes, or retry a failed release, print the release procedure for the repository's pinned version and follow it:
+When asked to make a release, draft, revise, or correct release notes, or retry a failed release, print the release procedure for the repository's pinned version and follow it:
 
 ```sh
 release-planner guide
@@ -35,9 +35,12 @@ Run every command from the repository root, with the pinned version installed. E
 | `uninstall [--force]` | Maintainer | Deletes the generated files and the `AGENTS.md` section. |
 | `guide [--default-style]` | Agent | Prints the release procedure, or only the default release notes style. |
 | `inventory [--head <ref>] [--repository <owner/name>] [--offline]` | Agent | Prints JSON describing everything since the previous release, including each pull request author's GitHub handle and the lines that list each change in the notes. |
-| `validate --base <ref> [--head <ref>] [--repository <owner/name>] [--out <file>] [--ci --event <name>]` | Agent, CI | Validates the release request between two commits and its notes, and prints the release plan as JSON. |
+| `validate --base <ref> [--head <ref>] [--repository <owner/name>] [--out <file>] [--ci [--head-repository <owner/name>]]` | Agent, CI | Validates the release pull request whose head is `--head` against the release branch at `--base`, and prints the release plan as JSON, including the release commit. |
+| `validate --ci --merged <sha> [--out <file>]` | CI | After the merge: finds the pull request merged as `<sha>`, plans its release commit, checks the merged notes are the approved ones, and finds the pull request's run whose checks and assets the release reuses. |
 | `validate --rules` | Anyone | Lists the release notes rules. |
-| `publish --plan <file> --commit <sha> --branch <name> [--assets <dir>]` | CI | Tags the approved commit and publishes the release. Refuses unless the commit is a pull request merged into the branch. With `--assets`, uploads the directory's files to a draft, verifies GitHub's checksums for them, and publishes last. Needs `GITHUB_TOKEN` and `GITHUB_REPOSITORY`. |
+| `publish --plan <file> --branch <name> [--built-plan <file>] [--assets <dir> [--signer-workflow <path>]]` | CI | Tags the release commit and publishes the release, and replaces the notes of published releases the plan edits. Refuses unless the plan's merged commit is its pull request merged into the branch. `--built-plan` must plan the same release. With `--assets`, verifies each file's build attestation from `--signer-workflow` with `gh attestation verify`, uploads the files to a draft, verifies GitHub's checksums for them, and publishes last. Needs `GITHUB_TOKEN` and `GITHUB_REPOSITORY`. |
+| `report --needs <json> --branch <name> (--pull-request <n> [--head-sha <sha>] [--head-ref <branch>] [--head-repository <owner/name>] \| --merged <sha>) [--plan <file>] [--assets <dir>] [--downstream <owner/name:workflow.yml>...]` | CI | Writes the release status blocks of the release pull request's description, from the workflow's `needs` context, the plan, and the run's jobs, which it links. `--head-sha` is the commit the run checked; once the pull request has a newer commit or is merged or closed, the report leaves the description alone. `--head-ref` and `--head-repository` name the pull request's branch, for the link that edits the notes. Warns instead of failing when it can't read the jobs, edit the description, or comment. |
+| `downstream --tag <tag> --target <owner/name:workflow.yml>...` | CI | Starts each target workflow with inputs `tag` and `version`, unless the tag is a prerelease. Needs `GITHUB_TOKEN` that can run workflows in the targets. |
 | `version` | Anyone | Prints the running version. |
 
 `install` and `check` refuse to run when the running version differs from the version the config pins, because they would render the wrong files.
@@ -49,7 +52,7 @@ Run every command from the repository root, with the pinned version installed. E
 | `.release-planner/config.yml` | Repository | Settings. See [Configuration](/customize/configuration/). |
 | `.release-planner/policy.md` | Repository | What users depend on, how to choose versions, who reads the notes, and what to always include or leave out. Wins over the guide where they differ. |
 | The file `release-notes-style.file` names, conventionally `.release-planner/release-notes-style.md` | Repository, optional | Appends to or replaces the default release notes style, as `release-notes-style.mode` says. |
-| `_releases/v<version>.md` | Release pull request | The notes for one release, published word for word. |
+| `_releases/v<version>.md` | Release pull request | The notes for one release, published word for word. Editing a published version's file in a later pull request replaces that release's notes. |
 | `.github/workflows/release-planner.yml` | Generated | The release workflow. |
 | `.agents/skills/release/SKILL.md`, `.claude/skills/release/SKILL.md` | Generated | Tell agents to run `guide` when asked to release. |
 | `AGENTS.md`, between the `release-planner:begin` and `release-planner:end` markers | Generated | The same pointer, for agents that read `AGENTS.md`. |
@@ -104,23 +107,34 @@ To look up handles, `inventory` uses `GITHUB_TOKEN`, `GH_TOKEN`, or the GitHub C
 
 The agent writes `_releases/<version>.md` in one pass: the sections the release notes style and policy call for, with no introduction; then `## Pull Requests`, with every `entry` from `inventory` grouped under `###` headings; then `## New Contributors`, if any; then the `closing` line. Titles in entries can be edited; the pull request number or commit link must stay.
 
-To revise the notes, edit the file in place. Never regenerate it or paste one copy over another. If the release branch moved, merge it into the release pull request's branch, rerun `inventory`, and add the new entries.
+To revise the notes, edit the file in place. Never regenerate it or paste one copy over another. The release branch moving on doesn't change the release. To include newer changes, merge the release branch into the release pull request's branch; the release commit moves to the new merge base. Rerun `inventory --head "$(git merge-base HEAD origin/<branch>)"` and add the new entries.
+
+To correct a published release's notes, edit its file in a pull request of its own. That's a notes edit, not a release: merging replaces the release's notes on GitHub and never changes its tag or assets.
 
 ## What `validate` checks
 
-`validate` compares two commits and finds the release request between them. It fails, and nothing is published, when:
+`validate` finds the release commit, the newest commit the head shares with the release branch (`git merge-base`), and reads what the head changes on top of it:
 
-- more than one notes file was added or changed
-- a notes file for an already-tagged version changed (published notes are immutable)
+- Adding or correcting the notes file of an untagged version requests that release.
+- Changing the notes file of a tagged version is a notes edit.
+- Deleting an untagged version's notes file withdraws that request.
+- Moving a tagged version's notes file unchanged out of the `release-notes-dir` the release commit configures, such as into a new one, changes nothing. Moving any other file into a tagged version's notes path adds that file, so it's a notes edit.
+
+It fails, and nothing is published, when:
+
+- a pull request that requests a release or edits notes also changes any other file
+- it requests more than one release
+- a tagged version's notes file is deleted
 - the filename isn't a SemVer 2.0.0 version with a leading `v`, or has build metadata
 - the notes are empty
 - another notes file exists without a tag (a pending request)
 - the version isn't newer than every existing version tag
 - there are no releases yet and the version isn't `first-version`
-- the version's tag already exists on a different commit
-- the previous release isn't an ancestor of the head
+- the previous release isn't an ancestor of the release commit
 
-A range with no notes change produces a plan with an empty `tag`, meaning no release was requested. Run `validate --base origin/<branch> --head HEAD` after committing the notes, and before opening the release pull request; it must print the intended version.
+A version's tag may already exist only on the release commit, where an interrupted publication created it. A pull request that neither requests a release nor edits notes produces a plan with an empty `tag` and no `edits`, and may change anything. Run `validate --base origin/<branch> --head HEAD` after committing the notes, and before opening the release pull request; it must print the intended version and release commit.
+
+After the merge, `validate --ci --merged <sha>` finds the pull request merged as `<sha>` through the GitHub API and plans it again, with the release branch before the merge, the merged commit's first parent, as the base. That gives the same release commit for a merge commit, a squash, or a rebase. It fetches the pull request's head if no branch holds it, and refuses notes on the release branch that differ from the pull request's head. A direct push of notes publishes nothing.
 
 It then checks the notes against the release notes rules:
 
@@ -137,16 +151,35 @@ Without `--ci`, a broken rule fails, listing every finding with its rule, line, 
 
 ## The release workflow
 
-The generated workflow runs when a pull request changes `_releases/`, `.release-planner/`, or the workflow itself, and when a notes file lands on the release branch.
+The generated workflow runs when a pull request changes `_releases/`, `.release-planner/`, or the workflow itself, when a notes file lands on the release branch, and when started by hand to retry. Everything that can fail runs on the pull request; nothing on a pull request can write to releases or tags.
 
-1. **validate** (read-only): installs the pinned Release Planner, checks out the head with full history, runs `check`, then `validate --ci`, which writes the release plan and reports broken release notes rules as warnings. For a release tag pin, installing downloads the release, verifies the build attestation of its `SHA256SUMS`, and checks the archive against it; a commit SHA pin is built from source with Go. For a release request, it also checks the `release` environment's settings and warns, without failing, if the environment doesn't exist yet, lets any branch deploy, doesn't let the release branch deploy, or requires reviewers. On a pull request, this is the whole run: it validates the request without publishing.
-2. **release-checks** (optional): runs the repository's [release checks](/customize/release-checks/) on the planned commit.
-3. **publish**: the only job with permission to write. It runs Release Planner at the pinned version and none of the repository's code. Before writing, it confirms that the version tags haven't changed since validation, that the previous release is published, and that any existing tag or release matches the plan. It then creates the tag and release, and afterward verifies that the tag points to the approved commit. If a matching release is already published, it changes nothing.
+| Job | Runs | Permissions | What it does |
+| --- | --- | --- | --- |
+| **validate** | Always | `contents: read`, `actions: read`, `pull-requests: read` | Installs the pinned Release Planner, checks out the head with full history, runs `check`, then `validate --ci`: `--base`/`--head` on a pull request, `--merged` after the merge. Writes the release plan and step outputs, and uploads the plan as the `release-plan` artifact. |
+| **release-checks** | Optional; when validate says this run builds | Default; the workflow form gets the repository's secrets | Runs the [release checks](/customize/release-checks/) on the release commit. |
+| **release-assets** | Optional; when validate says this run builds | `contents: read`, no secrets | Calls the [build workflow](/customize/release-assets/) with `ref`, `tag`, and `version`; it uploads the `release-assets` artifact. |
+| **attest** | After release-assets | `contents: read`, `id-token: write`, `attestations: write` | Attests each asset's build provenance. Runs no repository code. |
+| **publish** | After the merge, when the plan requests a release or edits notes, and nothing failed | `contents: write`, `pull-requests: read`, `actions: read`, `attestations: read` with assets | In the `release` environment, one at a time. Downloads the plan, and the plan and assets of the run that built the release; checks they plan the same release and verifies each asset's attestation; then tags the release commit and publishes, and replaces edited notes. Runs no repository code. |
+| **downstream** | Optional; after a new stable release publishes | `contents: read`, plus a GitHub App token for the targets | In the `downstream` environment. One job per target, named `downstream (<owner/name>:<workflow>)`, starts that [downstream workflow](/customize/downstream/). |
+| **report** | Always, after the others | `contents: read`, `actions: read`, `pull-requests: write` | Writes the release status blocks of the pull request description with `report`, and comments on a failure after the merge. |
 
-The publish job uses the `release` environment and runs one publication at a time across the repository.
+**Validate outputs.** `tag`, `version`, `commit` (the release commit), `publish` (`true` after the merge when there's something to publish), `build` (`true` when this run must run the release checks and build the assets), and `build-run` (the run whose checks and assets the release uses).
+
+**Who builds.** On a pull request from a branch in the repository, the pull request's run checks and builds the release commit. A fork's pull request builds nothing, because its token can't attest. After the merge, `validate` looks for the pull request's successful run of the same workflow at the pull request's head, from the repository itself, whose `release-plan` and any `release-assets` artifacts haven't expired. If it finds one, the push run reuses it: release-checks, release-assets, and attest are skipped, and publish downloads that run's artifacts, which are trusted because the pull request's head changes only notes on top of the release commit. Otherwise, the push run checks, builds, and attests the release commit itself.
+
+**Settings warnings.** For a release request or notes edit, `validate` warns, without failing, if the `release` environment doesn't exist yet, lets any branch deploy, doesn't let the release branch deploy, or requires reviewers; with `downstream` configured, it checks the `downstream` environment the same way. Before publishing, `publish` confirms that the version tags haven't changed since validation, that the previous release is published, and that any existing tag or release matches the plan, and afterward verifies that the tag points to the release commit. If a matching release is already published, it changes nothing; its notes may differ from the plan's, since a later pull request may have edited them.
+
+## The release status
+
+The agent writes only one sentence in the release pull request's description: `Why <version>? <reason>.`, and at most one more line about a change it left out. The report job keeps two blocks around it, and rewrites only the text between each block's hidden markers, reading the description just before each edit; it skips the edit when nothing changed. It adds a missing summary at the start of the description and a missing status at the end, and leaves the text between and around them alone. When a block's end marker was deleted, it removes just the start marker and adds a new block, keeping the old text, since a maintainer's text may follow the marker. A pull request run writes nothing once the pull request has a newer commit or is merged, so a slow run can't replace a newer run's status.
+
+- The summary, between `<!-- release-planner:summary:start -->` and `<!-- release-planner:summary:end -->`, links to edit each notes file: on the pull request's branch before the merge, and on the release branch after it, where saving starts a pull request that edits the published notes. Before the merge, it lists what merging does: tag the release commit, publish the release with its files, run any downstream workflows, or replace a published release's notes, with a warning if they were edited on GitHub since they merged. After the merge, it shows the published release or updated notes instead, or the failed job with a link to the run and the retry. A `### Release status` table of the version, the release commit, and the previous release, or of each edited version and its notes file, closes it.
+- The status, between `<!-- release-planner:status:start -->` and `<!-- release-planner:status:end -->`, has a `#### Jobs` table with each job's result and a link to it, including each downstream target and the jobs reused from the pull request's run, with publish shown as waiting for the merge; then any broken release notes rules, which don't block merging; the assets with their sizes and a link to download them all, or after publication each file's download link; and any settings warnings.
+
+Because GitHub doesn't notify anyone mentioned in an edited description, a failure after the merge also gets a short comment that mentions whoever merged, names the failed job, and links the run; a hidden `<!-- release-planner:failure run=... attempt=... job=... -->` marker keeps a re-run of the report from posting it twice. The report never adds blocks to a pull request that doesn't request a release or edit notes, and posts no other comments. When the token can't edit the pull request, as on a fork's pull request, it warns and writes the report to the step summary instead.
 
 ## Retrying a failed release
 
-Read the failed run and any existing tag or release before acting. Prefer **Re-run all jobs** on the failed run. For a manual retry, run the workflow on the release branch with the **Base SHA** and **Approved head SHA** from the failed run's summary; never substitute the latest commit.
+Read the release pull request's description, the failed run, and any existing tag or release before acting. Prefer **Re-run failed jobs** on the failed run: it reuses the same plan and files. For a manual retry, run the workflow on the release branch with `merged-commit` set to the full SHA of the commit the release pull request merged as; never another commit. It plans the same release commit, and reuses the pull request's run when it can; otherwise it builds the assets again, and publish refuses a draft that already holds different files. A retry that finds the release already published checks its tag and files, and keeps its notes even if a later pull request edited them.
 
-Published tags and releases never move. If the run failed before tagging, fix the cause in a separate pull request, then correct the untagged notes in a new release pull request, or withdraw the request by deleting its file.
+Published tags and assets never move. If the run failed before tagging, fix the cause in a separate pull request, then correct the untagged notes in a new release pull request, whose release commit then includes the fix, or withdraw the request by deleting its file.

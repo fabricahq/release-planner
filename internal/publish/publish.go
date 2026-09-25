@@ -1,4 +1,5 @@
-// Package publish tags the approved commit and publishes the approved notes as a GitHub release.
+// Package publish tags the release commit and publishes the approved notes as a GitHub
+// release, or replaces the notes of published releases.
 //
 // Every remote fact is verified before and after writing, and a retry after a successful
 // publication makes no writes. Callers must serialize publication across versions.
@@ -10,6 +11,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -29,6 +31,17 @@ type Result struct {
 	URL string
 	// AlreadyPublished is true when a matching release existed and nothing was written.
 	AlreadyPublished bool
+	// NotesChanged is true when that release's notes differ from the plan's, as a later
+	// approved notes edit leaves them. They are kept.
+	NotesChanged bool
+	Edited       []Edited
+}
+
+// Edited reports one release whose notes the plan edits.
+type Edited struct {
+	Tag, URL string
+	// Changed is false when the release already had the notes.
+	Changed bool
 }
 
 // File is a release asset read into memory, so uploads can't pick up later edits.
@@ -65,28 +78,73 @@ func ReadAssets(dir string) ([]File, error) {
 	return files, nil
 }
 
-// Publish verifies the plan against GitHub, then creates the tag and release. With assets,
-// it stages them on a draft, verifies GitHub's stored checksums, and publishes last, because
-// immutable releases freeze their assets at publication.
+// Publish verifies the plan against GitHub, then creates the tag and release the plan
+// requests, and replaces the notes it edits. With assets, it stages them on a draft,
+// verifies GitHub's stored checksums, and publishes last, because immutable releases
+// freeze their assets at publication. Editing notes never changes a tag or an asset.
 //
-// Merging the release pull request is the approval, so the commit must be the result of
-// merging a pull request into branch. A direct push of release notes publishes nothing.
-func Publish(ctx context.Context, gh *GitHub, p plan.Plan, commit, branch string, assets []File) (Result, error) {
-	if p.Tag == "" {
-		return Result{}, fmt.Errorf("the plan requests no release")
+// Merging the release pull request is the approval, so the plan's merged commit must be
+// that pull request's merge into branch. A direct push of release notes publishes nothing.
+func Publish(ctx context.Context, gh *GitHub, p plan.Plan, branch string, assets []File) (Result, error) {
+	if p.Empty() {
+		return Result{}, fmt.Errorf("the plan requests no release and edits no notes")
 	}
-	if !commitSHA.MatchString(p.Commit) || p.Commit != commit {
-		return Result{}, fmt.Errorf("the plan's commit %q does not match the approved commit %q", p.Commit, commit)
+	if !commitSHA.MatchString(p.Merged) || !commitSHA.MatchString(p.Head) {
+		return Result{}, fmt.Errorf("the plan names no merged pull request; plan with release-planner validate --merged")
 	}
-	if strings.TrimSpace(p.Notes) == "" {
-		return Result{}, fmt.Errorf("the plan has no release notes")
-	}
-	pr, err := gh.MergedPullRequest(ctx, commit, branch)
+	pr, err := gh.MergedPullRequest(ctx, p.Merged, branch)
 	if err != nil {
 		return Result{}, err
 	}
-	if pr == 0 {
-		return Result{}, fmt.Errorf("%s is not the merge of a pull request into %s; a release is approved by merging its pull request, so a direct push publishes nothing", commit, branch)
+	if pr == nil {
+		return Result{}, fmt.Errorf("%s is not the merge of a pull request into %s; a release is approved by merging its pull request, so a direct push publishes nothing", p.Merged, branch)
+	}
+	if pr.Number != p.PullRequest || pr.Head != p.Head {
+		return Result{}, fmt.Errorf("%s merged pull request #%d at %s, not the planned #%d at %s", p.Merged, pr.Number, pr.Head, p.PullRequest, p.Head)
+	}
+	var res Result
+	if p.Tag != "" {
+		if res, err = release(ctx, gh, p, assets); err != nil {
+			return res, err
+		}
+	}
+	for _, e := range p.Edits {
+		edited, err := editNotes(ctx, gh, e)
+		if err != nil {
+			return res, err
+		}
+		res.Edited = append(res.Edited, edited)
+	}
+	return res, nil
+}
+
+// editNotes replaces a published release's notes. It never touches the tag or the assets.
+func editNotes(ctx context.Context, gh *GitHub, e plan.Edit) (Edited, error) {
+	release, err := gh.ReleaseByTag(ctx, e.Tag)
+	if err != nil {
+		return Edited{}, err
+	}
+	if release == nil || release.Draft {
+		return Edited{}, fmt.Errorf("%s has no published release whose notes %s could edit", e.Tag, e.File)
+	}
+	if normalize(release.Body) == normalize(e.Notes) {
+		return Edited{Tag: e.Tag, URL: release.HTMLURL}, nil
+	}
+	if err := gh.UpdateNotes(ctx, release.ID, e.Notes); err != nil {
+		return Edited{}, err
+	}
+	return Edited{Tag: e.Tag, URL: release.HTMLURL, Changed: true}, nil
+}
+
+// release creates the tag on the release commit and publishes the release, verifying
+// every remote fact first. A retry after a successful publication makes no writes.
+func release(ctx context.Context, gh *GitHub, p plan.Plan, assets []File) (Result, error) {
+	commit := p.Commit
+	if !commitSHA.MatchString(commit) {
+		return Result{}, fmt.Errorf("the plan's release commit %q is not a full commit SHA", commit)
+	}
+	if strings.TrimSpace(p.Notes) == "" {
+		return Result{}, fmt.Errorf("the plan has no release notes")
 	}
 
 	// Refuse to act on a stale plan: the tags seen at planning must be the tags that exist now.
@@ -122,26 +180,29 @@ func Publish(ctx context.Context, gh *GitHub, p plan.Plan, commit, branch string
 		return Result{}, err
 	}
 	if existing != "" && existing != commit {
-		return Result{}, fmt.Errorf("%s already points to %s, not the approved %s", p.Tag, existing, commit)
+		return Result{}, fmt.Errorf("%s already points to %s, not the release commit %s", p.Tag, existing, commit)
 	}
 
 	release, err := gh.ReleaseByTag(ctx, p.Tag)
 	if err != nil {
 		return Result{}, err
 	}
-	if release != nil && (release.Name != p.Tag || normalize(release.Body) != normalize(p.Notes) || release.Prerelease != p.Prerelease) {
+	// Notes are editable after publication, so only a draft's must still be the plan's.
+	changed := release != nil && normalize(release.Body) != normalize(p.Notes)
+	if release != nil && (release.Name != p.Tag || changed && release.Draft || release.Prerelease != p.Prerelease) {
 		return Result{}, fmt.Errorf("an existing %s release differs from the approved notes; resolve it by hand", p.Tag)
 	}
 	if release != nil && release.Draft && existing == "" && release.TargetCommitish != commit {
 		// Publishing this draft would create the tag on its own target, not the approved commit.
-		return Result{}, fmt.Errorf("an existing %s draft targets %s, not the approved %s; delete the draft and retry", p.Tag, release.TargetCommitish, commit)
+		return Result{}, fmt.Errorf("an existing %s draft targets %s, not the release commit %s; delete the draft and retry", p.Tag, release.TargetCommitish, commit)
 	}
 	if release != nil && !release.Draft {
-		// A published release is immutable; accept it only if it is exactly what was approved.
+		// A published release's tag and assets are immutable; accept it only if they are
+		// exactly what was approved. Different notes are a later approved edit, so keep them.
 		if err := verifyAssets(ctx, gh, release, assets); err != nil {
 			return Result{}, fmt.Errorf("%s is already published, but %v", p.Tag, err)
 		}
-		return Result{URL: release.HTMLURL, AlreadyPublished: true}, verifyTag(ctx, gh, p.Tag, commit)
+		return Result{URL: release.HTMLURL, AlreadyPublished: true, NotesChanged: changed}, verifyTag(ctx, gh, p.Tag, commit)
 	}
 
 	switch {
@@ -223,7 +284,7 @@ func verifyTag(ctx context.Context, gh *GitHub, tag, commit string) error {
 		return err
 	}
 	if tagged != commit {
-		return fmt.Errorf("%s does not point to the approved commit after publication", tag)
+		return fmt.Errorf("%s does not point to the release commit after publication", tag)
 	}
 	return nil
 }
@@ -231,4 +292,18 @@ func verifyTag(ctx context.Context, gh *GitHub, tag, commit string) error {
 // GitHub may normalize line endings and trailing whitespace in a release body.
 func normalize(s string) string {
 	return strings.TrimRight(strings.ReplaceAll(s, "\r\n", "\n"), " \t\n")
+}
+
+// VerifyAttestations checks, with the GitHub CLI, that each asset in dir has a build
+// attestation from repository, signed on a GitHub-hosted runner by its workflow at the
+// path workflow, such as .github/workflows/release-planner.yml.
+func VerifyAttestations(ctx context.Context, dir string, assets []File, repository, workflow string) error {
+	for _, a := range assets {
+		cmd := exec.CommandContext(ctx, "gh", "attestation", "verify", filepath.Join(dir, a.Name),
+			"--repo", repository, "--signer-workflow", repository+"/"+workflow, "--deny-self-hosted-runners")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("%s has no build attestation from %s in %s: %v\n%s", a.Name, workflow, repository, err, strings.TrimSpace(string(out)))
+		}
+	}
+	return nil
 }

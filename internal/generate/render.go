@@ -10,6 +10,7 @@ import (
 	"text/template"
 
 	"github.com/fabricahq/release-planner/internal/config"
+	"github.com/fabricahq/release-planner/internal/publish"
 	"github.com/fabricahq/release-planner/internal/semver"
 )
 
@@ -19,19 +20,22 @@ const Module = "github.com/fabricahq/release-planner/cmd/release-planner"
 // Actions pins every third-party action the workflow uses to a reviewed commit.
 var Actions = struct {
 	Checkout, SetupGo, SetupNode, SetupPython, UploadArtifact, DownloadArtifact string
+	AttestBuildProvenance, CreateGitHubAppToken                                 string
 }{
-	Checkout:         "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1",
-	SetupGo:          "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0",
-	SetupNode:        "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0",
-	SetupPython:      "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0",
-	UploadArtifact:   "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1",
-	DownloadArtifact: "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1",
+	Checkout:              "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1",
+	SetupGo:               "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0",
+	SetupNode:             "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0",
+	SetupPython:           "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0",
+	UploadArtifact:        "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1",
+	DownloadArtifact:      "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1",
+	AttestBuildProvenance: "actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2",
+	CreateGitHubAppToken:  "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0",
 }
 
 //go:embed templates
 var templates embed.FS
 
-var parsed = template.Must(template.New("").Option("missingkey=error").Funcs(template.FuncMap{"yamlString": yamlString}).ParseFS(templates, "templates/*.tmpl"))
+var parsed = template.Must(template.New("").Option("missingkey=error").Funcs(template.FuncMap{"yamlString": yamlString, "join": strings.Join}).ParseFS(templates, "templates/*.tmpl"))
 
 // yamlString quotes s as a single-quoted YAML scalar, so any value reads back unchanged.
 func yamlString(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
@@ -51,6 +55,10 @@ type data struct {
 	Install string
 	// StartsBeforeOne is true when the first release is 0.x, so the policy needs pre-1.0 rules.
 	StartsBeforeOne bool
+	// Needs lists the jobs publication waits for.
+	Needs string
+	// DownstreamDocs explains how to set up the downstream environment.
+	DownstreamDocs string
 }
 
 func render(name string, c config.Config, marker string) string {
@@ -65,9 +73,17 @@ func render(name string, c config.Config, marker string) string {
 			run.WriteString("          " + line)
 		}
 	}
+	needs := []string{"validate"}
+	if c.ReleaseChecks.Enabled() {
+		needs = append(needs, "release-checks")
+	}
+	if c.ReleaseAssets.Workflow != "" {
+		needs = append(needs, "release-assets", "attest")
+	}
 	d := data{Config: c, Module: Module, Actions: Actions, Marker: marker, ReleaseChecksRun: run.String(),
 		PolicyPath: config.Policy, StyleText: style(c), IsRelease: IsRelease(c.Version), Install: InstallCommand(c.Version),
-		StartsBeforeOne: semver.MustParse(c.FirstVersion).Major == 0}
+		StartsBeforeOne: semver.MustParse(c.FirstVersion).Major == 0, Needs: strings.Join(needs, ", "),
+		DownstreamDocs: publish.DownstreamEnvironmentDocs}
 	if err := parsed.ExecuteTemplate(&b, name, d); err != nil {
 		// Templates are embedded and the config is validated, so this is a programming error.
 		panic(err)

@@ -7,14 +7,11 @@ on:
     paths: ['_releases/v*.md']
   pull_request:
     paths: ['_releases/**', '.release-planner/**', '.github/workflows/release.yml']
+  # Retry a failed publication by naming the commit the release pull request merged as.
   workflow_dispatch:
     inputs:
-      commit:
-        description: 'Approved head SHA from the original failed run summary'
-        required: true
-        type: string
-      base:
-        description: 'Base SHA from the original failed run summary'
+      merged-commit:
+        description: 'Full SHA of the commit the release pull request merged as on main'
         required: true
         type: string
 permissions:
@@ -26,6 +23,7 @@ jobs:
     permissions:
       contents: read
       actions: read # to check the release environment's settings
+      pull-requests: read # to find the merged pull request
     outputs:
       tag: ${{ steps.validate.outputs.tag }}
       commit: ${{ steps.validate.outputs.commit }}
@@ -33,20 +31,26 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-          ref: ${{ inputs.commit || github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.event.pull_request.head.sha || inputs.merged-commit || github.sha }}
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: false
+      # The release commit is the newest commit the release pull request shares with main.
       - name: Validate the release request
         id: validate
         env:
-          EVENT: ${{ github.event_name }}
-          BASE: ${{ inputs.base || github.event.pull_request.base.sha || github.event.before }}
-          HEAD: ${{ inputs.commit || github.event.pull_request.head.sha || github.sha }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          MERGED: ${{ inputs.merged-commit || github.sha }}
           GITHUB_TOKEN: ${{ github.token }}
-        run: go run ./cmd/release-planner validate --ci --event "$EVENT" --base "$BASE" --head "$HEAD" --out "$RUNNER_TEMP/release-plan.json"
+        run: |
+          if [ -n "$HEAD" ]; then
+            go run ./cmd/release-planner validate --ci --base "$BASE" --head "$HEAD" --out "$RUNNER_TEMP/release-plan.json"
+          else
+            go run ./cmd/release-planner validate --ci --merged "$MERGED" --out "$RUNNER_TEMP/release-plan.json"
+          fi
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-plan
@@ -106,8 +110,8 @@ jobs:
         with:
           subject-path: ${{ runner.temp }}/release-assets/SHA256SUMS
 
-  # The only job that can write. It runs the publisher built from the approved commit,
-  # stages the archives on a draft, verifies them, and publishes last.
+  # The only job that can write. It runs the publisher built from the release commit,
+  # tags it, stages the archives on a draft, verifies them, and publishes last.
   publish:
     needs: [validate, release-checks, attest]
     if: needs.validate.outputs.tag != '' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
@@ -132,10 +136,9 @@ jobs:
         with:
           name: release-assets
           path: ${{ runner.temp }}/release-assets
-      - name: Tag the approved commit and publish the release with its binaries
+      - name: Tag the release commit and publish the release with its binaries
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          COMMIT: ${{ needs.validate.outputs.commit }}
         run: |
           chmod +x "$RUNNER_TEMP/bin/release-planner"
-          "$RUNNER_TEMP/bin/release-planner" publish --plan "$RUNNER_TEMP/plan/release-plan.json" --commit "$COMMIT" --branch main --assets "$RUNNER_TEMP/release-assets"
+          "$RUNNER_TEMP/bin/release-planner" publish --plan "$RUNNER_TEMP/plan/release-plan.json" --branch main --assets "$RUNNER_TEMP/release-assets"

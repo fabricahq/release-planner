@@ -19,9 +19,10 @@ Release Planner splits the work. Deterministic code handles the parts that must 
 ## How does it work?
 
 1. You tell your agent "let's release."
-2. The agent runs `release-planner` to list every change since the previous release, applies your release policy to choose the version, and opens a pull request that adds the notes file, such as `_releases/v1.2.0.md`.
-3. You edit the notes in the pull request. Saving edits publishes nothing.
-4. You merge. The generated Release workflow validates the request, runs any release checks you configured, tags the merged commit, and publishes the notes word for word.
+2. The agent runs `release-planner` to list every change since the previous release, applies your release policy to choose the version, and opens a pull request that adds the notes file, such as `_releases/v1.2.0.md`. The release is the commit that pull request starts from.
+3. On the pull request, the generated Release workflow checks the version and the notes, runs any release checks you configured, and builds any files to attach. The pull request's description shows the release's status as it goes.
+4. You edit the notes in the pull request. Saving edits publishes nothing.
+5. You merge. The workflow tags the release commit and publishes the notes word for word, with the files the pull request built.
 
 The tag is created only at the last step, so a version never exists without the notes you approved. [How it works](https://release-planner.fabricahq.com/start-here/how-it-works/) describes the files and the command in more detail.
 
@@ -73,6 +74,7 @@ Before you merge your first release, protect your release branch and create the 
 - [Set up a repository](https://release-planner.fabricahq.com/start-here/set-up/): the full setup, including branch protection and the `release` environment
 - [Make a release](https://release-planner.fabricahq.com/start-here/release/): review the notes, merge, and retry a failed release
 - [Release policy](https://release-planner.fabricahq.com/customize/policy/), [release notes style](https://release-planner.fabricahq.com/customize/release-notes-style/), and [release checks](https://release-planner.fabricahq.com/customize/release-checks/): customize how releases are prepared and checked
+- [Release assets](https://release-planner.fabricahq.com/customize/release-assets/) and [downstream workflows](https://release-planner.fabricahq.com/customize/downstream/): attach built files to each release, and start workflows in other repositories after it
 - [Configuration](https://release-planner.fabricahq.com/customize/configuration/): every setting, the generated files, and upgrading
 - [For agents](https://release-planner.fabricahq.com/for-agents/): every command, file format, and check
 

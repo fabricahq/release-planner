@@ -3,7 +3,7 @@ title: Release checks
 description: Run extra checks on a release before it is published.
 ---
 
-Release checks are optional. They run on the exact commit being released, before anything is tagged. If they fail, nothing is published.
+Release checks are optional. They run on the release commit while the release pull request is open, so a failure shows up in the release status in the pull request description before you approve anything. If they fail, nothing is published. When you merge, the release reuses that result; if the pull request's run can't be reused, for example because you merged before it finished, the checks run again on the same commit first.
 
 ## Do you need them?
 
@@ -28,7 +28,7 @@ release-checks:
     govulncheck ./...
 ```
 
-The script runs on a standard GitHub-hosted Linux runner, without your repository's secrets. Install anything else it needs in the script itself.
+The script runs on a standard GitHub-hosted Linux runner, without your repository's secrets. Install anything else it needs in the script itself. To build files for the release, use [release assets](/customize/release-assets/) instead.
 
 ## Run one of your workflows
 
@@ -39,9 +39,9 @@ release-checks:
   workflow: release-checks.yml
 ```
 
-The release workflow calls it with the commit to check and your repository's secrets. It never receives the token that can publish releases.
+The release workflow calls it with the commit to check and your repository's secrets. It never receives the token that can publish releases. It runs on release pull requests from branches in your repository; a pull request from a fork gets no secrets, so its checks run after the merge instead.
 
-Your workflow must accept a `ref` input and check out that ref. On a retry, the release commit isn't the latest commit, so checking out the default would test the wrong code:
+Your workflow must accept a `ref` input and check out that ref. The release commit is usually not the latest commit, so checking out the default would test the wrong code:
 
 ```yaml
 on:
@@ -59,6 +59,6 @@ jobs:
       - run: make release-checks
 ```
 
-`release-planner install` and `check` fail if the workflow can't be called this way.
+`release-planner install` and `check` fail if the workflow can't be called this way, or if it's `release-planner.yml` itself.
 
 After changing `release-checks`, run `release-planner install` again and commit the result.
