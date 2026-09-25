@@ -26,7 +26,9 @@ schema-version: 1
 
 # Required. The Release Planner version to use, as a release tag.
 # A full commit SHA also works; your workflow then builds Release Planner
-# from source with Go instead of downloading a release.
+# from source with Go instead of downloading a release. Bumping it upgrades the
+# GitHub Actions workflow (.github/workflows/release-planner.yml), the agent guide,
+# and the release checks together; run release-planner install after changing it.
 version: v0.1.0
 
 # The version your first release must use.
