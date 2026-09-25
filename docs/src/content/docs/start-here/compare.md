@@ -3,13 +3,23 @@ title: Release Planner vs. other tools
 description: Which kind of release tool Release Planner is, how it compares with the others of its kind, and who should use something else.
 ---
 
-Release automation tools generally fall into three camps:
+Release automation tools generally fall into three camps. Release Planner is in the second.
 
-| Camp | How the notes get written | Examples |
-| --- | --- | --- |
-| Computed release notes | Generated from commit messages or pull request titles | semantic-release, release-please, git-cliff |
-| Written release notes | Written by a person or an agent, usually in a dedicated release pull request | Changesets, towncrier, **Release Planner** |
-| Build and packaging tools | Left to something else; these build and ship your software | GoReleaser |
+## The three camps
+
+### Computed release notes
+
+Generated from commit messages or pull request titles. Examples: semantic-release, release-please, git-cliff.
+
+### Written release notes
+
+Written by a person or an agent, usually in a dedicated release pull request. Examples: Changesets, towncrier, and **Release Planner**.
+
+### Build and packaging tools
+
+Build and ship your software, and leave the notes to something else. Example: GoReleaser.
+
+## Where Release Planner fits
 
 Release Planner is a written release notes tool, designed agent-first:
 
