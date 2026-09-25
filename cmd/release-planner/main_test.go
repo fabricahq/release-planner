@@ -337,6 +337,7 @@ func TestValidateFailsLocallyAndWarnsInCI(t *testing.T) {
 	}
 
 	summary := filepath.Join(t.TempDir(), "summary")
+	t.Setenv("GITHUB_REPOSITORY", "o/r")
 	t.Setenv("GITHUB_STEP_SUMMARY", summary)
 	t.Setenv("GITHUB_OUTPUT", filepath.Join(t.TempDir(), "output"))
 	planFile := filepath.Join(t.TempDir(), "plan.json")
