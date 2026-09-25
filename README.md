@@ -93,7 +93,7 @@ Everything in `.release-planner/` belongs to you; Release Planner never rewrites
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `schema-version` | required | The format of the file. Currently `1`. |
-| `version` | required | The Release Planner version to use: a release tag, or a full commit SHA. Bumping it upgrades the GitHub Actions workflow (`.github/workflows/release-planner.yml`), the agent guide, and the release checks together; run `release-planner install` after changing it. |
+| `version` | required | The Release Planner version to use: a release tag, or a full commit SHA. Bumping it upgrades the GitHub Actions workflow (`.github/workflows/release-planner.yml`) and the agent guide together; run `release-planner install` after changing it. |
 | `first-version` | `v0.1.0` | The version your first release must use. |
 | `release-checks` | none | Optional release-only checks. See [Release checks](#release-checks). |
 | `exclude-rules` | none | Release notes rules to skip, by ID, such as `[no-long-heading]`. See [Release notes rules](#release-notes-rules). |
