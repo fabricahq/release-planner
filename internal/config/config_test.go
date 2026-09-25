@@ -12,7 +12,7 @@ func TestParseFillsDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.FirstVersion != "v0.1.0" || c.NotesDir != "releases" || c.Branch != "main" || c.Validate.Run != "make test" || c.ReleaseNotesStyle.Set() || c.Style != "" {
+	if c.FirstVersion != "v0.1.0" || c.NotesDir != "_releases" || c.Branch != "main" || c.Validate.Run != "make test" || c.ReleaseNotesStyle.Set() || c.Style != "" {
 		t.Fatalf("%+v", c)
 	}
 }

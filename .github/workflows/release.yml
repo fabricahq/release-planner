@@ -4,9 +4,9 @@ name: Release
 on:
   push:
     branches: [main]
-    paths: ['releases/v*.md']
+    paths: ['_releases/v*.md']
   pull_request:
-    paths: ['releases/**', '.release-planner/**', '.github/workflows/release.yml']
+    paths: ['_releases/**', '.release-planner/**', '.github/workflows/release.yml']
   workflow_dispatch:
     inputs:
       commit:

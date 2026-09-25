@@ -165,7 +165,7 @@ func TestWorkflowRendersTheConfiguredSettings(t *testing.T) {
 		"RELEASE_PLANNER_VERSION: v0.2.0\n",
 		"gh attestation verify SHA256SUMS --repo fabricahq/release-planner\n",
 		"run: release-planner check\n",
-		"paths: ['releases/v*.md']\n",
+		"paths: ['_releases/v*.md']\n",
 		"go-version: '1.27.x'",
 		"          go install example.com/tool@v1\n          tool check\n",
 		"environment: release",

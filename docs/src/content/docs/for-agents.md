@@ -49,7 +49,7 @@ Run every command from the repository root, with the pinned version installed. E
 | `.release-planner/config.yml` | Repository | Settings. See [Configuration](/customize/configuration/). |
 | `.release-planner/policy.md` | Repository | What users depend on, how to choose versions, who reads the notes, and what to always include or leave out. Wins over the guide where they differ. |
 | The file `release-notes-style.file` names, conventionally `.release-planner/release-notes-style.md` | Repository, optional | Appends to or replaces the default release notes style, as `release-notes-style.mode` says. |
-| `releases/v<version>.md` | Release pull request | The notes for one release, published word for word. |
+| `_releases/v<version>.md` | Release pull request | The notes for one release, published word for word. |
 | `.github/workflows/release-planner.yml` | Generated | The release workflow. |
 | `.agents/skills/release/SKILL.md`, `.claude/skills/release/SKILL.md` | Generated | Tell agents to run `guide` when asked to release. |
 | `AGENTS.md`, between the `release-planner:begin` and `release-planner:end` markers | Generated | The same pointer, for agents that read `AGENTS.md`. |
@@ -94,7 +94,7 @@ To look up handles, `inventory` uses `GITHUB_TOKEN`, `GH_TOKEN`, or the GitHub C
 
 ## Drafts
 
-`draft` does everything about the notes that can be worked out deterministically, so the agent spends its effort on judgment: what the changes mean, how to group them, and how to say it. `draft <version>` checks the version, then creates `releases/<version>.md` containing:
+`draft` does everything about the notes that can be worked out deterministically, so the agent spends its effort on judgment: what the changes mean, how to group them, and how to say it. `draft <version>` checks the version, then creates `_releases/<version>.md` containing:
 
 1. A placeholder opening line starting `TODO: Open with one or two sentences`.
 2. `## Pull Requests`: each pull request merged into the release branch and each direct commit, in merge order, as `- <title> by @<handle> in #<number>`, or `- <title> in <commit URL>` for a direct commit.
@@ -123,7 +123,7 @@ A range with no notes change produces a plan with an empty `tag`, meaning no rel
 
 ## The release workflow
 
-The generated workflow runs when a pull request changes `releases/`, `.release-planner/`, or the workflow itself, and when a notes file lands on the release branch.
+The generated workflow runs when a pull request changes `_releases/`, `.release-planner/`, or the workflow itself, and when a notes file lands on the release branch.
 
 1. **plan** (read-only): installs the pinned Release Planner, checks out the head with full history, runs `check`, then `plan`. For a release tag pin, installing downloads the release, verifies the build attestation of its `SHA256SUMS`, and checks the archive against it; a commit SHA pin is built from source with Go. For a release request, it also checks the `release` environment's settings and warns, without failing, if the environment doesn't exist yet, lets any branch deploy, doesn't let the release branch deploy, or requires reviewers. On a pull request, this is the whole run: it validates the request without publishing.
 2. **validate** (optional): runs the repository's [release checks](/customize/release-checks/) on the planned commit.

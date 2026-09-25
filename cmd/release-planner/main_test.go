@@ -119,7 +119,7 @@ func TestPlanPullRequestAfterBaseMoved(t *testing.T) {
 	git("add", "-A")
 	git("commit", "-q", "-m", "Adopt Release Planner")
 	git("checkout", "-q", "-b", "release")
-	write("releases/v1.0.0.md", "The first release.\n")
+	write("_releases/v1.0.0.md", "The first release.\n")
 	git("add", "-A")
 	git("commit", "-q", "-m", "Release v1.0.0")
 	head := git("rev-parse", "HEAD")
@@ -252,10 +252,10 @@ func TestDraftPrintsLookupWarnings(t *testing.T) {
 	git("commit", "-q", "-m", "feat: add login (#7)")
 
 	code, out, errOut := cli(t, "draft", "--dir", dir, "v1.0.0")
-	if code != 0 || !strings.Contains(out, "created releases/v1.0.0.md\nwarning: no author for pull request #7") {
+	if code != 0 || !strings.Contains(out, "created _releases/v1.0.0.md\nwarning: no author for pull request #7") {
 		t.Fatalf("%d %q %s", code, out, errOut)
 	}
-	if data, _ := os.ReadFile(filepath.Join(dir, "releases/v1.0.0.md")); !strings.Contains(string(data), "- feat: add login in #7\n") {
+	if data, _ := os.ReadFile(filepath.Join(dir, "_releases/v1.0.0.md")); !strings.Contains(string(data), "- feat: add login in #7\n") {
 		t.Fatalf("notes:\n%s", data)
 	}
 }
@@ -304,7 +304,7 @@ func TestPlanWarnsAboutAnUnprotectedReleaseEnvironment(t *testing.T) {
 	git("add", "-A")
 	git("commit", "-q", "-m", "Adopt Release Planner")
 	base := git("rev-parse", "HEAD")
-	write("releases/v1.0.0.md", "The first release.\n")
+	write("_releases/v1.0.0.md", "The first release.\n")
 	git("add", "-A")
 	git("commit", "-q", "-m", "Release v1.0.0")
 

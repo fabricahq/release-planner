@@ -18,17 +18,17 @@ Everything that controls how your releases work lives in one folder at the root 
 
 You write these files, and Release Planner never changes them. See [Customize](/customize/policy/) for what goes in each one.
 
-## Your releases: `releases/`
+## Your releases: `_releases/`
 
-Every release is one Markdown file in the `releases/` folder, named for its version:
+Every release is one Markdown file in the `_releases/` folder, named for its version:
 
 ```text
-releases/
+_releases/
   v1.0.0.md
   v1.1.0.md
 ```
 
-When your agent prepares a release, its pull request adds the next file, such as `releases/v1.2.0.md`. That file is the release: its contents become the release notes on GitHub, word for word, and its name sets the version. To change the notes, edit the file in the pull request. After the release, the file stays in the folder as a record of what you published.
+When your agent prepares a release, its pull request adds the next file, such as `_releases/v1.2.0.md`. That file is the release: its contents become the release notes on GitHub, word for word, and its name sets the version. To change the notes, edit the file in the pull request. After the release, the file stays in the folder as a record of what you published.
 
 ## The `release-planner` command
 

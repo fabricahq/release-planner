@@ -22,7 +22,7 @@ Agents are good at the tedious part: reading every commit and pull request since
 
 1. **You tell your agent "let's release."**
 2. **The agent works out the next release.** It runs `release-planner guide` for the procedure and `release-planner inventory` for every change since the previous release and the candidate versions. Then it applies your release policy and picks the version.
-3. **The agent opens a release PR.** `release-planner draft` creates `releases/v<version>.md` with the raw material: every pull request with its author, new contributors, and the closing link. The agent writes the notes in your release notes style and explains its choice of version in the PR.
+3. **The agent opens a release PR.** `release-planner draft` creates `_releases/v<version>.md` with the raw material: every pull request with its author, new contributors, and the closing link. The agent writes the notes in your release notes style and explains its choice of version in the PR.
 4. **You edit the notes and merge.** Change anything you like. Saving edits publishes nothing.
 5. **Merging publishes the release.** The generated Release workflow checks the request, runs any release checks you configured, tags the merged commit, and publishes the notes file word for word as the GitHub release.
 
@@ -76,7 +76,7 @@ From the repository root:
   config.yml                  # you write it: version pin and settings
   policy.md                   # you write it: versioning, audience, always and never
   release-notes-style.md      # optional, if config.yml names it: how to write the notes
-releases/
+_releases/
   v1.0.0.md                   # the release notes, one file per release
 .github/workflows/release-planner.yml   # generated
 .agents/skills/release/SKILL.md         # generated
@@ -97,7 +97,7 @@ Everything in `.release-planner/` belongs to you; Release Planner never rewrites
 | `first-version` | `v0.1.0` | The version your first release must use. |
 | `validate` | none | Optional release-only checks. See [Release checks](#release-checks). |
 | `release-notes-style` | none | Your own release notes style: `file`, the markdown file that holds it, and `mode`, `append` or `replace`. See [Release notes style](#release-notes-style). |
-| `notes-dir` | `releases` | Where the release notes files live. |
+| `notes-dir` | `_releases` | Where the release notes files live. |
 | `branch` | `main` | The branch whose notes changes publish releases. |
 
 ### Release checks
