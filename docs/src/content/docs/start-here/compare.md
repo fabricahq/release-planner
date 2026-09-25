@@ -3,12 +3,12 @@ title: Release Planner vs. other tools
 description: Which kind of release tool Release Planner is, how it compares with the others of its kind, and who should use something else.
 ---
 
-Release tools fall into two camps:
+There are a _lot_ of release automation tools available, and they generally fall into two camps:
 
-- **Generated notes.** semantic-release, release-please, git-cliff and GitHub's generated release notes build notes from commit messages or pull request titles. The notes are a list of changes, and they're only as good as everyone's commit messages and labels.
-- **Written notes.** Changesets and towncrier have people write the notes. Each pull request adds a short note, and the tool collects them into the release.
+- **Computed release notes.** These tools deterministically generate release notes as a list of changes from commit messages or pull request titles. Example tools include semantic-release, release-please, git-cliff and GitHub's generated release notes.
+- **Written release notes.** With these tools, the humans write the notes. Humans review a prepared note in a pull request, and then merge the pull request to kick off the release. Example tools include changesets and towncrier.
 
-Release Planner is in the written-notes camp. The difference is who writes the notes, and when.
+Release Planner is in the **written release notes** camp. The difference is who writes the notes, and when.
 
 ## How it's different
 
