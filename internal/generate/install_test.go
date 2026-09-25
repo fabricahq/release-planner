@@ -654,6 +654,11 @@ func TestWorkflowCombinations(t *testing.T) {
 					}
 				}
 			}
+			// A manual retry checks out the workflow's own commit, so check matches the Release
+			// Planner version that runs even when the merged commit pins an older one.
+			if ref := jobs["validate"].Steps[0].With["ref"]; ref != "${{ github.event.pull_request.head.sha || github.sha }}" {
+				t.Errorf("validate checks out %q", ref)
+			}
 			// A job after publish runs even when the pull request's build was reused and its jobs
 			// skipped, so its condition names a status function and GitHub adds no success().
 			for id, j := range jobs {

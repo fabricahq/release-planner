@@ -69,7 +69,10 @@ jobs:
         with:
           # Version ordering and the release commit need the full history and tags.
           fetch-depth: 0
-          ref: ${{"{{"}} github.event.pull_request.head.sha || inputs.merged-commit || github.sha {{"}}"}}
+          # A manual retry checks out the workflow's own commit, not the merged one, so check compares
+          # the generated files with the Release Planner version that runs, even after an upgrade;
+          # validate reads the merged commit from the history.
+          ref: ${{"{{"}} github.event.pull_request.head.sha || github.sha {{"}}"}}
           persist-credentials: false
 {{- template "install" .}}
       - name: Check the generated release files
