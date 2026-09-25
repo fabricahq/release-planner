@@ -259,11 +259,20 @@ func planInstall(root string, c config.Config, force bool) ([]write, Problems, e
 		writes = append(writes, write{change: change, content: content})
 	}
 
-	if c.ReleaseChecks.Workflow != "" {
-		if problem, err := callableWorkflow(root, c.ReleaseChecks.Workflow); err != nil {
+	for _, called := range []struct {
+		key, workflow string
+		inputs        []string
+	}{
+		{"release-checks.workflow", c.ReleaseChecks.Workflow, []string{"ref"}},
+		{"release-assets.workflow", c.ReleaseAssets.Workflow, []string{"ref", "tag", "version"}},
+	} {
+		if called.workflow == "" {
+			continue
+		}
+		if problem, err := callableWorkflow(root, called.key, called.workflow, called.inputs); err != nil {
 			return nil, nil, err
 		} else if problem != "" {
-			problems = append(problems, Problem{".github/workflows/" + c.ReleaseChecks.Workflow, problem})
+			problems = append(problems, Problem{".github/workflows/" + called.workflow, problem})
 		}
 	}
 
@@ -277,11 +286,12 @@ func planInstall(root string, c config.Config, force bool) ([]write, Problems, e
 	return writes, problems, nil
 }
 
-// callableWorkflow checks that release-checks.workflow can be called with the commit to check.
-func callableWorkflow(root, name string) (string, error) {
+// callableWorkflow checks that the workflow the config key names can be called with the
+// string inputs the Release workflow passes, and needs no others.
+func callableWorkflow(root, key, name string, want []string) (string, error) {
 	data, ok, err := readFile(root, ".github/workflows/"+name)
 	if err != nil || !ok {
-		return "missing; release-checks.workflow in " + config.File + " names it", err
+		return "missing; " + key + " in " + config.File + " names it", err
 	}
 	var wf struct {
 		On any `yaml:"on"`
@@ -289,7 +299,10 @@ func callableWorkflow(root, name string) (string, error) {
 	if err := yaml.Unmarshal([]byte(data), &wf); err != nil {
 		return "", fmt.Errorf(".github/workflows/%s: %v", name, err)
 	}
-	const need = "add a workflow_call trigger with a string input named ref, and check out that ref"
+	need := "add a workflow_call trigger with a string input named ref, and check out that ref"
+	if len(want) > 1 {
+		need = fmt.Sprintf("add a workflow_call trigger with string inputs named %s, and %s, and check out ref", strings.Join(want[:len(want)-1], ", "), want[len(want)-1])
+	}
 	on, _ := wf.On.(map[string]any)
 	call, found := on["workflow_call"]
 	if !found {
@@ -297,17 +310,19 @@ func callableWorkflow(root, name string) (string, error) {
 	}
 	callMap, _ := call.(map[string]any)
 	inputs, _ := callMap["inputs"].(map[string]any)
-	ref, ok := inputs["ref"]
-	if !ok {
-		return "has no ref input, so it cannot check the release commit; " + need, nil
-	}
-	if refMap, _ := ref.(map[string]any); refMap["type"] != "string" {
-		return "declares ref without type: string, but the Release workflow passes a commit SHA; " + need, nil
+	for _, input := range want {
+		spec, ok := inputs[input]
+		if !ok {
+			return fmt.Sprintf("has no %s input, but the Release workflow passes it; %s", input, need), nil
+		}
+		if specMap, _ := spec.(map[string]any); specMap["type"] != "string" {
+			return fmt.Sprintf("declares %s without type: string, but the Release workflow passes a string; %s", input, need), nil
+		}
 	}
 	var extra []string
 	for name, input := range inputs {
 		spec, _ := input.(map[string]any)
-		if _, hasDefault := spec["default"]; name != "ref" && spec["required"] == true && !hasDefault {
+		if _, hasDefault := spec["default"]; !slices.Contains(want, name) && spec["required"] == true && !hasDefault {
 			extra = append(extra, name)
 		}
 	}

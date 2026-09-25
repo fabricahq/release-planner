@@ -2,6 +2,7 @@ package generate
 
 import (
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -169,11 +170,13 @@ func TestWorkflowRendersTheConfiguredSettings(t *testing.T) {
 		"go-version: '1.27.x'",
 		"          go install example.com/tool@v1\n          tool check\n",
 		"environment: release",
-		"actions: read # to check the release environment's settings\n",
-		"GITHUB_TOKEN: ${{ github.token }}\n        run: release-planner validate --ci",
-		"  release-checks:\n    needs: validate\n",
+		"actions: read # to check the environments' settings and find the pull request's run\n",
+		`release-planner validate --ci --base "$BASE" --head "$HEAD" --head-repository "$HEAD_REPOSITORY"`,
+		`release-planner validate --ci --merged "$MERGED"`,
+		"  release-checks:\n    needs: validate\n    if: needs.validate.outputs.build == 'true'\n",
 		"needs: [validate, release-checks]\n",
 		"${{ needs.validate.outputs.commit }}",
+		"merged-commit:",
 	} {
 		if !strings.Contains(wf, want) {
 			t.Errorf("workflow lacks %q", want)
@@ -351,7 +354,7 @@ func TestReleaseChecksAcceptOnlyCallableWorkflows(t *testing.T) {
 		t.Fatal(err)
 	}
 	wf := read(t, root, WorkflowPath)
-	if strings.Contains(wf, "release-checks:") || !strings.Contains(wf, "needs: [validate]\n") {
+	if strings.Contains(wf, "release-checks:") || !strings.Contains(wf, "needs: [validate]\n") || strings.Contains(wf, "  attest:") {
 		t.Errorf("no checks configured, but the workflow runs them:\n%s", wf)
 	}
 
@@ -366,7 +369,7 @@ func TestReleaseChecksAcceptOnlyCallableWorkflows(t *testing.T) {
 
 	put(t, root, ".github/workflows/ci.yml", "on:\n  workflow_call:\n")
 	_, err = Install(root, withCI, false)
-	problemFor(t, err, ".github/workflows/ci.yml", "no ref input")
+	problemFor(t, err, ".github/workflows/ci.yml", "has no ref input")
 
 	put(t, root, ".github/workflows/ci.yml", "on:\n  workflow_call:\n    inputs:\n      ref:\n        type: boolean\n")
 	_, err = Install(root, withCI, false)
@@ -403,5 +406,228 @@ func TestCommitPinBuildsFromSource(t *testing.T) {
 	}
 	if !strings.Contains(read(t, root, AgentsPath), "go install github.com/fabricahq/release-planner/cmd/release-planner@"+sha) {
 		t.Error("AGENTS.md lacks the source install command")
+	}
+}
+
+func TestReleaseAssetsNeedsTheReleaseInputs(t *testing.T) {
+	c, err := config.Parse([]byte("schema-version: 1\nversion: v0.2.0\nrelease-assets:\n  workflow: build.yml\n"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	_, err = Install(root, c, false)
+	problemFor(t, err, ".github/workflows/build.yml", "missing; release-assets.workflow")
+
+	put(t, root, ".github/workflows/build.yml", "on:\n  workflow_call:\n    inputs:\n      ref:\n        type: string\n      tag:\n        type: string\n")
+	_, err = Install(root, c, false)
+	problemFor(t, err, ".github/workflows/build.yml", "has no version input, but the Release workflow passes it; add a workflow_call trigger with string inputs named ref, tag, and version")
+
+	put(t, root, ".github/workflows/build.yml", "on:\n  workflow_call:\n    inputs:\n      ref:\n        type: string\n      tag:\n        type: number\n      version:\n        type: string\n")
+	_, err = Install(root, c, false)
+	problemFor(t, err, ".github/workflows/build.yml", "declares tag without type: string")
+
+	put(t, root, ".github/workflows/build.yml", buildWorkflow)
+	if _, err := Install(root, c, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := Check(root, c); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// buildWorkflow and checksWorkflow are minimal workflows the Release workflow can call.
+const (
+	buildWorkflow = `name: Build release
+on:
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        required: true
+      tag:
+        type: string
+        required: true
+      version:
+        type: string
+        required: true
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - run: mkdir dist && echo "$VERSION" > dist/version.txt
+        env:
+          VERSION: ${{ inputs.version }}
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-assets
+          path: dist/
+`
+	checksWorkflow = `name: Release checks
+on:
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - run: make release-checks
+`
+)
+
+// combinations are the configurations the generated workflow must handle, by name.
+var combinations = map[string]string{
+	"plain":             "",
+	"checks-script":     "release-checks:\n  go: '1.27.x'\n  run: go test ./...\n",
+	"checks-workflow":   "release-checks:\n  workflow: release-checks.yml\n",
+	"assets":            "release-assets:\n  workflow: build-release.yml\n",
+	"downstream":        "downstream:\n  - repository: fabricahq/homebrew-tap\n    workflow: update-code-rules.yml\n",
+	"all":               "release-checks:\n  workflow: release-checks.yml\nrelease-assets:\n  workflow: build-release.yml\ndownstream:\n  - repository: fabricahq/homebrew-tap\n    workflow: update-code-rules.yml\n  - repository: fabricahq/scoop-bucket\n    workflow: update.yml\n",
+	"script-and-assets": "release-checks:\n  run: make smoke\nrelease-assets:\n  workflow: build-release.yml\n",
+}
+
+type job struct {
+	Needs       any               `yaml:"needs"`
+	If          string            `yaml:"if"`
+	Uses        string            `yaml:"uses"`
+	Secrets     any               `yaml:"secrets"`
+	Environment string            `yaml:"environment"`
+	Permissions map[string]string `yaml:"permissions"`
+	Steps       []struct {
+		Uses string            `yaml:"uses"`
+		If   string            `yaml:"if"`
+		With map[string]string `yaml:"with"`
+		Run  string            `yaml:"run"`
+	} `yaml:"steps"`
+}
+
+// installCombination renders the workflow for a combination, with the workflows it calls.
+func installCombination(t *testing.T, root, extra string) map[string]job {
+	t.Helper()
+	c, err := config.Parse([]byte("schema-version: 1\nversion: v0.4.0\n"+extra), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	put(t, root, ".github/workflows/build-release.yml", buildWorkflow)
+	put(t, root, ".github/workflows/release-checks.yml", checksWorkflow)
+	if _, err := Install(root, c, false); err != nil {
+		t.Fatal(err)
+	}
+	var wf struct {
+		Jobs map[string]job `yaml:"jobs"`
+	}
+	if err := yaml.Unmarshal([]byte(read(t, root, WorkflowPath)), &wf); err != nil {
+		t.Fatal(err)
+	}
+	return wf.Jobs
+}
+
+func TestWorkflowCombinations(t *testing.T) {
+	for name, extra := range combinations {
+		t.Run(name, func(t *testing.T) {
+			jobs := installCombination(t, t.TempDir(), extra)
+			checks := strings.Contains(extra, "release-checks")
+			assets := strings.Contains(extra, "release-assets")
+			downstream := strings.Contains(extra, "downstream")
+			want := []string{"validate", "publish", "report"}
+			if checks {
+				want = append(want, "release-checks")
+			}
+			if assets {
+				want = append(want, "release-assets", "attest")
+			}
+			if downstream {
+				want = append(want, "downstream")
+			}
+			var got []string
+			for id := range jobs {
+				got = append(got, id)
+			}
+			slices.Sort(got)
+			slices.Sort(want)
+			if !slices.Equal(got, want) {
+				t.Fatalf("jobs %v, want %v", got, want)
+			}
+
+			// Only publish can write to the repository, only after the merge, in the release environment.
+			for id, j := range jobs {
+				if j.Permissions["contents"] == "write" && id != "publish" {
+					t.Errorf("%s can write contents", id)
+				}
+				if j.Permissions["id-token"] == "write" && id != "attest" {
+					t.Errorf("%s can mint OIDC tokens", id)
+				}
+			}
+			publish := jobs["publish"]
+			if publish.Environment != "release" || !strings.Contains(publish.If, "github.event_name != 'pull_request'") || !strings.Contains(publish.If, "!contains(needs.*.result, 'failure')") {
+				t.Errorf("publish: %+v", publish)
+			}
+			wantNeeds := []any{"validate"}
+			for _, id := range []string{"release-checks", "release-assets", "attest"} {
+				if _, ok := jobs[id]; ok {
+					wantNeeds = append(wantNeeds, id)
+				}
+			}
+			if !slices.Equal(publish.Needs.([]any), wantNeeds) {
+				t.Errorf("publish needs %v, want %v", publish.Needs, wantNeeds)
+			}
+			run := publish.Steps[len(publish.Steps)-1].Run
+			if assets != strings.Contains(run, "--assets \"$RUNNER_TEMP/release-assets\" --signer-workflow .github/workflows/release-planner.yml") || !strings.Contains(run, "--built-plan") {
+				t.Errorf("publish runs %q", run)
+			}
+			if assets != (publish.Permissions["attestations"] == "read") {
+				t.Errorf("publish permissions %v", publish.Permissions)
+			}
+			for _, step := range publish.Steps {
+				if step.With["run-id"] != "" && (step.With["run-id"] != "${{ needs.validate.outputs.build-run }}" || step.If != "needs.validate.outputs.tag != ''") {
+					t.Errorf("publish downloads from %+v", step)
+				}
+			}
+
+			// Checks and builds run only when validate says this run builds the release.
+			for _, id := range []string{"release-checks", "release-assets"} {
+				if j, ok := jobs[id]; ok && j.If != "needs.validate.outputs.build == 'true'" {
+					t.Errorf("%s runs if %q", id, j.If)
+				}
+			}
+			if assets {
+				build := jobs["release-assets"]
+				if build.Uses != "./.github/workflows/build-release.yml" || build.Secrets != nil || !maps.Equal(build.Permissions, map[string]string{"contents": "read"}) {
+					t.Errorf("release-assets: %+v", build)
+				}
+				attest := jobs["attest"]
+				if !maps.Equal(attest.Permissions, map[string]string{"contents": "read", "id-token": "write", "attestations": "write"}) ||
+					!strings.HasPrefix(attest.Steps[1].Uses, "actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8") {
+					t.Errorf("attest: %+v", attest)
+				}
+			}
+			if downstream {
+				d := jobs["downstream"]
+				if d.Environment != "downstream" || !strings.Contains(d.If, "!contains(needs.validate.outputs.version, '-')") || d.Permissions["contents"] != "read" ||
+					!strings.HasPrefix(d.Steps[1].Uses, "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1") ||
+					d.Steps[1].With["owner"] != "fabricahq" || d.Steps[1].With["permission-actions"] != "write" {
+					t.Errorf("downstream: %+v", d)
+				}
+				last := d.Steps[len(d.Steps)-1].Run
+				if !strings.Contains(last, "--target fabricahq/homebrew-tap:update-code-rules.yml") {
+					t.Errorf("downstream runs %q", last)
+				}
+			}
+			report := jobs["report"]
+			if report.If != "always() && needs.validate.result != 'skipped'" || report.Permissions["pull-requests"] != "write" || len(report.Needs.([]any)) != len(jobs)-1 {
+				t.Errorf("report: %+v", report)
+			}
+		})
 	}
 }
