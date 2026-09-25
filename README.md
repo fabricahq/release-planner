@@ -46,7 +46,7 @@ You need a GitHub repository with GitHub Actions enabled. Run these commands fro
 
 3. Fill in `.release-planner/policy.md`: replace each `TODO:` line with what your users depend on, how you choose versions, and who reads your notes. Until every `TODO:` line is gone, the agent stops and asks instead of guessing a version. [Release policy](https://release-planner.fabricahq.com/customize/policy/) has examples and a prompt you can give your agent to draft it.
 
-4. Generate the release workflow and the agent instructions.
+4. Generate the GitHub Actions workflow that publishes releases, along with the agent instructions.
 
    ```console
    $ release-planner install
