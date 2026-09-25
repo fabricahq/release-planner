@@ -3,7 +3,7 @@ title: Release checks
 description: Run extra checks on a release before it is published.
 ---
 
-Release checks are optional. They run on the release commit while the release pull request is open, so a failure shows up in the pull request's status comment before you approve anything. If they fail, nothing is published. When you merge, the release reuses that result; if the pull request's run can't be reused, for example because you merged before it finished, the checks run again on the same commit first.
+Release checks are optional. They run on the release commit while the release pull request is open, so a failure shows up in the release status in the pull request description before you approve anything. If they fail, nothing is published. When you merge, the release reuses that result; if the pull request's run can't be reused, for example because you merged before it finished, the checks run again on the same commit first.
 
 ## Do you need them?
 

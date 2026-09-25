@@ -5,14 +5,14 @@ description: Ask for a release, review the notes, and merge to publish.
 
 ## Ask for a release
 
-Tell your agent "let's release." It works through the release procedure on its own and opens a pull request titled **Release v&lt;version&gt;**. The pull request adds one file with the release notes, and its description explains:
+Tell your agent "let's release." It works through the release procedure on its own and opens a pull request titled **Release v&lt;version&gt;**. The pull request adds one file with the release notes, and its description has:
 
-- the previous release and the version the agent chose, and why
-- every pull request since the previous release, and where each one appears in the notes, or why it was left out
+- a link to edit the notes on GitHub
+- why the agent chose the version, and any change it left out of the notes that you might expect to see
 
 The agent never merges its own release pull request.
 
-The release workflow comments on the pull request with the release's status: the version, the release commit, the previous release, any [release notes rules](/customize/release-notes-style/#release-notes-rules) the notes break, your [release checks](/customize/release-checks/), and any [release assets](/customize/release-assets/) with their checksums. It updates the same comment on every push.
+The release workflow adds a **Release status** section at the end of the description: the version, the release commit, the previous release, any [release notes rules](/customize/release-notes-style/#release-notes-rules) the notes break, your [release checks](/customize/release-checks/), and any [release assets](/customize/release-assets/) with a link to download them. It updates the section on every push, and leaves the rest of the description alone.
 
 ## Review the notes
 
@@ -30,14 +30,14 @@ The release contains the changes up to the commit the pull request branched from
 
 ## Merge to publish
 
-Merging the pull request is the approval. Wait for the status comment to show the checks passed first. The release workflow then tags the release commit and publishes the notes as the GitHub release, with the files the pull request built, and updates the status comment with a link to it. If you configured [downstream workflows](/customize/downstream/), it starts them next.
+Merging the pull request is the approval. Wait for the release status to show the checks passed first. The release workflow then tags the release commit and publishes the notes as the GitHub release, with the files the pull request built, and updates the release status with a link to it. If you configured [downstream workflows](/customize/downstream/), it starts them next.
 
-If anything fails, the status comment names the failed job and mentions you.
+If anything fails, the release status names the failed job and how to retry, and the workflow comments on the pull request to mention you, since GitHub doesn't notify anyone about an edited description.
 
 ## If publishing fails
 
-Open the run the status comment links to. Once the problem is fixed, use **Re-run failed jobs** on that run. Re-running is always safe: it publishes the same release commit and files, and if the release was already published, the workflow changes nothing.
+Open the run the release status links to. Once the problem is fixed, use **Re-run failed jobs** on that run. Re-running is always safe: it publishes the same release commit and files, and if the release was already published, the workflow changes nothing.
 
 ## Correct published notes
 
-Published tags and files never change, but notes can. Ask your agent to fix the notes of a release, or edit its file, such as `_releases/v1.1.0.md`, in a pull request of its own. The status comment says merging updates that release's notes, and warns if someone edited them on GitHub since, because merging replaces those edits. Merging updates the release on GitHub. Deleting a published release's notes file isn't allowed.
+Published tags and files never change, but notes can. Ask your agent to fix the notes of a release, or edit its file, such as `_releases/v1.1.0.md`, in a pull request of its own. The release status in its description says merging updates that release's notes, and warns if someone edited them on GitHub since, because merging replaces those edits. Merging updates the release on GitHub. Deleting a published release's notes file isn't allowed.

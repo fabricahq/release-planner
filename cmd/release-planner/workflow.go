@@ -39,7 +39,8 @@ func cmdReport(ctx context.Context, args []string, out io.Writer) error {
 		server = "https://github.com"
 	}
 	s := report.Status{Server: server, Repository: *repository, Merged: *merged != "",
-		RunURL: fmt.Sprintf("%s/%s/actions/runs/%s", server, *repository, os.Getenv("GITHUB_RUN_ID"))}
+		RunURL: fmt.Sprintf("%s/%s/actions/runs/%s", server, *repository, os.Getenv("GITHUB_RUN_ID")),
+		RunID:  os.Getenv("GITHUB_RUN_ID"), RunAttempt: os.Getenv("GITHUB_RUN_ATTEMPT")}
 	if err := json.Unmarshal([]byte(*needs), &s.Jobs); err != nil {
 		return fmt.Errorf("--needs: %v", err)
 	}
@@ -56,12 +57,18 @@ func cmdReport(ctx context.Context, args []string, out io.Writer) error {
 		// The assets are missing when they weren't built, which the jobs report.
 		if files, err := publish.ReadAssets(*assetsDir); err == nil {
 			for _, f := range files {
-				s.Assets = append(s.Assets, report.Asset{Name: f.Name, Size: int64(len(f.Data)), Digest: f.Digest})
+				s.Assets = append(s.Assets, report.Asset{Name: f.Name, Size: int64(len(f.Data))})
 			}
 		}
 	}
 
 	gh := api(os.Getenv("GITHUB_TOKEN"), *repository)
+	if len(s.Assets) > 0 && s.Plan != nil && s.Plan.BuildRun != 0 {
+		// Link the zip of the run that built the assets; without its ID, the report just omits the link.
+		if id, err := gh.ArtifactID(ctx, s.Plan.BuildRun, "release-assets"); err == nil && id != 0 {
+			s.Archive = fmt.Sprintf("%s/%s/actions/runs/%d/artifacts/%d", server, *repository, s.Plan.BuildRun, id)
+		}
+	}
 	s.Downstream = downstream
 	switch s.Jobs["downstream"].Result {
 	case "success":
@@ -92,21 +99,29 @@ func cmdReport(ctx context.Context, args []string, out io.Writer) error {
 		}
 		pr, s.MergedBy = merge.Number, merge.MergedBy
 	}
-	body := report.Render(s)
-	if body != "" {
-		if err := appendEnvFile("GITHUB_STEP_SUMMARY", strings.Replace(body, report.Marker+"\n", "", 1)); err != nil {
+	content := report.Render(s)
+	if content != "" {
+		if err := appendEnvFile("GITHUB_STEP_SUMMARY", content); err != nil {
 			return err
 		}
 	}
-	// A new comment waits for a plan in the pull request, so an ordinary change whose settings
+	// A new section waits for a plan in the pull request, so an ordinary change whose settings
 	// fail validation isn't taken for a release. After the merge, every failure is reported.
 	create := s.Merged || s.Plan != nil
-	if err := report.Upsert(ctx, gh, pr, body, create); err != nil {
+	switch changed, err := report.Update(ctx, gh, pr, content, create); {
+	case err != nil:
 		// A fork's pull request gets a read-only token; the step summary still has the report.
-		fmt.Fprintf(out, "::warning title=Release status::Couldn't update the release status comment on #%d: %s\n", pr, escapeData(err.Error()))
-		return nil
+		fmt.Fprintf(out, "::warning title=Release status::Couldn't update the release status in the description of #%d: %s\n", pr, escapeData(err.Error()))
+	case changed:
+		fmt.Fprintf(out, "Updated the release status in the description of #%d.\n", pr)
 	}
-	fmt.Fprintf(out, "Updated the release status on #%d.\n", pr)
+	// Editing a description notifies no one, so a failed release also gets a comment.
+	switch posted, err := report.Notify(ctx, gh, pr, s); {
+	case err != nil:
+		fmt.Fprintf(out, "::warning title=Release status::Couldn't comment on #%d about the failed %s job: %s\n", pr, s.Failed(), escapeData(err.Error()))
+	case posted:
+		fmt.Fprintf(out, "Commented on #%d about the failed %s job.\n", pr, s.Failed())
+	}
 	return nil
 }
 

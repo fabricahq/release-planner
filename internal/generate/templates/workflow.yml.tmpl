@@ -26,8 +26,8 @@
 {{- end -}}
 name: Release
 # A pull request that adds or edits release notes is validated, checked, and built before it
-# merges, and one comment on it reports the release's status. Merging it into {{.Branch}}
-# approves publication, so ordinary changes never create releases.
+# merges, and a section at the end of its description reports the release's status. Merging it
+# into {{.Branch}} approves publication, so ordinary changes never create releases.
 on:
   push:
     branches: [{{yamlString .Branch}}]
@@ -262,16 +262,17 @@ jobs:
         run: release-planner downstream --tag "$TAG" --target "$TARGET"
 {{- end}}
 
-  # Keep one status comment on the release pull request, from its checks through publication,
-  # whatever failed.
+  # Keep the release status section at the end of the release pull request's description up to
+  # date, from its checks through publication, whatever failed. After the merge, a failure also
+  # gets a comment that mentions whoever merged, since editing a description notifies no one.
   report:
     needs: [{{.Needs}}, publish{{if .Downstream}}, downstream{{end}}]
     if: always() && needs.validate.result != 'skipped'
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      actions: read # to download the pull request's run's assets{{if .Downstream}} and read each downstream job's result{{end}}
-      pull-requests: write # to write the status comment
+      actions: read # to download and link the build run's assets{{if .Downstream}} and read each downstream job's result{{end}}
+      pull-requests: write # to edit the description's release status and comment on a failure
     steps:
 {{- template "install" .}}
       # Missing when validation failed; the report says which job did.

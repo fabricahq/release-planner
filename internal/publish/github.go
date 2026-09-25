@@ -541,9 +541,23 @@ func (g *GitHub) CreateComment(ctx context.Context, number int, body string) err
 	return err
 }
 
-// UpdateComment replaces a comment's text.
-func (g *GitHub) UpdateComment(ctx context.Context, id int64, body string) error {
-	_, err := g.do(ctx, http.MethodPatch, fmt.Sprintf("/issues/comments/%d", id), map[string]string{"body": body}, nil)
+// PullRequestBody returns a pull request's description.
+func (g *GitHub) PullRequestBody(ctx context.Context, number int) (string, error) {
+	var pr struct {
+		Body *string `json:"body"`
+	}
+	if _, err := g.do(ctx, http.MethodGet, fmt.Sprintf("/pulls/%d", number), nil, &pr); err != nil {
+		return "", fmt.Errorf("get pull request #%d in %s: %v", number, g.Repository, err)
+	}
+	if pr.Body == nil {
+		return "", nil
+	}
+	return *pr.Body, nil
+}
+
+// UpdatePullRequestBody replaces a pull request's description, open or merged.
+func (g *GitHub) UpdatePullRequestBody(ctx context.Context, number int, body string) error {
+	_, err := g.do(ctx, http.MethodPatch, fmt.Sprintf("/pulls/%d", number), map[string]string{"body": body}, nil)
 	return err
 }
 
@@ -594,6 +608,28 @@ func (g *GitHub) Artifacts(ctx context.Context, run int64) ([]string, error) {
 		target = next
 	}
 	return names, nil
+}
+
+// ArtifactID returns the ID of a workflow run's unexpired artifact with the name, or 0 if it
+// has none.
+func (g *GitHub) ArtifactID(ctx context.Context, run int64, name string) (int64, error) {
+	var page struct {
+		Artifacts []struct {
+			ID      int64  `json:"id"`
+			Name    string `json:"name"`
+			Expired bool   `json:"expired"`
+		} `json:"artifacts"`
+	}
+	query := url.Values{"name": {name}, "per_page": {"100"}}
+	if _, err := g.do(ctx, http.MethodGet, fmt.Sprintf("/actions/runs/%d/artifacts?%s", run, query.Encode()), nil, &page); err != nil {
+		return 0, fmt.Errorf("list the artifacts of run %d in %s: %v", run, g.Repository, err)
+	}
+	for _, a := range page.Artifacts {
+		if a.Name == name && !a.Expired {
+			return a.ID, nil
+		}
+	}
+	return 0, nil
 }
 
 // JobConclusions maps each of a workflow run's jobs, by name, to the conclusion of its
