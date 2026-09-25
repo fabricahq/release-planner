@@ -65,11 +65,21 @@ It prints the release commit, which must be the commit inventory listed changes 
 
 ## 7. Open the pull request
 
-Open a pull request titled `Release <version>`. In its description:
+Open a pull request titled `Release <version>`, with this description and nothing else, such as tool attribution:
 
-- Link to the notes file's editor: `https://github.com/<owner>/<repo>/edit/<branch>/{{.NotesDir}}/<version>.md`.
-- Say that saving edits publishes nothing, and that merging publishes the release.
-- Record the previous release, the release commit, the version you chose and why, and each pull request and commit you left out of the sections above, with why.
+```markdown
+**[✏️ Edit the release notes](https://github.com/<owner>/<repo>/edit/<branch>/{{.NotesDir}}/<version>.md)**
+
+Merging publishes <version> with these notes, and any files this pull request builds. Saving edits publishes nothing.
+
+| Version | Release commit | Previous release |
+| --- | --- | --- |
+| <version> | [`<short SHA>`](https://github.com/<owner>/<repo>/commit/<full SHA>) | <previous version, or "None"> |
+
+<Why this version, in one sentence, such as "Minor: adds the --shout flag.">
+```
+
+If you left a change out of the notes that a reader might expect to see, add one line after that sentence naming it and saying why.
 
 Leave the pull request for the maintainer. Do not merge it. The Release workflow comments on it with the release's status: the release commit, rule findings, release checks, and any assets. If a check or build fails there, tell the maintainer; the fix belongs in a separate pull request.
 
