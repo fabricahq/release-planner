@@ -6,25 +6,29 @@ description: Which kind of release tool Release Planner is, how it compares with
 There are a _lot_ of release automation tools available, and they generally fall into two camps:
 
 - **Computed release notes.** These tools deterministically generate release notes as a list of changes from commit messages or pull request titles. Example tools include semantic-release, release-please, git-cliff and GitHub's generated release notes.
-- **Written release notes.** With these tools, the humans write the notes. Humans review a prepared note in a pull request, and then merge the pull request to kick off the release. Example tools include changesets and towncrier.
+- **Written release notes.** With these tools, the humans write the notes. Humans review a prepared note in a pull request, and then merge the pull request to kick off the release. Example tools include Changesets and towncrier.
 
-Release Planner is in the **written release notes** camp. The difference is who writes the notes, and when.
+Release Planner is in the **written release notes** camp. The difference is who writes the notes, and when. It's also not mutually exclusive with other tools: it can publish your GitHub releases on its own, or work alongside the tools you already use to build and distribute your software.
 
-## How it's different
+## Release Planner vs. semantic-release, release-please, etc.
 
-With Changesets or towncrier, every contributor writes a note in every pull request. With Release Planner, your agent writes the notes once, at release time, from everything that merged. You review them in one pull request.
+Tools like semantic-release and release-please read your commit history, usually written as Conventional Commits, and compute the next version and a changelog from it. git-cliff and GitHub's generated release notes do the same for the notes alone. Because the notes are computed, nobody has to write them. Release Planner is inspired by the problem they solve: nobody wants to assemble a changelog by hand.
 
-- **Nobody has to remember anything.** Contributors don't add note files, follow commit conventions, or label pull requests.
-- **The notes read as one release, not a pile of fragments.** Your agent can combine three pull requests into one feature, leave out internal changes, and explain why a change matters to your users.
-- **You review the whole release at once**, including the version. Your agent picks it from your [release policy](/customize/policy/) and says why.
+Release Planner takes that work away too, but gives the writing to your agent instead of a template. A computed changelog can only repeat what commit messages say, so it's only as good as everyone's discipline in writing them. Release Planner's agent reads the pull requests and their changes, so contributors don't need any convention, and the notes can group related changes, leave out internal ones, and explain what a change means for your users. Because the notes are files in your repository, you can also fix a published release's notes later in a pull request.
 
-Release Planner also:
+Release Planner also separates planning a release from publishing it. The release pull request is the plan: it shows the version and why it was chosen, the notes, the results of your release checks, and the files built for the release. You can review and edit all of it before anything happens. Merging publishes exactly that plan: the same commit, notes, and files, without rebuilding anything. semantic-release publishes as soon as changes merge, and with release-please, files are usually built after the release pull request merges, so you approve the notes but not what ships.
 
-- **Ships exactly what you approved.** Checks and [builds](/customize/release-assets/) run on the release pull request, and merging publishes those same files.
-- **Checks the notes.** [Release notes rules](/customize/release-notes-style/#release-notes-rules) catch common problems, whether your agent or you wrote the text.
-- **Lets you fix notes later.** Edit a published version's notes in a pull request, and the GitHub release updates when it merges.
+## Release Planner vs. Changesets, towncrier, etc.
 
-Already use a build tool like GoReleaser? Keep it, and run it from your [build workflow](/customize/release-assets/).
+Changesets and towncrier have people write the notes. Each pull request adds a short note file, and the tool collects them into the release. The notes come from the people who know each change best, and read far better than a list of commits.
+
+Release Planner also produces written notes, but writes them once, at release time, instead of in every pull request. Contributors don't add note files, so nobody has to remember to. Because your agent sees the whole release at once, the notes read as one release rather than a pile of fragments, and you review them in one place, together with the version, which your agent picks from your [release policy](/customize/policy/) and explains. [Release notes rules](/customize/release-notes-style/#release-notes-rules) then check the result, whether your agent or you wrote the text.
+
+## Release Planner vs. GoReleaser, etc.
+
+Tools like GoReleaser build and package your software: cross-compiled binaries, archives, checksums, and package manager formulas. Release Planner doesn't replace them. It decides what's in a release and writes the notes, and leaves building to your own workflow.
+
+Run GoReleaser, or any build tool, from your [build workflow](/customize/release-assets/) with its own publishing turned off. Release Planner builds the files on the release pull request, attests them, publishes them with the notes when you merge, and then starts any [downstream workflows](/customize/downstream/), such as a Homebrew tap update.
 
 ## Who it's not for
 
