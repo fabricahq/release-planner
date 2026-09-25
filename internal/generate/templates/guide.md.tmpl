@@ -1,6 +1,8 @@
 # Prepare a release (Release Planner {{.Version}})
 
-The maintainer approves a release by merging a pull request that adds `{{.NotesDir}}/v<version>.md`. On merge, the Release workflow validates the request, runs any release checks the repository configured, tags that commit, and publishes the file word for word as the GitHub release. Your job is to open that pull request with accurate notes. You never tag, publish, or merge.
+The maintainer approves a release by merging a pull request that adds `{{.NotesDir}}/v<version>.md` and changes nothing else. The release commit is the newest commit that pull request shares with `{{.Branch}}`: the commit you branch from, unless you later merge `{{.Branch}}` in. The release contains exactly the commits up to it, however `{{.Branch}}` moves on.
+
+On the pull request, the Release workflow validates the request, runs any release checks and builds any release assets on the release commit, and keeps one status comment up to date. Merging tags the release commit and publishes the file word for word as the GitHub release, with the assets the pull request built. Your job is to open that pull request with accurate notes. You never tag, publish, or merge.
 
 Run every `release-planner` command in this guide with version {{.Version}}. If `release-planner version` prints anything else, install it:
 
@@ -16,7 +18,7 @@ Then read the release notes style at the end of this guide.
 
 ## 2. Take the inventory
 
-Fetch `{{.Branch}}` and tags, then run:
+Fetch `{{.Branch}}` and tags, and create your release branch from `origin/{{.Branch}}`. Its tip is the release commit. Then run:
 
 ```sh
 release-planner inventory --head origin/{{.Branch}}
@@ -40,7 +42,7 @@ Choose the version from `candidates` using the policy. With no previous release,
 
 ## 5. Write the notes
 
-Create a release branch and write `{{.NotesDir}}/<version>.md` in one pass, in this order:
+On the release branch, write `{{.NotesDir}}/<version>.md` in one pass, in this order:
 
 1. The sections the style and the policy call for, opening as they say. If they don't ask for an opening, start with the first heading.
 2. `## Pull Requests`: every `entry` line from the inventory, each once, as inventory wrote it, grouped under `###` headings as the style says.
@@ -48,6 +50,8 @@ Create a release branch and write `{{.NotesDir}}/<version>.md` in one pass, in t
 4. The `closing` line. After a previous release, replace `<version>` in it with your version.
 
 Use absolute URLs for links to files and pages, because the notes render on the release page. Pull request numbers such as `#7` link automatically.
+
+Change nothing but notes files in the release pull request. Validation refuses a release pull request that changes anything else; other changes belong in their own pull request.
 
 ## 6. Validate
 
@@ -57,7 +61,7 @@ Commit the notes, then run:
 release-planner validate --base origin/{{.Branch}} --head HEAD
 ```
 
-It checks the version and the notes against the release notes rules, and lists every rule the notes break, with its line; `release-planner validate --rules` describes them. Fix each finding by editing the file in place, commit, and rerun until it passes. Before you push, read the whole file from top to bottom, as a reader would, and cut any implementation detail that doesn't help that reader understand the value or act, unless the style or policy asks for it.
+It prints the release commit, which must be the commit inventory listed changes up to, and checks the version and the notes against the release notes rules, and lists every rule the notes break, with its line; `release-planner validate --rules` describes them. Fix each finding by editing the file in place, commit, and rerun until it passes. Before you push, read the whole file from top to bottom, as a reader would, and cut any implementation detail that doesn't help that reader understand the value or act, unless the style or policy asks for it.
 
 ## 7. Open the pull request
 
@@ -65,21 +69,31 @@ Open a pull request titled `Release <version>`. In its description:
 
 - Link to the notes file's editor: `https://github.com/<owner>/<repo>/edit/<branch>/{{.NotesDir}}/<version>.md`.
 - Say that saving edits publishes nothing, and that merging publishes the release.
-- Record the previous release, the analyzed commit on `{{.Branch}}`, the version you chose and why, and each pull request and commit you left out of the sections above, with why.
+- Record the previous release, the release commit, the version you chose and why, and each pull request and commit you left out of the sections above, with why.
 
-Leave the pull request for the maintainer. Do not merge it.
+Leave the pull request for the maintainer. Do not merge it. The Release workflow comments on it with the release's status: the release commit, rule findings, release checks, and any assets. If a check or build fails there, tell the maintainer; the fix belongs in a separate pull request.
 
 ## 8. Revise on request
 
-The Release workflow validates the pull request on every push. It shows rule findings as warnings, not failures, because the maintainer may break a rule on purpose.
+The Release workflow validates the pull request on every push. The status comment shows rule findings as warnings, not failures, because the maintainer may break a rule on purpose.
 
 When asked to revise, fetch the release branch and keep the maintainer's edits. Edit the notes file in place. Never regenerate it, rewrite it from scratch, or paste one copy over another: that loses edits and leaves stale sections behind.
 
-If `{{.Branch}}` has moved, merge it into the release branch, rerun `inventory`, add the new `entry` lines to the right groups, and update the sections above them. Then validate and read the whole file again. Keep other changes out of the release pull request. You are done when every change through the analyzed commit is in the notes and the pull request's checks pass.
+You don't need to merge `{{.Branch}}` when it moves on: the release commit stays where the pull request branched. Merge `{{.Branch}}` into the release branch only to include newer changes, such as a fix for a failed release check, or when the maintainer asks. That moves the release commit to the new `{{.Branch}}` tip, so rerun the inventory there, add the new `entry` lines to the right groups, and update the sections above them:
+
+```sh
+release-planner inventory --head "$(git merge-base HEAD origin/{{.Branch}})"
+```
+
+Then validate and read the whole file again. Keep other changes out of the release pull request. You are done when every change through the release commit is in the notes and the pull request's checks pass.
+
+## Edit published notes
+
+Published notes can be corrected. Open a pull request that edits only `{{.NotesDir}}/<version>.md` of the published version, and validate it the same way. Merging replaces that release's notes on GitHub; its tag and assets never change. If the status comment warns that the notes were edited on GitHub since they merged, tell the maintainer that merging replaces those edits. Never delete a published version's notes file.
 
 ## Retry a failed release
 
-Read the failed Release run and any existing tag or release before acting. Prefer **Re-run all jobs** on that run. For a manual retry, run the Release workflow on `{{.Branch}}` with the **Base SHA** and **Approved head SHA** from the failed run's summary; never substitute the latest commit. Published tags and releases never move, so fix problems in a new release. If the run failed before tagging, fix the cause in a normal pull request, then correct the untagged notes in a new release pull request, or withdraw the request by deleting its file.
+Read the status comment on the release pull request, the failed Release run, and any existing tag or release before acting. Prefer **Re-run failed jobs** on that run: it publishes the same release commit and files, and skips what already succeeded. For a manual retry, run the Release workflow on `{{.Branch}}` with **merged-commit** set to the full SHA of the commit the release pull request merged as; never another commit. Published tags and assets never change, so fix problems in a new release. If the run failed before tagging, fix the cause in a normal pull request, then correct the untagged notes in a new release pull request, whose release commit then includes the fix, or withdraw the request by deleting its file.
 
 ## Release notes style
 
