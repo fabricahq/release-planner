@@ -2,7 +2,7 @@
 #
 # Release Planner releases itself from the approved commit with the hand-written
 # .github/workflows/release.yml, so it does not run install. This file drives
-# guide, inventory, draft, and plan.
+# guide, inventory, and validate.
 
 schema-version: 1
 version: v0.1.0

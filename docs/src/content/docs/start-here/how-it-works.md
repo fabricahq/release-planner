@@ -41,7 +41,7 @@ The command does three jobs:
   - a short **Releases** section in `AGENTS.md`, and a `release` skill in `.agents/skills/` and `.claude/skills/`, so agents know what to do when you say "let's release"
 
   You don't edit the generated files. To change them, change your settings and run `install` again.
-- **Helps your agent prepare releases.** It gives your agent the release procedure to follow, lists every change since your last release, and creates the notes file for the agent to fill in.
+- **Helps your agent prepare releases.** It gives your agent the release procedure to follow, lists every change since your last release with a ready-made line for each, and checks the notes the agent writes.
 - **Publishes releases.** When you merge a release pull request, the workflow runs the command to check the release and publish it.
 
 You'll rarely run it yourself after setup. The full list of commands is in [For agents](/for-agents/).
@@ -50,7 +50,7 @@ You'll rarely run it yourself after setup. The full list of commands is in [For 
 
 Merging the release pull request is what starts the release. The workflow then:
 
-1. checks the request: one notes file, a version newer than every existing release, and no unfinished draft text
+1. validates the request: one notes file and a version newer than every existing release
 2. runs any [release checks](/customize/release-checks/) you set up
 3. tags the commit you merged and publishes the notes as the GitHub release
 

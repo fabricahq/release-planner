@@ -52,11 +52,15 @@ release-notes-style:
 
 # Checks to run on the exact commit being released, before it's tagged.
 # Default: none.
-validate:
+release-checks:
   run: make smoke-test
+
+# Release notes rules to skip. List them with: release-planner validate --rules
+# Default: none; every rule is checked.
+exclude-rules: [no-long-heading]
 ```
 
-For the details of the last two, see [Release notes style](/customize/release-notes-style/) and [Release checks](/customize/release-checks/).
+For the details of the last three, see [Release notes style](/customize/release-notes-style/), [Release checks](/customize/release-checks/), and [Release notes rules](/customize/release-notes-style/#release-notes-rules).
 
 ## Upgrade Release Planner
 

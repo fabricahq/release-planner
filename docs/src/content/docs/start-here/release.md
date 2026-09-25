@@ -17,7 +17,7 @@ The agent never merges its own release pull request.
 Use the link in the pull request description to edit the notes file on GitHub. Rewrite anything you like: the notes you merge are published exactly as written. Check that:
 
 - the version is right for the changes, especially if anything breaks compatibility
-- the opening sentences say what matters most
+- the notes lead with what matters most
 - nothing important is missing
 
 To change the version, ask the agent to redo the release for the version you want, or rename the file yourself, for example from `_releases/v1.1.0.md` to `_releases/v2.0.0.md`, and update the **Full Changelog** link at the end. You can also ask the agent to revise the notes; it keeps your edits.
@@ -28,7 +28,7 @@ Saving edits publishes nothing.
 
 Merging the pull request is the approval. The release workflow then:
 
-1. Checks the request: one notes file, a version newer than every existing release, and no unfinished draft text.
+1. Validates the request: one notes file and a version newer than every existing release. If the notes break a [release notes rule](/customize/release-notes-style/#release-notes-rules), it warns without stopping the release.
 2. Runs your [release checks](/customize/release-checks/), if you configured any.
 3. Tags the merged commit and publishes the notes as the GitHub release.
 
