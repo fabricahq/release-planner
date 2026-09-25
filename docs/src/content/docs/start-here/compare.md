@@ -27,7 +27,7 @@ Written release notes tools like Changesets and towncrier have pull request auth
 
 Release Planner also produces written notes, but your agent writes them, once, at release time. Contributors don't write anything extra in their pull requests. When you ask for a release, your agent reads every pull request merged since the last one, selects the right "next version" based on your [release policy](/customize/policy/), and writes notes for the whole release. Because it sees the whole release at once, the notes read as one release rather than a pile of fragments.
 
-You still have the final say. The notes and the version arrive together in one pull request, where you can change anything. [Release notes rules](/customize/release-notes-style/#release-notes-rules) check the text whether your agent or you wrote it, and merging publishes exactly what you approved.
+You still have the final say. The notes and the version arrive together in one pull request, where you can change anything. When you merge the pull request, you'll kick off a release using exactly the release notes you approved.
 
 ## Release Planner vs. build and packaging tools
 
