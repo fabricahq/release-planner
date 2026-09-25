@@ -92,6 +92,7 @@ var jobs = []struct{ id, label string }{
 	{"release-assets", "Build the release assets"},
 	{"attest", "Attest the release assets"},
 	{"publish", "Publish"},
+	{"attest-release", "Attest the published assets"},
 	{"downstream", "Run downstream workflows"},
 }
 

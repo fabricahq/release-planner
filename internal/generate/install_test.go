@@ -550,7 +550,7 @@ func TestWorkflowCombinations(t *testing.T) {
 				want = append(want, "release-checks")
 			}
 			if assets {
-				want = append(want, "release-assets", "attest")
+				want = append(want, "release-assets", "attest", "attest-release")
 			}
 			if downstream {
 				want = append(want, "downstream")
@@ -570,7 +570,7 @@ func TestWorkflowCombinations(t *testing.T) {
 				if j.Permissions["contents"] == "write" && id != "publish" {
 					t.Errorf("%s can write contents", id)
 				}
-				if j.Permissions["id-token"] == "write" && id != "attest" {
+				if j.Permissions["id-token"] == "write" && id != "attest" && id != "attest-release" {
 					t.Errorf("%s can mint OIDC tokens", id)
 				}
 			}
@@ -616,6 +616,14 @@ func TestWorkflowCombinations(t *testing.T) {
 					!strings.HasPrefix(attest.Steps[1].Uses, "actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8") {
 					t.Errorf("attest: %+v", attest)
 				}
+				// After publication, the published files are attested again from the release branch.
+				again := jobs["attest-release"]
+				if !maps.Equal(again.Permissions, attest.Permissions) || !slices.Equal(again.Needs.([]any), []any{"validate", "publish"}) ||
+					again.If != "needs.publish.result == 'success' && needs.validate.outputs.tag != ''" ||
+					!strings.Contains(again.Steps[0].Run, `gh release download "$TAG"`) || again.Steps[1].Uses != attest.Steps[1].Uses ||
+					again.Steps[1].With["subject-path"] != "${{ runner.temp }}/published/*" {
+					t.Errorf("attest-release: %+v", again)
+				}
 			}
 			if downstream {
 				d := jobs["downstream"]
@@ -623,6 +631,10 @@ func TestWorkflowCombinations(t *testing.T) {
 					!strings.HasPrefix(d.Steps[1].Uses, "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1") ||
 					d.Steps[1].With["owner"] != "fabricahq" || d.Steps[1].With["permission-actions"] != "write" {
 					t.Errorf("downstream: %+v", d)
+				}
+				// Downstream workflows start only once the published files carry the release branch's attestation.
+				if assets != (slices.Contains(d.Needs.([]any), "attest-release") && strings.Contains(d.If, "needs.attest-release.result == 'success'")) {
+					t.Errorf("downstream needs %v if %q", d.Needs, d.If)
 				}
 				// One job per target, named for it, so a retry runs only the targets that failed.
 				targets := []string{"fabricahq/homebrew-tap:update-code-rules.yml"}

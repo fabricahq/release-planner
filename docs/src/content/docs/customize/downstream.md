@@ -65,4 +65,4 @@ The release workflow warns on each release pull request if the `downstream` envi
 
 ## Example: a Homebrew tap
 
-In `fabricahq/homebrew-tap`, a workflow `update-code-rules.yml` takes `tag` and `version`, downloads the release's archives, updates the formula's URLs and checksums, and commits the change. The releasing repository lists it under `downstream`, and the GitHub App is installed on the tap only, so the release workflow can start that workflow but can't change anything else.
+In `fabricahq/homebrew-tap`, a workflow `update-code-rules.yml` takes `tag` and `version`, downloads the release's archives, checks they were attested by the releasing repository's `release-planner.yml` on `refs/heads/main`, updates the formula's URLs and checksums, and commits the change. The releasing repository lists it under `downstream`, and the GitHub App is installed on the tap only, so the release workflow can start that workflow but can't change anything else.
