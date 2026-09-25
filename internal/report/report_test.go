@@ -188,8 +188,8 @@ func TestRendersWhatMergingDoes(t *testing.T) {
 func TestRendersAPublishedRelease(t *testing.T) {
 	p := release()
 	p.Reused, p.BuildRun, p.Merged, p.PullRequest = true, 77, "dddddddddddddddddddddddddddddddddddddddd", 7
-	s := status(p, true, results("validate", "success", "release-checks", "skipped", "release-assets", "skipped", "attest", "skipped", "publish", "success", "downstream", "success"))
-	s.RunJobs = runJobs("200", "validate", "publish", "downstream (o/tap:update.yml)", "downstream (o/bucket:update.yml)", "report")
+	s := status(p, true, results("validate", "success", "release-checks", "skipped", "release-assets", "skipped", "attest", "skipped", "publish", "success", "attest-release", "success", "downstream", "success"))
+	s.RunJobs = runJobs("200", "validate", "publish", "attest-release", "downstream (o/tap:update.yml)", "downstream (o/bucket:update.yml)", "report")
 	s.BuildJobs = runJobs("77", "validate", "release-checks / test", "release-checks / lint", "release-assets / build", "attest", "report")
 	s.Downstream = []Target{{"o/tap", "update.yml", "success"}, {"o/bucket", "update.yml", "success"}}
 	s.BuildsAssets, s.Assets = true, []Asset{{"tool_linux_amd64.tar.gz", 3 << 20}, {"SHA256SUMS", 120}}
@@ -214,8 +214,9 @@ func TestRendersAPublishedRelease(t *testing.T) {
 | ♻️ | Build the release assets | [Reused from the pull request](https://github.com/o/r/actions/runs/77/job/4) |
 | ♻️ | Attest the release assets | [Reused from the pull request](https://github.com/o/r/actions/runs/77/job/5) |
 | ✅ | Publish | [Details](https://github.com/o/r/actions/runs/200/job/2) |
-| ✅ | Run o/tap `+"`update.yml`"+` | [Details](https://github.com/o/r/actions/runs/200/job/3) |
-| ✅ | Run o/bucket `+"`update.yml`"+` | [Details](https://github.com/o/r/actions/runs/200/job/4) |
+| ✅ | Attest the published assets | [Details](https://github.com/o/r/actions/runs/200/job/3) |
+| ✅ | Run o/tap `+"`update.yml`"+` | [Details](https://github.com/o/r/actions/runs/200/job/4) |
+| ✅ | Run o/bucket `+"`update.yml`"+` | [Details](https://github.com/o/r/actions/runs/200/job/5) |
 
 #### Assets
 

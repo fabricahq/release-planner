@@ -64,6 +64,15 @@ jobs:
 2. An `attest` job signs each file's [build provenance](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations), so anyone can check it came from your release workflow with `gh attestation verify <file> --repo <owner>/<name>`.
 3. The release status in the pull request description lists each file with its size, and links a zip of them all to download. It's a workflow artifact, so only signed-in users who can read the repository can download it, until it expires. Once the release is published, each file links to its download on the release instead.
 4. **When you merge**, the publish job downloads the files the pull request built, verifies each file's attestation was made by this repository's `release-planner.yml`, uploads them to a draft release, checks GitHub's checksums, and publishes last.
+5. **After publishing**, an `attest-release` job downloads the published files and attests them again, this time from the release branch. Only files that were approved, verified, and published get this attestation, so anything that installs them, such as a Homebrew tap, can require it:
+
+   ```sh
+   gh attestation verify <file> --repo <owner>/<name> \
+     --signer-workflow <owner>/<name>/.github/workflows/release-planner.yml \
+     --source-ref refs/heads/main
+   ```
+
+   Downstream workflows start only after this job succeeds.
 
 If the pull request's files are gone, because the pull request's run didn't finish before the merge or its artifacts expired, the release workflow builds and attests them again from the same release commit after the merge.
 

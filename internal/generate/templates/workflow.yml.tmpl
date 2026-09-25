@@ -218,6 +218,30 @@ jobs:
         env:
           GITHUB_TOKEN: ${{"{{"}} github.token {{"}}"}}
         run: release-planner publish --plan "$RUNNER_TEMP/plan/release-plan.json" --built-plan "$RUNNER_TEMP/built/release-plan.json" --branch {{.Branch}}{{if .ReleaseAssets.Workflow}} --assets "$RUNNER_TEMP/release-assets" --signer-workflow .github/workflows/release-planner.yml{{end}}
+{{- if .ReleaseAssets.Workflow}}
+
+  # Attest the published assets again, from the release branch. The attest job ran on the
+  # pull request; this attestation exists only for files that were approved, verified, and
+  # published, so downstream consumers can require one signed on {{.Branch}}. This job runs no
+  # repository code.
+  attest-release:
+    needs: [validate, publish]
+    if: needs.publish.result == 'success' && needs.validate.outputs.tag != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download the published assets
+        env:
+          GH_TOKEN: ${{"{{"}} github.token {{"}}"}}
+          TAG: ${{"{{"}} needs.validate.outputs.tag {{"}}"}}
+        run: gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/published"
+      - uses: {{.Actions.AttestBuildProvenance}}
+        with:
+          subject-path: '${{"{{"}} runner.temp {{"}}"}}/published/*'
+{{- end}}
 {{- if .Downstream}}
 
   # After a new stable release, run the workflows that depend on it in other repositories,
@@ -225,8 +249,8 @@ jobs:
   # per target, so Re-run failed jobs runs only the targets that failed.
   downstream:
     name: downstream (${{"{{"}} matrix.target {{"}}"}})
-    needs: [validate, publish]
-    if: needs.publish.result == 'success' && needs.validate.outputs.tag != '' && !contains(needs.validate.outputs.version, '-')
+    needs: [validate, publish{{if .ReleaseAssets.Workflow}}, attest-release{{end}}]
+    if: needs.publish.result == 'success'{{if .ReleaseAssets.Workflow}} && needs.attest-release.result == 'success'{{end}} && needs.validate.outputs.tag != '' && !contains(needs.validate.outputs.version, '-')
     strategy:
       fail-fast: false
       matrix:
@@ -267,7 +291,7 @@ jobs:
   # failure also gets a comment that mentions whoever merged, since editing a description
   # notifies no one.
   report:
-    needs: [{{.Needs}}, publish{{if .Downstream}}, downstream{{end}}]
+    needs: [{{.Needs}}, publish{{if .ReleaseAssets.Workflow}}, attest-release{{end}}{{if .Downstream}}, downstream{{end}}]
     if: always() && needs.validate.result != 'skipped'
     runs-on: ubuntu-latest
     permissions:
