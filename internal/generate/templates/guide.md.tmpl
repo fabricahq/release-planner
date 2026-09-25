@@ -42,7 +42,7 @@ Choose the version from `candidates` using the policy. With no previous release,
 
 Create a release branch and write `{{.NotesDir}}/<version>.md` in one pass, in this order:
 
-1. The sections the style and the policy call for. Start with the first heading; don't write an introduction.
+1. The sections the style and the policy call for, opening as they say. If they don't ask for an opening, start with the first heading.
 2. `## Pull Requests`: every `entry` line from the inventory, each once, as inventory wrote it, grouped under `###` headings as the style says.
 3. `## New Contributors`, if the inventory lists any: their `entry` lines.
 4. The `closing` line. After a previous release, replace `<version>` in it with your version.

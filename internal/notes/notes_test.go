@@ -205,3 +205,18 @@ func TestRules(t *testing.T) {
 		t.Fatal(ids)
 	}
 }
+
+// Near misses are named as wrong, not missing: a Pull Requests heading in another case, and a
+// closing line that's been reworded.
+func TestNearMissesAreReportedAsWrong(t *testing.T) {
+	lower := strings.Replace(valid, "## Pull Requests", "## Pull requests", 1)
+	f := Check(lower, release, nil)
+	if i := slices.IndexFunc(f, func(f Finding) bool { return f.Rule == "require-pull-requests-last" }); i < 0 || !strings.Contains(f[i].Message, "name this heading exactly") {
+		t.Fatal(f)
+	}
+	reworded := strings.Replace(valid, "**Full Changelog**: https://github.com/octo/example/compare/v1.0.0...v1.1.0", "**Full Changelog** since v1.0.0", 1)
+	f = Check(reworded, release, nil)
+	if i := slices.IndexFunc(f, func(f Finding) bool { return f.Rule == "require-closing-link" }); i < 0 || !strings.Contains(f[i].Message, "doesn't match") {
+		t.Fatal(f)
+	}
+}

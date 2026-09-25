@@ -427,3 +427,22 @@ func TestTitledMergeCommitListsOnlyThePullRequest(t *testing.T) {
 		t.Fatalf("listed %v", listed)
 	}
 }
+
+// An empty commit, such as an empty initial commit, changes nothing, so it isn't a change
+// to release.
+func TestEmptyCommitsAreNotChanges(t *testing.T) {
+	f := newFixture(t)
+	f.git("commit", "-q", "--allow-empty", "-m", "Empty")
+	inv, err := Take(context.Background(), f.repo, opts, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range inv.Commits {
+		if c.Subject == "Empty" {
+			t.Fatalf("listed the empty commit: %+v", inv.Commits)
+		}
+	}
+	if len(inv.Commits) != 1 {
+		t.Fatalf("%+v", inv.Commits)
+	}
+}

@@ -71,7 +71,7 @@ curl -fsSL https://raw.githubusercontent.com/fabricahq/release-planner/main/inst
 release-planner install
 ```
 
-One version pin covers everything: the workflow, the agent's instructions, and the release checks change together.
+One version pin covers everything: the workflow and the agent's instructions change together.
 
 ## Generated files
 

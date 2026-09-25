@@ -183,7 +183,7 @@ func changes(ctx context.Context, repo gitrepo.Repo, notesDir, previous, head st
 	kept := []Commit{}
 	for _, c := range commits {
 		c.OnBranch = onBranch[c.SHA]
-		if c.OnBranch && notesOnly(ctx, repo, notesDir, c.SHA) {
+		if c.OnBranch && nothingToRelease(ctx, repo, notesDir, c) {
 			continue
 		}
 		kept = append(kept, c)
@@ -191,21 +191,30 @@ func changes(ctx context.Context, repo gitrepo.Repo, notesDir, previous, head st
 	return kept, nil
 }
 
-// notesOnly reports whether commit changes nothing outside the notes directory, compared with
-// its first parent: a release request, or its merge, rather than a change to release.
-func notesOnly(ctx context.Context, repo gitrepo.Repo, notesDir, commit string) bool {
-	out, err := repo.Run(ctx, "diff", "--name-only", "-z", commit+"^1", commit)
+// nothingToRelease reports whether commit changes nothing outside the notes directory,
+// compared with its first parent: a release request or its merge, or an empty direct commit
+// such as an empty initial commit. None of them are changes to release.
+func nothingToRelease(ctx context.Context, repo gitrepo.Repo, notesDir string, c Commit) bool {
+	args := []string{"diff-tree", "--root", "--no-commit-id", "--name-only", "-r", "-z", c.SHA}
+	if c.merge {
+		args = []string{"diff", "--name-only", "-z", c.SHA + "^1", c.SHA}
+	}
+	out, err := repo.Run(ctx, args...)
 	if err != nil {
 		return false
 	}
-	files := strings.Split(strings.TrimSuffix(out, "\x00"), "\x00")
 	dir := strings.Trim(notesDir, "/") + "/"
+	files := strings.Split(strings.TrimSuffix(out, "\x00"), "\x00")
+	if len(files) == 1 && files[0] == "" {
+		// Empty: nothing to release, unless it's a pull request, which is always listed.
+		return c.PullRequest == 0
+	}
 	for _, f := range files {
 		if !strings.HasPrefix(f, dir) {
 			return false
 		}
 	}
-	return len(files) > 0 && files[0] != ""
+	return true
 }
 
 // Listed reports whether the notes list c under ## Pull Requests: a pull request or a direct

@@ -150,10 +150,12 @@ func (h heading) String() string { return strings.Repeat("#", h.level) + " " + h
 
 // isPullRequests reports whether h is, or was meant to be, the ## Pull Requests heading.
 func isPullRequests(h heading) bool {
-	return h.level == 2 && strings.HasPrefix(h.text, "Pull Requests")
+	return h.level == 2 && strings.HasPrefix(strings.ToLower(h.text), "pull requests")
 }
 
-var closingLine = regexp.MustCompile(`^(\*\*Full Changelog\*\*: |This is the first release\. Browse the source at )`)
+// closingLine recognizes a closing line, including near misses such as "This is the first
+// major release", so they're reported as wrong rather than missing.
+var closingLine = regexp.MustCompile(`^(\*\*Full Changelog\*\*|This is the first .*release)`)
 
 func noEmptyHeading(doc document, _ Release) []Finding {
 	var findings []Finding
