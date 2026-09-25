@@ -15,7 +15,7 @@ Release Planner is a single command, `release-planner`, for macOS and Linux:
 curl -fsSL https://raw.githubusercontent.com/fabricahq/release-planner/main/install.sh | sh
 ```
 
-This installs the latest release into `~/.local/bin` after verifying its checksum. To install a specific version, add `-s -- --version v0.1.0` after `sh`. If you have [Go](https://go.dev/dl/), `go install github.com/fabricahq/release-planner/cmd/release-planner@v0.1.0` works too.
+This installs the latest release into `~/.local/bin` after verifying its checksum. To install a specific version, add `-s -- --version v0.3.2` after `sh`. If you have [Go](https://go.dev/dl/), `go install github.com/fabricahq/release-planner/cmd/release-planner@v0.3.2` works too.
 
 ## 2. Create the configuration
 
