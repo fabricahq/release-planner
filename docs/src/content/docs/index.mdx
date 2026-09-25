@@ -3,7 +3,9 @@ title: What is Release Planner?
 description: A simple, agent-assisted way to publish well-written GitHub releases.
 ---
 
-Release Planner makes it easy for your GitHub repository to publish release notes people actually want to read. Your coding agent does the tedious work of reviewing what changed and drafting the notes. You stay in charge of what ships: nothing is published until you approve it.
+import { Steps } from '@astrojs/starlight/components';
+
+Release Planner makes it easy to publish release notes people actually want to read. Release Planner plus your coding agent do the tedious work of reviewing what changed and drafting the notes. You stay in charge of what ships: nothing is published until you approve it.
 
 Release Planner works with GitHub only for now. It publishes GitHub releases, and it runs on GitHub Actions.
 
@@ -11,12 +13,19 @@ Release Planner works with GitHub only for now. It publishes GitHub releases, an
 
 With Release Planner set up, here's how a new release happens:
 
-1. **You:** Ask for a release. Tell your agent "let's release."
-2. **Automated:** Release Planner gathers every commit and pull request merged since your last release and hands that list to your agent. The agent reads through the changes, works out what they mean for your users, and drafts the notes.
-3. **Automated:** Your agent opens a pull request titled **Release v1.1.0**. It contains the drafted release notes and explains why the agent chose that version.
-4. **You:** Review the notes and change anything you like. Nothing is published while the pull request is open. Meanwhile, the release workflow checks the release and builds any files it ships, and keeps the release status in the pull request description up to date.
-5. **You:** Merge the pull request. Merging is what approves and starts the release.
-6. **Automated:** A GitHub Actions workflow tags the release commit, the commit your release pull request branched from, and publishes your new version on the repository's **Releases** page, with exactly the notes you approved and the files the pull request built.
+<Steps>
+
+1. **You ask for a release.** Tell your agent "let's release."
+
+2. **Your agent drafts it.** Release Planner lists every change since your last release. Your agent reads them, writes the notes, picks the version, and opens a pull request titled something like **Release v1.1.0**.
+
+3. **You review it.** Change anything you like; nothing is published yet. Meanwhile, the release workflow checks the release, builds any files it ships, and shows its progress in the pull request.
+
+4. **You merge it.** Merging approves the release.
+
+5. **It's published.** The workflow tags the release commit and publishes your new version on the **Releases** page, with exactly the notes you approved and the files the pull request built.
+
+</Steps>
 
 You do three things: ask, review, and merge. There's no changelog to maintain, no commit message conventions to follow, and no release checklist to remember.
 
