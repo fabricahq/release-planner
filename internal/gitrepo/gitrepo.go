@@ -1,10 +1,13 @@
-// Package gitrepo runs read-only git commands against a working copy.
+// Package gitrepo runs git commands against a working copy. Only FetchCommit changes it, by
+// adding objects from origin.
 package gitrepo
 
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -44,6 +47,31 @@ func (r Repo) IsAncestor(ctx context.Context, ancestor, descendant string) bool 
 func (r Repo) MergeBase(ctx context.Context, a, b string) (string, error) {
 	out, err := r.Run(ctx, "merge-base", a, b)
 	return strings.TrimSpace(out), err
+}
+
+// HasCommit reports whether the commit is in the working copy's object store.
+func (r Repo) HasCommit(ctx context.Context, sha string) bool {
+	_, err := r.Run(ctx, "cat-file", "-e", sha+"^{commit}")
+	return err == nil
+}
+
+// FetchCommit fetches one commit and its history from origin, such as a merged pull
+// request's head that no branch holds any more. With a token, it authenticates the way
+// actions/checkout does, through the environment rather than the command line.
+func (r Repo) FetchCommit(ctx context.Context, sha, token string) error {
+	cmd := exec.CommandContext(ctx, "git", "fetch", "--quiet", "--no-tags", "origin", sha)
+	cmd.Dir = r.Dir
+	cmd.Env = os.Environ()
+	if token != "" {
+		auth := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + token))
+		cmd.Env = append(cmd.Env, "GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=http.extraheader", "GIT_CONFIG_VALUE_0=AUTHORIZATION: basic "+auth)
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("git fetch origin %s: %v: %s", sha, err, strings.TrimSpace(stderr.String()))
+	}
+	return nil
 }
 
 // Tags lists tag names starting with v.

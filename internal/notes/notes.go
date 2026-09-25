@@ -28,9 +28,9 @@ type Release struct {
 
 // Finding is one rule the notes break, at a 1-based line, or 0 for the whole file.
 type Finding struct {
-	Rule    string
-	Line    int
-	Message string
+	Rule    string `json:"rule"`
+	Line    int    `json:"line,omitempty"`
+	Message string `json:"message"`
 }
 
 func (f Finding) String() string {

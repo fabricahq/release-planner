@@ -65,6 +65,23 @@ func (f *fixture) plan(base, head string) (Plan, error) {
 	return Read(context.Background(), f.repo, opts, base, head)
 }
 
+// branch commits files on a new branch off main, like a release pull request's, and returns
+// its head. An empty body deletes the file. Main is checked out again afterwards.
+func (f *fixture) branch(name string, files map[string]string) string {
+	f.t.Helper()
+	f.git("checkout", "-q", "-b", name, "main")
+	for file, body := range files {
+		if body == "" {
+			f.git("rm", "-q", file)
+		} else {
+			f.write(file, body)
+		}
+	}
+	head := f.commit("Change " + name)
+	f.git("checkout", "-q", "main")
+	return head
+}
+
 func TestReadValidatesReleaseRequests(t *testing.T) {
 	for _, tc := range []struct{ name, tag, notes, existing, want string }{
 		{"first", "v1.0.0", "## ✨ New Features\nFirst release.\n", "", ""},
@@ -79,16 +96,17 @@ func TestReadValidatesReleaseRequests(t *testing.T) {
 		{"prerelease", "v1.1.0-rc.1", "Notes", "v1.0.0", ""},
 		{"backwards", "v1.0.0", "Notes", "v1.1.0", "newer"},
 		{"prerelease-after-release", "v1.1.0-rc.1", "Notes", "v1.1.0", "newer"},
-		{"reused", "v1.0.0", "Notes", "v1.0.0", "another commit"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFixture(t)
 			if tc.existing != "" {
 				f.git("tag", tc.existing)
+				f.write("code.txt", "after "+tc.existing)
+				f.commit("Change code")
 			}
-			f.write("releases/"+tc.tag+".md", tc.notes)
-			head := f.commit("Release")
-			p, err := f.plan(f.initial, head)
+			release := f.git("rev-parse", "main")
+			head := f.branch("release", map[string]string{"releases/" + tc.tag + ".md": tc.notes})
+			p, err := f.plan("main", head)
 			if tc.want != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.want) {
 					t.Fatalf("got %v, want %q", err, tc.want)
@@ -98,11 +116,12 @@ func TestReadValidatesReleaseRequests(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if p.Tag != tc.tag || p.Notes != tc.notes || p.Commit != head || p.Previous != tc.existing || p.Prerelease != strings.Contains(tc.tag, "-") {
+			if p.Tag != tc.tag || p.Notes != tc.notes || p.Commit != release || p.Head != head || p.Previous != tc.existing || p.Prerelease != strings.Contains(tc.tag, "-") || len(p.Edits) != 0 {
 				t.Fatalf("unexpected plan: %+v", p)
 			}
-			f.git("tag", tc.tag)
-			retry, err := f.plan(f.initial, head)
+			// An interrupted publication tagged the release commit; retrying plans the same release.
+			f.git("tag", tc.tag, release)
+			retry, err := f.plan("main", head)
 			if err != nil || !reflect.DeepEqual(retry, p) {
 				t.Fatalf("retry at the tagged commit: %+v %v", retry, err)
 			}
@@ -110,69 +129,144 @@ func TestReadValidatesReleaseRequests(t *testing.T) {
 	}
 }
 
-func TestReadWithoutNotesRequestsNoRelease(t *testing.T) {
+// The release commit is the newest commit the pull request shares with the release branch,
+// before and after the merge, however it merges.
+func TestReleaseCommitIsTheMergeBase(t *testing.T) {
 	f := newFixture(t)
-	f.write("practices/rule.md", "Rule")
-	p, err := f.plan(f.initial, f.commit("Rule"))
-	if err != nil || p.Tag != "" {
-		t.Fatal(p, err)
+	f.write("releases/v1.0.0.md", "First\n")
+	f.git("checkout", "-q", "-b", "release")
+	f.git("add", "-A")
+	f.git("commit", "-q", "-m", "Request v1.0.0")
+	f.write("releases/v1.0.0.md", "First, revised\n")
+	head := f.commit("Revise v1.0.0")
+	f.git("checkout", "-q", "main")
+	f.write("later.txt", "after the pull request opened")
+	later := f.commit("Later change")
+
+	if p, err := f.plan("main", head); err != nil || p.Commit != f.initial || p.Notes != "First, revised\n" {
+		t.Fatalf("pull request: %+v %v", p, err)
+	}
+	merged := map[string]func() string{
+		"merge commit": func() string {
+			f.git("merge", "-q", "--no-ff", "release", "-m", "Merge pull request #2 from o/release")
+			return f.git("rev-parse", "HEAD")
+		},
+		"squash": func() string {
+			f.git("merge", "-q", "--squash", "release")
+			return f.commit("Release v1.0.0 (#2)")
+		},
+		"rebase": func() string {
+			f.git("cherry-pick", "--allow-empty", f.initial+".."+head)
+			return f.git("rev-parse", "HEAD")
+		},
+	}
+	for name, merge := range merged {
+		t.Run(name, func(t *testing.T) {
+			f.git("reset", "-q", "--hard", later)
+			commit := merge()
+			if p, err := f.plan(commit+"^1", head); err != nil || p.Commit != f.initial || p.Tag != "v1.0.0" {
+				t.Fatalf("after merge: %+v %v", p, err)
+			}
+		})
+	}
+
+	// Merging the release branch into the pull request moves the release commit to include it.
+	f.git("reset", "-q", "--hard", later)
+	f.git("checkout", "-q", "release")
+	f.git("merge", "-q", "--no-ff", "main", "-m", "Merge branch 'main' into release")
+	updated := f.git("rev-parse", "HEAD")
+	f.git("checkout", "-q", "main")
+	if p, err := f.plan("main", updated); err != nil || p.Commit != later {
+		t.Fatalf("after merging main: %+v %v", p, err)
 	}
 }
 
-func TestReadRejectsEditsToTaggedNotes(t *testing.T) {
+// A release pull request changes only notes files. Any pull request that doesn't request a
+// release or edit notes may change anything.
+func TestReleasePullRequestsChangeOnlyNotes(t *testing.T) {
 	f := newFixture(t)
-	f.write("releases/v1.0.0.md", "Original notes")
-	first := f.commit("Notes")
+	for name, files := range map[string]map[string]string{
+		"code":   {"releases/v1.0.0.md": "Notes", "main.go": "package main"},
+		"index":  {"releases/v1.0.0.md": "Notes", "releases/index.md": "# Releases"},
+		"config": {"releases/v1.0.0.md": "Notes", ".release-planner/config.yml": "schema-version: 1"},
+	} {
+		head := f.branch(name, files)
+		if _, err := f.plan("main", head); err == nil || !strings.Contains(err.Error(), "may change only release notes files") {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if p, err := f.plan("main", f.branch("ordinary", map[string]string{"main.go": "package main"})); err != nil || !p.Empty() || p.Head == "" {
+		t.Fatal(p, err)
+	}
+	head := f.branch("two", map[string]string{"releases/v1.0.0.md": "One", "releases/v1.1.0.md": "Two"})
+	if _, err := f.plan("main", head); err == nil || !strings.Contains(err.Error(), "one release per pull request") {
+		t.Fatal(err)
+	}
+}
+
+// published sets up a tagged v1.0.0 whose notes merged after the tagged commit, as they do.
+func published(t *testing.T) *fixture {
+	f := newFixture(t)
 	f.git("tag", "v1.0.0")
-	f.write("releases/v1.0.0.md", "Uncommitted edit")
-	if p, err := f.plan(f.initial, first); err != nil || p.Notes != "Original notes" {
-		t.Fatal(p, err)
+	f.write("releases/v1.0.0.md", "Published notes\n")
+	f.commit("Release v1.0.0 (#1)")
+	return f
+}
+
+func TestEditsTheNotesOfTaggedVersions(t *testing.T) {
+	f := published(t)
+	head := f.branch("edit", map[string]string{"releases/v1.0.0.md": "Corrected notes\n"})
+	p, err := f.plan("main", head)
+	if err != nil || p.Tag != "" || p.Commit != "" || len(p.Edits) != 1 {
+		t.Fatalf("%+v %v", p, err)
 	}
-	f.commit("Edit")
-	if _, err := f.plan(first, "HEAD"); err == nil || !strings.Contains(err.Error(), "immutable") {
-		t.Fatal(err)
+	if e := p.Edits[0]; e.Tag != "v1.0.0" || e.File != "releases/v1.0.0.md" || e.Notes != "Corrected notes\n" || len(e.Findings) == 0 {
+		t.Fatalf("%+v", e)
 	}
-	f.git("tag", "-d", "v1.0.0")
-	base := f.git("rev-parse", "HEAD")
-	f.write("releases/v1.0.0.md", "Edited again")
-	f.write("releases/v1.1.0.md", "Second")
-	f.commit("More notes")
-	if _, err := f.plan(base, "HEAD"); err == nil || !strings.Contains(err.Error(), "one release") {
+
+	// One pull request may request a release and edit earlier notes.
+	head = f.branch("both", map[string]string{"releases/v1.0.0.md": "Corrected notes\n", "releases/v1.1.0.md": "Second\n"})
+	if p, err := f.plan("main", head); err != nil || p.Tag != "v1.1.0" || p.Previous != "v1.0.0" || len(p.Edits) != 1 {
+		t.Fatalf("%+v %v", p, err)
+	}
+
+	if _, err := f.plan("main", f.branch("emptied", map[string]string{"releases/v1.0.0.md": "\n"})); err == nil || !strings.Contains(err.Error(), "must not be empty") {
 		t.Fatal(err)
 	}
 }
 
-func TestCorrectOrWithdrawUntaggedRequest(t *testing.T) {
-	f := newFixture(t)
-	f.write("releases/v1.0.0.md", "Original")
-	original := f.commit("Request")
-	f.write("releases/v1.0.0.md", "Corrected")
-	corrected := f.commit("Correct")
-	if p, err := f.plan(original, corrected); err != nil || p.Tag != "v1.0.0" || p.Notes != "Corrected" {
-		t.Fatal(p, err)
+func TestTaggedNotesCantBeDeleted(t *testing.T) {
+	f := published(t)
+	if _, err := f.plan("main", f.branch("delete", map[string]string{"releases/v1.0.0.md": ""})); err == nil || !strings.Contains(err.Error(), "can't be deleted") {
+		t.Fatal(err)
 	}
-	f.git("rm", "-q", "releases/v1.0.0.md")
-	f.commit("Withdraw")
-	if p, err := f.plan(corrected, "HEAD"); err != nil || p.Tag != "" {
+	// Deleting a request that never published withdraws it.
+	f.write("releases/v1.1.0.md", "Never published\n")
+	f.commit("Release v1.1.0 (#2)")
+	if p, err := f.plan("main", f.branch("withdraw", map[string]string{"releases/v1.1.0.md": ""})); err != nil || !p.Empty() {
 		t.Fatal(p, err)
 	}
 }
 
-// Publication can create the tag and then fail. Retrying the same corrected range must
-// still plan, while any later edit to the now-published notes stays immutable.
-func TestRetriesCorrectedRequestAfterTagCreated(t *testing.T) {
-	f := newFixture(t)
-	f.write("releases/v1.0.0.md", "Original")
-	original := f.commit("Request")
-	f.write("releases/v1.0.0.md", "Corrected")
-	corrected := f.commit("Correct")
-	f.git("tag", "v1.0.0", corrected)
-	if p, err := f.plan(original, corrected); err != nil || p.Tag != "v1.0.0" || p.Notes != "Corrected" {
+// Moving tagged notes, unchanged, to a new notes directory changes nothing, alongside the
+// config change that moves it. Rewriting them on the way is not a move.
+func TestMovedNotesAreNotChanges(t *testing.T) {
+	f := published(t)
+	moved := Options{NotesDir: "_releases", FirstVersion: "v1.0.0"}
+	f.git("checkout", "-q", "-b", "move")
+	f.git("mv", "releases", "_releases")
+	f.write(".release-planner/config.yml", "release-notes-dir: _releases\n")
+	head := f.commit("Move the notes")
+	f.git("checkout", "-q", "main")
+	if p, err := Read(context.Background(), f.repo, moved, "main", head); err != nil || !p.Empty() {
 		t.Fatal(p, err)
 	}
-	f.write("releases/v1.0.0.md", "Edited after publication")
-	f.commit("Edit")
-	if _, err := f.plan(corrected, "HEAD"); err == nil || !strings.Contains(err.Error(), "immutable") {
+
+	f.git("checkout", "-q", "move")
+	f.write("_releases/v1.0.0.md", "Rewritten while moving\n")
+	head = f.commit("Rewrite")
+	f.git("checkout", "-q", "main")
+	if _, err := Read(context.Background(), f.repo, moved, "main", head); err == nil || !strings.Contains(err.Error(), "may change only release notes files") {
 		t.Fatal(err)
 	}
 }
@@ -180,41 +274,34 @@ func TestRetriesCorrectedRequestAfterTagCreated(t *testing.T) {
 func TestIgnoresMalformedVersionTags(t *testing.T) {
 	f := newFixture(t)
 	f.git("tag", "v-preview")
-	f.write("releases/v1.0.0.md", "Approved notes")
-	f.commit("Release")
-	if p, err := f.plan(f.initial, "HEAD"); err != nil || len(p.Tags) != 0 {
+	head := f.branch("release", map[string]string{"releases/v1.0.0.md": "Approved notes"})
+	if p, err := f.plan("main", head); err != nil || len(p.Tags) != 0 || p.Tag != "v1.0.0" {
 		t.Fatal(p, err)
 	}
 }
 
+// A request approved but never published must be published, corrected, or withdrawn
+// before a later one. Correcting it moves its release commit to the newest shared commit.
 func TestPendingRequestCannotBeSkipped(t *testing.T) {
 	f := newFixture(t)
 	f.git("tag", "v1.0.0")
 	f.write("releases/v1.1.0.md", "Pending release")
-	base := f.commit("Pending request")
-	f.write("releases/v1.2.0.md", "Later release")
-	f.commit("Later request")
-	if _, err := f.plan(base, "HEAD"); err == nil || !strings.Contains(err.Error(), "untagged release request") {
+	pending := f.commit("Pending request (#2)")
+	if _, err := f.plan("main", f.branch("later", map[string]string{"releases/v1.2.0.md": "Later release"})); err == nil || !strings.Contains(err.Error(), "untagged release request") {
 		t.Fatal(err)
 	}
-	f.git("tag", "v1.1.0", base)
-	if p, err := f.plan(base, "HEAD"); err != nil || p.Tag != "v1.2.0" || p.Previous != "v1.1.0" {
-		t.Fatal(p, err)
-	}
-	f.git("tag", "-d", "v1.1.0")
-	f.git("rm", "-q", "releases/v1.1.0.md")
-	f.commit("Withdraw pending request")
-	if p, err := f.plan(base, "HEAD"); err != nil || p.Tag != "v1.2.0" || p.Previous != "v1.0.0" {
+	p, err := f.plan("main", f.branch("correct", map[string]string{"releases/v1.1.0.md": "Corrected release"}))
+	if err != nil || p.Tag != "v1.1.0" || p.Commit != pending || p.Notes != "Corrected release" {
 		t.Fatal(p, err)
 	}
 }
 
 func TestReadUsesTheConfiguredNotesDirectory(t *testing.T) {
 	f := newFixture(t)
-	f.write("docs/releases/v1.0.0.md", "Notes")
 	f.write("releases/v9.0.0.md", "Outside the configured directory")
-	f.commit("Release")
-	p, err := Read(context.Background(), f.repo, Options{NotesDir: "docs/releases", FirstVersion: "v1.0.0"}, f.initial, "HEAD")
+	f.commit("Unrelated file")
+	head := f.branch("release", map[string]string{"docs/releases/v1.0.0.md": "Notes"})
+	p, err := Read(context.Background(), f.repo, Options{NotesDir: "docs/releases", FirstVersion: "v1.0.0"}, "main", head)
 	if err != nil || p.Tag != "v1.0.0" {
 		t.Fatal(p, err)
 	}
@@ -263,44 +350,6 @@ func TestInventoryListsChangesSinceThePreviousRelease(t *testing.T) {
 	inv, err = Take(context.Background(), f.repo, opts, "HEAD")
 	if err != nil || inv.Previous != "v1.0.0" || !reflect.DeepEqual(inv.UnmergedNewerTags, []string{"v1.2.0"}) {
 		t.Fatalf("unmerged tag: %+v %v", inv, err)
-	}
-}
-
-// Moving published notes to a new notes directory, byte for byte, requests nothing. Changing
-// them on the way, or re-adding them for a tag the notes don't match, is still refused.
-func TestRelocatedTaggedNotesAreHistory(t *testing.T) {
-	f := newFixture(t)
-	f.write("releases/v1.0.0.md", "Published notes")
-	published := f.commit("Release v1.0.0")
-	f.git("tag", "v1.0.0", published)
-	moved := Options{NotesDir: "_releases", FirstVersion: "v1.0.0"}
-
-	f.git("mv", "releases", "_releases")
-	relocation := f.commit("Move notes")
-	if p, err := Read(context.Background(), f.repo, moved, published, relocation); err != nil || p.Tag != "" {
-		t.Fatal(p, err)
-	}
-
-	f.write("_releases/v1.0.0.md", "Rewritten while moving")
-	f.commit("Rewrite")
-	if _, err := Read(context.Background(), f.repo, moved, published, "HEAD"); err == nil || !strings.Contains(err.Error(), "already points to another commit") {
-		t.Fatal(err)
-	}
-}
-
-// A tagged commit with more than one file of the notes' name can't say which was published,
-// so a matching copy of the other one isn't accepted as a move.
-func TestRelocationNeedsOnePublishedFile(t *testing.T) {
-	f := newFixture(t)
-	f.write("releases/v1.0.0.md", "Approved")
-	f.write("docs/v1.0.0.md", "Rewritten")
-	published := f.commit("Release v1.0.0")
-	f.git("tag", "v1.0.0", published)
-	f.write("_releases/v1.0.0.md", "Rewritten")
-	f.commit("Move rewritten notes")
-	moved := Options{NotesDir: "_releases", FirstVersion: "v1.0.0"}
-	if _, err := Read(context.Background(), f.repo, moved, published, "HEAD"); err == nil || !strings.Contains(err.Error(), "already points to another commit") {
-		t.Fatal(err)
 	}
 }
 

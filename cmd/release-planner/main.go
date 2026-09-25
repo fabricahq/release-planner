@@ -10,8 +10,11 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/fabricahq/release-planner/internal/buildinfo"
@@ -36,10 +39,12 @@ Set up a repository:
 Prepare a release (agents):
   guide       Print the release procedure to follow
   inventory   List changes since the previous release, with the lines that list them in the notes
-  validate    Check a release request and its notes, and print what to publish
+  validate    Check a release pull request and its notes, and print what merging publishes
 
 Run in the Release workflow:
-  publish     Tag the approved commit and publish the approved notes
+  publish     Tag the release commit and publish the approved notes, or edit published notes
+  report      Write the release status comment on the release pull request
+  downstream  Run workflows in other repositories for a new release
 
 Other:
   version     Print this program's version
@@ -59,7 +64,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	commands := map[string]func(context.Context, []string, io.Writer) error{
 		"init": cmdInit, "install": cmdInstall, "check": cmdCheck, "uninstall": cmdUninstall,
 		"guide": cmdGuide, "inventory": cmdInventory, "validate": cmdValidate,
-		"publish": cmdPublish, "version": cmdVersion,
+		"publish": cmdPublish, "report": cmdReport, "downstream": cmdDownstream, "version": cmdVersion,
 	}
 	cmd, ok := commands[args[0]]
 	if !ok {
@@ -268,11 +273,7 @@ func cmdInventory(ctx context.Context, args []string, out io.Writer) error {
 		}
 	}
 	if known && !*offline && len(inv.PullRequests) > 0 {
-		api := os.Getenv("GITHUB_API_URL")
-		if api == "" {
-			api = "https://api.github.com"
-		}
-		contributors.Add(ctx, &publish.GitHub{BaseURL: api, Token: githubToken(ctx), Repository: *repository}, &inv)
+		contributors.Add(ctx, api(githubToken(ctx), *repository), &inv)
 	}
 	inv.AddEntries(*repository)
 	return printJSON(out, inv)
@@ -297,13 +298,23 @@ func githubToken(ctx context.Context) string {
 
 var fullSHA = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
+// api returns a GitHub API client for repository, at GITHUB_API_URL or github.com.
+func api(token, repository string) *publish.GitHub {
+	base := os.Getenv("GITHUB_API_URL")
+	if base == "" {
+		base = "https://api.github.com"
+	}
+	return &publish.GitHub{BaseURL: base, Token: token, Repository: repository}
+}
+
 func cmdValidate(ctx context.Context, args []string, out io.Writer) error {
-	fs, dir := flags("validate", "validate --base <ref> [--head <ref>] [--repository owner/name] [--out <file>] [--ci --event <name>] | validate --rules")
-	base := fs.String("base", "", "commit before the release request")
-	head := fs.String("head", "HEAD", "commit containing the approved notes")
+	fs, dir := flags("validate", "validate --base <ref> [--head <ref>] [--repository owner/name] [--out <file>] [--ci [--head-repository owner/name]] | validate --ci --merged <sha> [--out <file>] | validate --rules")
+	base := fs.String("base", "", "the release branch, such as origin/main; the release commit is the newest commit head shares with it")
+	head := fs.String("head", "HEAD", "the release pull request's head")
+	merged := fs.String("merged", "", "with --ci, after the merge: the full SHA of the commit the release pull request merged as on the release branch")
 	outFile := fs.String("out", "", "write the release plan to this file instead of standard output")
-	ci := fs.Bool("ci", false, "running in the Release workflow: write step outputs, enforce retry rules, and report release notes rules as warnings")
-	event := fs.String("event", "", "GitHub event name, with --ci")
+	ci := fs.Bool("ci", false, "running in the Release workflow: write step outputs, check the repository's settings, and report release notes rules as warnings")
+	headRepository := fs.String("head-repository", "", "with --ci, the owner/name the pull request comes from; a fork's pull request builds nothing")
 	listRules := fs.Bool("rules", false, "list the release notes rules")
 	repository := fs.String("repository", "", "GitHub repository the closing link must name, as owner/name (default: GITHUB_REPOSITORY with --ci, otherwise from the origin remote)")
 	if err := fs.Parse(args); err != nil {
@@ -318,39 +329,18 @@ func cmdValidate(ctx context.Context, args []string, out io.Writer) error {
 		}
 		return nil
 	}
-	if *base == "" {
+	if (*base == "") == (*merged == "") {
 		fs.Usage()
-		return fmt.Errorf("--base is required")
+		return fmt.Errorf("pass --base, or --merged with --ci")
+	}
+	if *merged != "" && !*ci {
+		return fmt.Errorf("--merged plans a publication in the Release workflow; pass --ci")
 	}
 	c, err := config.Load(*dir)
 	if err != nil {
 		return err
 	}
 	repo := gitrepo.Repo{Dir: *dir}
-	retry := *ci && *event == "workflow_dispatch"
-	if retry {
-		// A retry must name the original approved range exactly, never the latest commit.
-		if !fullSHA.MatchString(*base) || !fullSHA.MatchString(*head) {
-			return fmt.Errorf("a retry needs the full Base SHA and Approved head SHA from the failed run's summary")
-		}
-		if !repo.IsAncestor(ctx, *head, "origin/"+c.Branch) {
-			return fmt.Errorf("the approved head %s is not on %s", *head, c.Branch)
-		}
-	}
-	if *ci && *event == "pull_request" {
-		// The pull request's base SHA is the base branch's current tip, which the head
-		// doesn't contain once the branch has moved on. Check what the pull request adds.
-		mergeBase, err := repo.MergeBase(ctx, *base, *head)
-		if err != nil {
-			return fmt.Errorf("finding where the pull request branched from %s: %v", *base, err)
-		}
-		*base = mergeBase
-	}
-	if *ci {
-		if err := appendEnvFile("GITHUB_STEP_SUMMARY", fmt.Sprintf("Release request range\n\nBase SHA: `%s`\n\nApproved head SHA: `%s`\n", *base, *head)); err != nil {
-			return err
-		}
-	}
 	// The closing link must point at this repository: the one given; in the workflow, the one it
 	// runs in; locally, origin's, which a fork's clone overrides with --repository. Without any,
 	// the link's repository isn't checked.
@@ -361,33 +351,30 @@ func cmdValidate(ctx context.Context, args []string, out io.Writer) error {
 	default:
 		*repository, _ = repo.GitHubRepository(ctx)
 	}
-	p, err := plan.Read(ctx, repo, plan.Options{NotesDir: c.NotesDir, FirstVersion: c.FirstVersion, RulesOff: c.RulesOff(), Repository: *repository}, *base, *head)
+	opts := plan.Options{NotesDir: c.NotesDir, FirstVersion: c.FirstVersion, RulesOff: c.RulesOff(), Repository: *repository}
+	var p plan.Plan
+	if *merged != "" {
+		p, err = readMerged(ctx, repo, c, opts, *merged)
+	} else {
+		p, err = plan.Read(ctx, repo, opts, *base, *head)
+	}
 	if err != nil {
 		return err
 	}
 	// Locally, findings fail, so the agent fixes them. In the workflow they're warnings: the
 	// maintainer may break a rule on purpose, and merging approves the notes as written.
-	if len(p.Findings) > 0 && !*ci {
-		lines := make([]string, len(p.Findings))
-		for i, f := range p.Findings {
-			lines[i] = f.String()
+	if !*ci {
+		var lines []string
+		for _, f := range allFindings(p) {
+			lines = append(lines, fmt.Sprintf("%s: %s", f.file, f))
 		}
-		return fmt.Errorf("%s breaks release notes rules:\n  %s\nEdit the file in place to fix each one, then rerun release-planner validate", p.File, strings.Join(lines, "\n  "))
-	}
-	if retry && p.Tag == "" {
-		return fmt.Errorf("the retry range contains no release request")
+		if len(lines) > 0 {
+			return fmt.Errorf("the notes break release notes rules:\n  %s\nEdit each file in place to fix each one, then rerun release-planner validate", strings.Join(lines, "\n  "))
+		}
 	}
 	if *ci {
-		if err := appendEnvFile("GITHUB_OUTPUT", fmt.Sprintf("tag=%s\ncommit=%s\n", p.Tag, p.Commit)); err != nil {
+		if err := inWorkflow(ctx, out, repo, c, &p, *base, *headRepository, *outFile != ""); err != nil {
 			return err
-		}
-		if err := warnAboutNotes(out, p, *outFile != ""); err != nil {
-			return err
-		}
-		if p.Tag != "" {
-			if err := warnAboutEnvironment(ctx, out, c.Branch, *outFile != ""); err != nil {
-				return err
-			}
 		}
 	}
 	w := out
@@ -402,12 +389,208 @@ func cmdValidate(ctx context.Context, args []string, out io.Writer) error {
 	if err := printJSON(w, p); err != nil {
 		return err
 	}
-	if *outFile != "" && p.Tag != "" {
-		fmt.Fprintf(out, "Validated %s at %s.\n", p.Tag, p.Commit)
-	} else if *outFile != "" {
-		fmt.Fprintln(out, "No release requested.")
+	if *outFile != "" {
+		switch {
+		case p.Tag != "":
+			fmt.Fprintf(out, "Validated %s at the release commit %s.\n", p.Tag, p.Commit)
+		case len(p.Edits) > 0:
+			fmt.Fprintf(out, "Validated edits to published notes.\n")
+		default:
+			fmt.Fprintln(out, "No release requested and no notes edited.")
+		}
 	}
 	return nil
+}
+
+type fileFinding struct {
+	file string
+	notes.Finding
+}
+
+// allFindings lists the rules broken by the requested notes and by every edit.
+func allFindings(p plan.Plan) []fileFinding {
+	var all []fileFinding
+	for _, f := range p.Findings {
+		all = append(all, fileFinding{p.File, f})
+	}
+	for _, e := range p.Edits {
+		for _, f := range e.Findings {
+			all = append(all, fileFinding{e.File, f})
+		}
+	}
+	return all
+}
+
+// readMerged plans the publication a release pull request's merge approved. merged is the
+// commit it merged as on the release branch, by a merge commit, squash, or rebase. The
+// release commit is the newest commit the pull request's head shares with the branch
+// before the merge, and the notes merged must be the notes at that head.
+func readMerged(ctx context.Context, repo gitrepo.Repo, c config.Config, opts plan.Options, merged string) (plan.Plan, error) {
+	empty := plan.Plan{Tags: []string{}}
+	if !fullSHA.MatchString(merged) {
+		return empty, fmt.Errorf("--merged needs the full SHA of the commit the release pull request merged as, not %q", merged)
+	}
+	if !repo.IsAncestor(ctx, merged, "origin/"+c.Branch) {
+		return empty, fmt.Errorf("%s is not on %s", merged, c.Branch)
+	}
+	token := os.Getenv("GITHUB_TOKEN")
+	pr, err := api(token, opts.Repository).MergedPullRequest(ctx, merged, c.Branch)
+	if err != nil {
+		return empty, err
+	}
+	if pr == nil {
+		return empty, fmt.Errorf("%s is not the merge of a pull request into %s; a release is approved by merging its pull request, so a direct push publishes nothing", merged, c.Branch)
+	}
+	// A squashed or rebased pull request's head is on no branch once its branch is deleted.
+	if !repo.HasCommit(ctx, pr.Head) {
+		if err := repo.FetchCommit(ctx, pr.Head, token); err != nil {
+			return empty, fmt.Errorf("fetching pull request #%d's head: %v", pr.Number, err)
+		}
+	}
+	p, err := plan.Read(ctx, repo, opts, merged+"^1", pr.Head)
+	if err != nil {
+		return empty, fmt.Errorf("pull request #%d: %v", pr.Number, err)
+	}
+	approved := map[string]string{}
+	if p.Tag != "" {
+		approved[p.File] = p.Notes
+	}
+	for _, e := range p.Edits {
+		approved[e.File] = e.Notes
+	}
+	for file, text := range approved {
+		if landed, err := repo.Run(ctx, "show", merged+":"+file); err != nil || landed != text {
+			return empty, fmt.Errorf("%s on %s differs from %s at pull request #%d's head %s; publish only what the pull request approved by opening a new one", file, c.Branch, file, pr.Number, pr.Head)
+		}
+	}
+	p.PullRequest, p.Merged, p.MergedBy = pr.Number, merged, pr.MergedBy
+	return p, nil
+}
+
+// inWorkflow completes the plan in the Release workflow: it decides which run's release
+// checks and assets the release uses, checks the repository's settings, flags notes edited on
+// GitHub, and writes step outputs, warnings, and the step summary. base is the pull
+// request's base commit, or "" after the merge.
+func inWorkflow(ctx context.Context, out io.Writer, repo gitrepo.Repo, c config.Config, p *plan.Plan, base, headRepository string, annotate bool) error {
+	token, repository := os.Getenv("GITHUB_TOKEN"), os.Getenv("GITHUB_REPOSITORY")
+	var gh *publish.GitHub
+	if token != "" && repository != "" {
+		gh = api(token, repository)
+	}
+	warn := func(format string, args ...any) { p.Warnings = append(p.Warnings, fmt.Sprintf(format, args...)) }
+	runID, _ := strconv.ParseInt(os.Getenv("GITHUB_RUN_ID"), 10, 64)
+	build := false
+	if p.Tag != "" {
+		p.BuildRun, build = runID, true
+		switch {
+		case base != "":
+			// A fork's pull request gets a read-only token, so it can't attest what it builds.
+			build = headRepository == "" || headRepository == repository
+		case gh != nil:
+			if run, err := reusableRun(ctx, gh, c, p.Head, repository); err != nil {
+				warn("Couldn't look for the pull request's run to reuse its checks and assets, so this run repeats them: %v", err)
+			} else if run != 0 {
+				p.BuildRun, p.Reused, build = run, true, false
+			}
+		}
+	}
+	if gh != nil && base != "" {
+		for i, e := range p.Edits {
+			release, err := gh.ReleaseByTag(ctx, e.Tag)
+			switch {
+			case err != nil:
+				warn("Couldn't read the %s release to compare its notes: %v", e.Tag, err)
+			case release == nil || release.Draft:
+				warn("%s has no published release, so merging can't edit its notes.", e.Tag)
+			default:
+				previous, err := repo.Run(ctx, "show", base+":"+e.File)
+				p.Edits[i].HandEdited = err == nil && normalize(previous) != normalize(release.Body)
+			}
+		}
+	}
+	if gh != nil && !p.Empty() {
+		environment(ctx, gh, releaseEnvironment, c.Branch, publish.EnvironmentDocs, warn)
+		if p.Tag != "" && len(c.Downstream) > 0 {
+			environment(ctx, gh, downstreamEnvironment, c.Branch, publish.DownstreamEnvironmentDocs, warn)
+		}
+	}
+
+	publishes := base == "" && !p.Empty()
+	outputs := fmt.Sprintf("tag=%s\nversion=%s\ncommit=%s\npublish=%t\nbuild=%t\nbuild-run=%d\n", p.Tag, p.Version, p.Commit, publishes, build, p.BuildRun)
+	if err := appendEnvFile("GITHUB_OUTPUT", outputs); err != nil {
+		return err
+	}
+	var summary strings.Builder
+	if p.Tag != "" {
+		fmt.Fprintf(&summary, "Release %s\n\nRelease commit: `%s`\n\nPull request head: `%s`\n", p.Tag, p.Commit, p.Head)
+		if p.Merged != "" {
+			fmt.Fprintf(&summary, "\nMerged as: `%s`\n", p.Merged)
+		}
+		if p.Reused {
+			fmt.Fprintf(&summary, "\nReleasing the checks and assets of the pull request's run %d.\n", p.BuildRun)
+		}
+	}
+	for _, e := range p.Edits {
+		fmt.Fprintf(&summary, "\nEdits the notes of %s.\n", e.Tag)
+	}
+	if found := allFindings(*p); len(found) > 0 {
+		summary.WriteString("\nRelease notes rules\n\nThe notes break these rules. They don't block the release; fix them if they're mistakes.\n\n")
+		for _, f := range found {
+			if annotate {
+				line := ""
+				if f.Line > 0 {
+					line = fmt.Sprintf(",line=%d", f.Line)
+				}
+				fmt.Fprintf(out, "::warning file=%s%s,title=%s::%s\n", escapeProperty(f.file), line, escapeProperty(f.Rule), escapeData(f.Message))
+			}
+			fmt.Fprintf(&summary, "- %s: %s\n", f.file, f.Finding)
+		}
+	}
+	if len(p.Warnings) > 0 {
+		summary.WriteString("\nSettings\n\n")
+		for _, w := range p.Warnings {
+			if annotate {
+				fmt.Fprintf(out, "::warning title=Release settings::%s\n", escapeData(w))
+			}
+			summary.WriteString("- " + w + "\n")
+		}
+	}
+	return appendEnvFile("GITHUB_STEP_SUMMARY", summary.String())
+}
+
+// reusableRun returns the pull request's successful run of this workflow at head, from the
+// same repository, whose release plan and any release assets haven't expired: it already
+// ran the release checks on the release commit, and built and attested the assets. It
+// returns 0 if there is none.
+func reusableRun(ctx context.Context, gh *publish.GitHub, c config.Config, head, repository string) (int64, error) {
+	// GITHUB_WORKFLOW_REF is owner/name/.github/workflows/<file>@<ref>.
+	ref, _, _ := strings.Cut(os.Getenv("GITHUB_WORKFLOW_REF"), "@")
+	if ref == "" {
+		return 0, nil
+	}
+	runs, err := gh.SuccessfulPullRequestRuns(ctx, path.Base(ref), head)
+	if err != nil {
+		return 0, err
+	}
+	for _, r := range runs {
+		// A fork's run built nothing; only this repository's own branches do.
+		if r.HeadSHA != head || r.Conclusion != "success" || r.HeadRepository.FullName != repository {
+			continue
+		}
+		names, err := gh.Artifacts(ctx, r.ID)
+		if err != nil {
+			return 0, err
+		}
+		if slices.Contains(names, "release-plan") && (c.ReleaseAssets.Workflow == "" || slices.Contains(names, "release-assets")) {
+			return r.ID, nil
+		}
+	}
+	return 0, nil
+}
+
+// normalize ignores the line endings and trailing whitespace GitHub may change in a release body.
+func normalize(s string) string {
+	return strings.TrimRight(strings.ReplaceAll(s, "\r\n", "\n"), " \t\n")
 }
 
 // appendEnvFile writes to a GitHub Actions file such as GITHUB_OUTPUT, if the variable is set.
@@ -425,72 +608,85 @@ func appendEnvFile(name, content string) error {
 	return err
 }
 
+// readPlan reads a release plan that validate --out wrote.
+func readPlan(file string) (plan.Plan, error) {
+	var p plan.Plan
+	data, err := os.ReadFile(file)
+	if err != nil {
+		return p, err
+	}
+	if err := json.Unmarshal(data, &p); err != nil {
+		return p, fmt.Errorf("read %s: %v", file, err)
+	}
+	return p, nil
+}
+
 func cmdPublish(ctx context.Context, args []string, out io.Writer) error {
-	fs, _ := flags("publish", "publish --plan <file> --commit <sha> --branch <name> [--assets <dir>] [--repository owner/name]")
-	planFile := fs.String("plan", "", "release plan written by release-planner validate --out")
-	commit := fs.String("commit", "", "approved commit from the validate job")
-	branch := fs.String("branch", "", "release branch; the commit must be a pull request merged into it")
+	fs, _ := flags("publish", "publish --plan <file> --branch <name> [--built-plan <file>] [--assets <dir> [--signer-workflow <path>]] [--repository owner/name]")
+	planFile := fs.String("plan", "", "release plan written by release-planner validate --ci --merged --out")
+	builtPlan := fs.String("built-plan", "", "release plan of the run that ran the release checks and built the assets, which must plan the same release")
+	branch := fs.String("branch", "", "release branch; the plan's merged commit must be a pull request merged into it")
 	repository := fs.String("repository", os.Getenv("GITHUB_REPOSITORY"), "GitHub repository, as owner/name")
 	assetsDir := fs.String("assets", "", "directory of files to attach to the release, staged on a draft and verified before publishing")
+	signer := fs.String("signer-workflow", "", "with --assets, require each file's build attestation from this workflow in the repository, such as .github/workflows/release-planner.yml")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *planFile == "" || *commit == "" || *branch == "" || *repository == "" {
+	if *planFile == "" || *branch == "" || *repository == "" {
 		fs.Usage()
-		return fmt.Errorf("--plan, --commit, --branch, and --repository (or GITHUB_REPOSITORY) are required")
+		return fmt.Errorf("--plan, --branch, and --repository (or GITHUB_REPOSITORY) are required")
 	}
 	token := os.Getenv("GITHUB_TOKEN")
 	if token == "" {
 		return fmt.Errorf("set GITHUB_TOKEN to a token that can write to %s", *repository)
 	}
-	data, err := os.ReadFile(*planFile)
+	p, err := readPlan(*planFile)
 	if err != nil {
 		return err
-	}
-	var p plan.Plan
-	if err := json.Unmarshal(data, &p); err != nil {
-		return fmt.Errorf("read %s: %v", *planFile, err)
 	}
 	var assets []publish.File
-	if *assetsDir != "" {
-		if assets, err = publish.ReadAssets(*assetsDir); err != nil {
-			return err
+	if p.Tag != "" {
+		if *builtPlan != "" {
+			built, err := readPlan(*builtPlan)
+			if err != nil {
+				return err
+			}
+			if built.Tag != p.Tag || built.Commit != p.Commit {
+				return fmt.Errorf("the run that checked and built the release planned %q at %s, not %s at %s", built.Tag, built.Commit, p.Tag, p.Commit)
+			}
+		}
+		if *assetsDir != "" {
+			if assets, err = publish.ReadAssets(*assetsDir); err != nil {
+				return err
+			}
+			if *signer != "" {
+				if err := publish.VerifyAttestations(ctx, *assetsDir, assets, *repository, *signer); err != nil {
+					return err
+				}
+			}
 		}
 	}
-	api := os.Getenv("GITHUB_API_URL")
-	if api == "" {
-		api = "https://api.github.com"
-	}
-	res, err := publish.Publish(ctx, &publish.GitHub{BaseURL: api, Token: token, Repository: *repository}, p, *commit, *branch, assets)
+	res, err := publish.Publish(ctx, api(token, *repository), p, *branch, assets)
 	if err != nil {
 		return err
 	}
-	if res.AlreadyPublished {
-		fmt.Fprintf(out, "%s is already published: %s\n", p.Tag, res.URL)
-	} else {
-		fmt.Fprintf(out, "Published %s: %s\n", p.Tag, res.URL)
+	var summary strings.Builder
+	switch {
+	case p.Tag == "":
+	case res.AlreadyPublished:
+		fmt.Fprintf(&summary, "%s is already published: %s\n", p.Tag, res.URL)
+	default:
+		fmt.Fprintf(&summary, "Published %s: %s\n", p.Tag, res.URL)
 	}
-	return appendEnvFile("GITHUB_STEP_SUMMARY", fmt.Sprintf("\nPublished %s\n", res.URL))
-}
-
-// warnAboutNotes reports the release notes rules the notes break without failing, as GitHub
-// warning annotations on standard output when the plan goes to a file, and in the step summary.
-func warnAboutNotes(out io.Writer, p plan.Plan, annotate bool) error {
-	if len(p.Findings) == 0 {
-		return nil
-	}
-	summary := fmt.Sprintf("\nRelease notes rules\n\n%s breaks these rules. They don't block the release; fix them if they're mistakes.\n\n", p.File)
-	for _, f := range p.Findings {
-		if annotate {
-			line := ""
-			if f.Line > 0 {
-				line = fmt.Sprintf(",line=%d", f.Line)
-			}
-			fmt.Fprintf(out, "::warning file=%s%s,title=%s::%s\n", escapeProperty(p.File), line, escapeProperty(f.Rule), escapeData(f.Message))
+	for _, e := range res.Edited {
+		if e.Changed {
+			fmt.Fprintf(&summary, "Updated the notes of %s: %s\n", e.Tag, e.URL)
+		} else {
+			fmt.Fprintf(&summary, "The notes of %s were already up to date: %s\n", e.Tag, e.URL)
 		}
-		summary += "- " + f.String() + "\n"
 	}
-	return appendEnvFile("GITHUB_STEP_SUMMARY", summary)
+	fmt.Fprint(out, summary.String())
+	return appendEnvFile("GITHUB_STEP_SUMMARY", "\n"+summary.String())
 }
 
 // escapeData and escapeProperty encode text for a GitHub Actions workflow command.
@@ -502,40 +698,22 @@ func escapeProperty(s string) string {
 	return strings.NewReplacer("%", "%25", "\r", "%0D", "\n", "%0A", ":", "%3A", ",", "%2C").Replace(s)
 }
 
-// releaseEnvironment is the environment the generated workflow publishes from.
-const releaseEnvironment = "release"
+// The environments the generated workflow publishes from, and runs downstream workflows from.
+const (
+	releaseEnvironment    = "release"
+	downstreamEnvironment = "downstream"
+)
 
-// warnAboutEnvironment reports, without failing, how the release environment differs from
-// the recommended setup. It writes GitHub warning annotations, to standard output only when
-// the plan goes to a file, and adds the warnings to the step summary.
-func warnAboutEnvironment(ctx context.Context, out io.Writer, branch string, annotate bool) error {
-	token, repository := os.Getenv("GITHUB_TOKEN"), os.Getenv("GITHUB_REPOSITORY")
-	if token == "" || repository == "" {
-		return nil
-	}
-	api := os.Getenv("GITHUB_API_URL")
-	if api == "" {
-		api = "https://api.github.com"
-	}
-	gh := &publish.GitHub{BaseURL: api, Token: token, Repository: repository}
-	env, err := gh.Environment(ctx, releaseEnvironment, branch)
-	var warnings []string
+// environment warns, through warn, how an environment differs from the recommended setup.
+func environment(ctx context.Context, gh *publish.GitHub, name, branch, docs string, warn func(string, ...any)) {
+	env, err := gh.Environment(ctx, name, branch)
 	if err != nil {
-		warnings = []string{fmt.Sprintf("Couldn't check the %s environment's settings: %v. Give the validate job actions: read to check them.", releaseEnvironment, err)}
-	} else {
-		warnings = publish.EnvironmentWarnings(releaseEnvironment, branch, env)
+		warn("Couldn't check the %s environment's settings: %v. Give the validate job actions: read to check them.", name, err)
+		return
 	}
-	if len(warnings) == 0 {
-		return nil
+	for _, w := range publish.EnvironmentWarnings(name, branch, docs, env) {
+		warn("%s", w)
 	}
-	summary := "\nRelease environment\n\n"
-	for _, w := range warnings {
-		if annotate {
-			fmt.Fprintf(out, "::warning title=Release environment::%s\n", w)
-		}
-		summary += "- " + w + "\n"
-	}
-	return appendEnvFile("GITHUB_STEP_SUMMARY", summary)
 }
 
 func cmdVersion(_ context.Context, args []string, out io.Writer) error {
