@@ -895,11 +895,13 @@ func beforePrePublish(ctx context.Context, repo gitrepo.Repo, gh *publish.GitHub
 	return nil
 }
 
-// waitingFor returns the earliest release the plan's release must wait for: the lowest version
-// below the plan's, among the previous release and every version whose notes file is on the
-// release branch at base, or after the merge at its current tip, that has no published release,
-// tagged or not. file is its notes file when it isn't tagged, so withdrawing it is an option, and
-// "" otherwise. It returns "" when there's none.
+// waitingFor returns the earliest release the plan's release must wait for: the lowest version,
+// among the previous release and every version between it and the plan's whose notes file is on
+// the release branch at base, or after the merge at its current tip, that has no published
+// release, tagged or not. Versions below the previous release don't count: it was published
+// after them, so their workflows already had their turn, and a deleted old release never holds
+// up later ones. file is its notes file when it isn't tagged, so withdrawing it is an option,
+// and "" otherwise. It returns "" when there's none.
 func waitingFor(ctx context.Context, repo gitrepo.Repo, gh *publish.GitHub, c config.Config, p plan.Plan, base string) (tag, file string, err error) {
 	ref := base
 	if ref == "" {
@@ -919,7 +921,8 @@ func waitingFor(ctx context.Context, repo gitrepo.Repo, gh *publish.GitHub, c co
 		earlier[p.Previous] = ""
 	}
 	for _, name := range files {
-		if v, ok := semver.Parse(plan.NotesTag(dir, name)); ok && semver.Compare(v, current) < 0 {
+		v, ok := semver.Parse(plan.NotesTag(dir, name))
+		if ok && semver.Compare(v, current) < 0 && (p.Previous == "" || semver.Compare(v, semver.MustParse(p.Previous)) > 0) {
 			earlier[plan.NotesTag(dir, name)] = name
 		}
 	}

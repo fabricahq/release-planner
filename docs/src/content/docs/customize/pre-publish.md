@@ -94,7 +94,7 @@ The release workflow warns on each release pull request if the environment is mi
 
 After you merge, once the release checks and assets have passed, and right before the release is tagged. It runs for prereleases too. It doesn't run on the release pull request, or for notes edits to a published release.
 
-Releases publish in order. If an earlier release you merged isn't published yet, a newer one waits: its run stops before your workflow, and its pull request says which release it's waiting for. Once that release is published or withdrawn, use **Re-run failed jobs** on the newer release's run. That includes an earlier release that was tagged but whose GitHub release is missing or a draft, so restore it rather than delete it.
+Releases publish in order. If an earlier release you merged isn't published yet, a newer one waits: its run stops before your workflow, and its pull request says which release it's waiting for. Once that release is published or withdrawn, use **Re-run failed jobs** on the newer release's run. It checks the latest published release and every version between it and this one, tagged or not. Versions below the latest published release don't hold anything up: it was published after them, so their workflows already had their turn.
 
 ## If it fails
 
