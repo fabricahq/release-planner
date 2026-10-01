@@ -3,9 +3,19 @@ title: Pre-publish workflow
 description: Run one of your workflows after you approve a release and before it's tagged, such as one that applies database migrations.
 ---
 
-A pre-publish workflow is optional. It runs after you merge the release pull request and before the release is tagged, so if it fails, the release isn't published. A common one applies database migrations, so every published release has its schema in place.
+Some releases need a change outside the repository before anyone can use them. The common case is a database. Say version 1.3.0 adds a column and its code expects that column to exist:
 
-It never runs on the release pull request. Merging is the approval, and nothing with side effects runs before it.
+- **Migrate after publishing**, and there's a window where 1.3.0 is published and ready to deploy, but its column doesn't exist yet. If the migration then fails, you have a published release you can't deploy.
+- **Migrate before approving**, on the release pull request, and you change production for a release you might never approve, or that changes before you merge it.
+
+What you want is to apply the change after you approve the release and before it's published, and to publish only if the change succeeded.
+
+A pre-publish workflow does exactly that. It's one of your own workflows, such as one that applies database migrations, that Release Planner runs after you merge the release pull request and before it tags and publishes the release:
+
+- **If it succeeds**, Release Planner publishes the release as usual, so every published release has its migrations in place.
+- **If it fails**, nothing is tagged or published. Fix the cause and use **Re-run failed jobs**, or withdraw the release.
+
+It's optional, and it never runs on the release pull request: merging is the approval, and nothing with side effects runs before it.
 
 ## Set it up
 
