@@ -640,3 +640,75 @@ func TestNotifyCommentsOncePerRunAttemptAndJob(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// A pre-publish workflow runs after the merge, before publication, and says so before it.
+func TestRendersThePrePublishWorkflow(t *testing.T) {
+	s := status(release(), false, results("validate", "success", "pre-publish", "skipped", "publish", "skipped"))
+	s.PrePublish = "migrate.yml"
+	blocks := render(t, s)
+	contains(t, blocks.Summary, "**When you merge this PR:**\n- First, `migrate.yml` runs on the release commit. If it fails, the release isn't published.\n- The release commit, `0123456`, is tagged `v1.2.0`.\n")
+	contains(t, blocks.Status, "| ⏸️ | Run `migrate.yml` | Runs when you merge |\n| ⏸️ | Publish | Runs when you merge |\n")
+
+	// A notes edit doesn't run it.
+	edit := status(&plan.Plan{Edits: []plan.Edit{{Tag: "v1.0.0", File: "_releases/v1.0.0.md"}}}, false, results("validate", "success", "pre-publish", "skipped", "publish", "skipped"))
+	edit.PrePublish = "migrate.yml"
+	lacks(t, render(t, edit).Summary, "migrate.yml")
+	lacks(t, render(t, edit).Status, "migrate.yml")
+
+	// After the merge, it's named first when it failed, before the publish job it blocked.
+	s = status(release(), true, results("validate", "success", "pre-publish", "failure", "publish", "skipped"))
+	s.PrePublish, s.RunJobs = "migrate.yml", runJobs("100", "validate", "pre-publish / migrate", "report")
+	blocks = render(t, s)
+	equal(t, blocks.Summary, `**[✏️ Edit the v1.2.0 release notes](https://github.com/o/r/edit/main/_releases/v1.2.0.md)**
+
+❌ **The pre-publish job failed,** so this attempt stopped before publishing. See [the workflow run](https://github.com/o/r/actions/runs/100). If the cause was outside the release commit, fix it, then use **Re-run failed jobs** on that run. If the release commit itself is broken, withdraw v1.2.0: delete `+"`_releases/v1.2.0.md`"+` in the pull request that fixes it, then release again. [What to do when pre-publish fails](https://release-planner.fabricahq.com/customize/pre-publish/#if-it-fails)
+
+### Release status
+
+| Version | Release commit | Previous release |
+| --- | --- | --- |
+| `+"`v1.2.0`"+` | [`+"`0123456`"+`](https://github.com/o/r/commit/`+commit+`) | [v1.1.0](https://github.com/o/r/releases/tag/v1.1.0) |
+`)
+	contains(t, blocks.Status, "| ✅ | Check the version and release notes | [Details](https://github.com/o/r/actions/runs/100/job/1) |\n| ❌ | Run `migrate.yml` | [Details](https://github.com/o/r/actions/runs/100/job/2) |\n")
+	lacks(t, blocks.Status, "Publish")
+	if s.Failed() != "pre-publish" || !strings.Contains(Failure(s), "The release's **pre-publish** job failed") {
+		t.Fatal(Failure(s))
+	}
+
+	s.Jobs["pre-publish"] = Job{Result: "cancelled"}
+	contains(t, render(t, s).Summary, "⚪ **The pre-publish job was cancelled,** so this attempt stopped before publishing. Use **Re-run failed jobs** on [that run](https://github.com/o/r/actions/runs/100).\n")
+
+	s.Jobs["pre-publish"], s.Jobs["publish"] = Job{Result: "success"}, Job{Result: "success"}
+	contains(t, render(t, s).Status, "| ✅ | Run `migrate.yml` |", "| ✅ | Publish |")
+}
+
+// A release that waits for an earlier one, or whose request was withdrawn, stopped on purpose,
+// so the report says why instead of asking for a fix.
+func TestRendersARunThatStoppedOnPurpose(t *testing.T) {
+	waiting := status(nil, true, results("validate", "failure", "pre-publish", "skipped", "publish", "skipped"))
+	waiting.Jobs["validate"] = Job{Result: "failure", Outputs: map[string]string{"waiting-for": "v1.1.0", "waiting-for-file": "_releases/v1.1.0.md"}}
+	equal(t, render(t, waiting).Summary, "⏳ **This release waits for v1.1.0,** which merged earlier and isn't published yet. Publish v1.1.0, or withdraw it by deleting `_releases/v1.1.0.md` in a pull request. Then use **Re-run failed jobs** on [this run](https://github.com/o/r/actions/runs/100).\n")
+	waiting.Jobs["validate"] = Job{Result: "failure", Outputs: map[string]string{"waiting-for": "v1.1.0"}}
+	equal(t, render(t, waiting).Summary, "⏳ **This release waits for v1.1.0,** which is tagged but has no published release. Publish v1.1.0 by retrying its release, then use **Re-run failed jobs** on [this run](https://github.com/o/r/actions/runs/100).\n")
+
+	const withdrawn = "⚪ **A later change to the release notes on main withdrew or replaced what this pull request approved,** so this run doesn't publish it. Any newer request publishes from its own run.\n"
+	stale := status(nil, true, results("validate", "failure", "publish", "skipped"))
+	stale.Jobs["validate"] = Job{Result: "failure", Outputs: map[string]string{"withdrawn": commit}}
+	equal(t, render(t, stale).Summary, withdrawn)
+
+	// Re-run failed jobs reuses validate, so publish finds the withdrawal.
+	stale = status(release(), true, results("validate", "success", "pre-publish", "success", "publish", "failure"))
+	stale.Jobs["publish"] = Job{Result: "failure", Outputs: map[string]string{"release": "withdrawn"}}
+	contains(t, render(t, stale).Summary, "**\n\n"+withdrawn)
+}
+
+// The summary reports what publish did, from its outputs, not just that it succeeded.
+func TestRendersWhatPublishDid(t *testing.T) {
+	p := release()
+	p.Edits = []plan.Edit{{Tag: "v1.0.0", File: "_releases/v1.0.0.md"}, {Tag: "v1.1.0", File: "_releases/v1.1.0.md"}}
+	s := status(p, true, results("validate", "success", "publish", "success"))
+	s.Jobs["publish"] = Job{Result: "success", Outputs: map[string]string{"release": "already-published", "notes": `[{"tag":"v1.0.0","changed":false},{"tag":"v1.1.0","changed":true}]`}}
+	contains(t, render(t, s).Summary, "✅ [v1.2.0](https://github.com/o/r/releases/tag/v1.2.0) was already published from `0123456`.\n\n"+
+		"✅ The notes of [v1.0.0](https://github.com/o/r/releases/tag/v1.0.0) were already up to date.\n\n"+
+		"✅ Updated the notes of [v1.1.0](https://github.com/o/r/releases/tag/v1.1.0).\n\n")
+}

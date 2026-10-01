@@ -243,6 +243,10 @@ jobs:
 {{- if .ReleaseAssets.Workflow}}
       attestations: read # to verify the assets' build attestations
 {{- end}}
+    # What publish did, for the report.
+    outputs:
+      release: ${{"{{"}} steps.publish.outputs.release {{"}}"}}
+      notes: ${{"{{"}} steps.publish.outputs.notes {{"}}"}}
     # Serialize publication so competing releases cannot race. Waiting runs queue in order;
     # without a queue, a newer waiting run would cancel an older one.
     concurrency:
@@ -306,6 +310,7 @@ jobs:
           github-token: ${{"{{"}} github.token {{"}}"}}
 {{- end}}
       - name: Publish the approved release
+        id: publish
         env:
           GITHUB_TOKEN: ${{"{{"}} github.token {{"}}"}}
           # Empty without the release App, so writes use GITHUB_TOKEN.
@@ -425,4 +430,4 @@ jobs:
           MERGED: ${{"{{"}} inputs.merged-commit || github.sha {{"}}"}}
         run: |
           if [ -n "$PULL_REQUEST" ]; then target=(--pull-request "$PULL_REQUEST" --head-sha "$HEAD_SHA" --head-ref "$HEAD_REF" --head-repository "$HEAD_REPOSITORY"); else target=(--merged "$MERGED"); fi
-          release-planner report --needs "$NEEDS" --branch {{.Branch}} --plan "$RUNNER_TEMP/plan/release-plan.json"{{if .ReleaseAssets.Workflow}} --assets "$RUNNER_TEMP/release-assets"{{end}}{{range .Downstream}} --downstream {{.Repository}}:{{.Workflow}}{{end}} "${target[@]}"
+          release-planner report --needs "$NEEDS" --branch {{.Branch}} --plan "$RUNNER_TEMP/plan/release-plan.json"{{if .ReleaseAssets.Workflow}} --assets "$RUNNER_TEMP/release-assets"{{end}}{{if .PrePublish.Workflow}} --pre-publish {{.PrePublish.Workflow}}{{end}}{{range .Downstream}} --downstream {{.Repository}}:{{.Workflow}}{{end}} "${target[@]}"

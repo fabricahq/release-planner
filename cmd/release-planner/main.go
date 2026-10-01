@@ -25,6 +25,7 @@ import (
 	"github.com/fabricahq/release-planner/internal/notes"
 	"github.com/fabricahq/release-planner/internal/plan"
 	"github.com/fabricahq/release-planner/internal/publish"
+	"github.com/fabricahq/release-planner/internal/report"
 	"github.com/fabricahq/release-planner/internal/semver"
 )
 
@@ -739,6 +740,11 @@ func cmdPublish(ctx context.Context, args []string, out io.Writer) error {
 	// Re-run failed jobs reuses validate's plan, so check again that a later commit on the
 	// release branch hasn't withdrawn or replaced what the merge approved.
 	if err := plan.StillApproved(ctx, gitrepo.Repo{Dir: *dir}, *branch, p); err != nil {
+		if errors.As(err, new(plan.WithdrawnError)) {
+			if err := appendEnvFile("GITHUB_OUTPUT", "release=withdrawn\n"); err != nil {
+				return err
+			}
+		}
 		return err
 	}
 	gh := api(token, *repository)
@@ -746,6 +752,9 @@ func cmdPublish(ctx context.Context, args []string, out io.Writer) error {
 	gh.WriteToken = os.Getenv("RELEASE_TOKEN")
 	res, err := publish.Publish(ctx, gh, p, *branch, assets)
 	if err != nil {
+		return err
+	}
+	if err := appendEnvFile("GITHUB_OUTPUT", publishOutputs(p, res)); err != nil {
 		return err
 	}
 	var summary strings.Builder
@@ -767,6 +776,26 @@ func cmdPublish(ctx context.Context, args []string, out io.Writer) error {
 	}
 	fmt.Fprint(out, summary.String())
 	return appendEnvFile("GITHUB_STEP_SUMMARY", "\n"+summary.String())
+}
+
+// publishOutputs are the publish step's outputs, which the report reads: release, whether the
+// requested release was published now or already, and notes, whether each edit changed the
+// release's notes, as a JSON list of report.EditedNotes.
+func publishOutputs(p plan.Plan, res publish.Result) string {
+	release := ""
+	switch {
+	case p.Tag == "":
+	case res.AlreadyPublished:
+		release = "already-published"
+	default:
+		release = "published"
+	}
+	notes := []report.EditedNotes{}
+	for _, e := range res.Edited {
+		notes = append(notes, report.EditedNotes{Tag: e.Tag, Changed: e.Changed})
+	}
+	data, _ := json.Marshal(notes)
+	return fmt.Sprintf("release=%s\nnotes=%s\n", release, data)
 }
 
 // escapeData and escapeProperty encode text for a GitHub Actions workflow command.

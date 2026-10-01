@@ -366,8 +366,13 @@ func TestPublishRefusesARequestWithdrawnAfterValidation(t *testing.T) {
 	o.git("rm", "-q", "_releases/v1.0.0.md")
 	o.repo.commit("Fix the migration and withdraw v1.0.0 (#4)")
 	api := newAPI(t, map[string]any{})
+	output := actionsFiles(t)
 	code, _, errOut := cli(t, "publish", "--dir", o.checkout(t), "--plan", file, "--built-plan", file, "--branch", "main")
 	if code != 1 || !strings.Contains(errOut, "so v1.0.0 was withdrawn or requested again") || len(api.requests) != 0 {
 		t.Fatalf("%d %s %v", code, errOut, api.requests)
+	}
+	// The report says the run stopped on purpose.
+	if output("output") != "release=withdrawn\n" {
+		t.Fatalf("outputs %q", output("output"))
 	}
 }

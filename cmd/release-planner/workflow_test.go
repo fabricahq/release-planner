@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/fabricahq/release-planner/internal/plan"
+	"github.com/fabricahq/release-planner/internal/publish"
 )
 
 func writePlan(t *testing.T, p plan.Plan) string {
@@ -287,5 +288,26 @@ func TestPublishChecksTheBuildBeforeWriting(t *testing.T) {
 	data, _ := os.ReadFile(log)
 	if !strings.Contains(string(data), "attestation verify "+filepath.Join(assets, "bad.tar.gz")+" --repo fabricahq/example --signer-workflow fabricahq/example/.github/workflows/release-planner.yml --deny-self-hosted-runners") {
 		t.Fatal(string(data))
+	}
+}
+
+// publish's outputs tell the report what it did: whether the release was new, and which
+// edited notes changed.
+func TestPublishOutputsWhatItDid(t *testing.T) {
+	for name, tc := range map[string]struct {
+		p    plan.Plan
+		res  publish.Result
+		want string
+	}{
+		"published":         {plan.Plan{Tag: "v1.2.0"}, publish.Result{}, "release=published\nnotes=[]\n"},
+		"already published": {plan.Plan{Tag: "v1.2.0"}, publish.Result{AlreadyPublished: true}, "release=already-published\nnotes=[]\n"},
+		"edits": {plan.Plan{Edits: []plan.Edit{{Tag: "v1.0.0"}, {Tag: "v1.1.0"}}}, publish.Result{Edited: []publish.Edited{{Tag: "v1.0.0"}, {Tag: "v1.1.0", Changed: true}}},
+			`release=` + "\n" + `notes=[{"tag":"v1.0.0","changed":false},{"tag":"v1.1.0","changed":true}]` + "\n"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := publishOutputs(tc.p, tc.res); got != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
 	}
 }

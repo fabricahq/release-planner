@@ -6,9 +6,11 @@ package report
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/fabricahq/release-planner/internal/notes"
@@ -33,6 +35,13 @@ const (
 type Job struct {
 	Result  string            `json:"result"`
 	Outputs map[string]string `json:"outputs"`
+}
+
+// EditedNotes is one entry of the publish job's notes output, a JSON list: whether publishing
+// changed the notes of a release the plan edits.
+type EditedNotes struct {
+	Tag     string `json:"tag"`
+	Changed bool   `json:"changed"`
 }
 
 // Asset is a built release file.
@@ -80,6 +89,8 @@ type Status struct {
 	MergedBy string
 	// Downstream lists the downstream workflows, with their jobs' results.
 	Downstream []Target
+	// PrePublish is the pre-publish workflow's file name, or "" when there's none.
+	PrePublish string
 }
 
 // Blocks are the contents of the description's summary and status blocks, without their markers.
@@ -91,6 +102,7 @@ var jobs = []struct{ id, label string }{
 	{"release-checks", "Run the release checks"},
 	{"release-assets", "Build the release assets"},
 	{"attest", "Attest the release assets"},
+	{"pre-publish", "Run the pre-publish workflow"},
 	{"publish", "Publish"},
 	{"attest-release", "Attest the published assets"},
 	{"downstream", "Run downstream workflows"},
@@ -106,6 +118,38 @@ func (s Status) Failed() string {
 		if r := s.Jobs[j.id].Result; r == "failure" || r == "cancelled" {
 			return j.id
 		}
+	}
+	return ""
+}
+
+// label is the job's row label: the pre-publish workflow's own name, or the job's.
+func (s Status) label(id, label string) string {
+	if id == "pre-publish" && s.PrePublish != "" {
+		return "Run `" + s.PrePublish + "`"
+	}
+	return label
+}
+
+// PrePublishDocs explains what to do when the pre-publish workflow fails.
+const PrePublishDocs = "https://release-planner.fabricahq.com/customize/pre-publish/#if-it-fails"
+
+// stopped explains a run after the merge that stopped on purpose, or failed in a way with its
+// own remedy, or returns "".
+func (s Status) stopped(p *plan.Plan, failed string) string {
+	validate, publish := s.Jobs["validate"].Outputs, s.Jobs["publish"].Outputs
+	switch {
+	case failed == "validate" && validate["waiting-for"] != "" && validate["waiting-for-file"] != "":
+		tag := validate["waiting-for"]
+		return fmt.Sprintf("⏳ **This release waits for %s,** which merged earlier and isn't published yet. Publish %s, or withdraw it by deleting `%s` in a pull request. Then use **Re-run failed jobs** on [this run](%s).", tag, tag, validate["waiting-for-file"], s.RunURL)
+	case failed == "validate" && validate["waiting-for"] != "":
+		tag := validate["waiting-for"]
+		return fmt.Sprintf("⏳ **This release waits for %s,** which is tagged but has no published release. Publish %s by retrying its release, then use **Re-run failed jobs** on [this run](%s).", tag, tag, s.RunURL)
+	case failed == "validate" && validate["withdrawn"] != "", failed == "publish" && publish["release"] == "withdrawn":
+		return fmt.Sprintf("⚪ **A later change to the release notes on %s withdrew or replaced what this pull request approved,** so this run doesn't publish it. Any newer request publishes from its own run.", s.Branch)
+	case failed == "pre-publish" && s.Jobs[failed].Result == "cancelled":
+		return fmt.Sprintf("⚪ **The pre-publish job was cancelled,** so this attempt stopped before publishing. Use **Re-run failed jobs** on [that run](%s).", s.RunURL)
+	case failed == "pre-publish":
+		return fmt.Sprintf("❌ **The pre-publish job failed,** so this attempt stopped before publishing. See [the workflow run](%s). If the cause was outside the release commit, fix it, then use **Re-run failed jobs** on that run. If the release commit itself is broken, withdraw %s: delete `%s` in the pull request that fixes it, then release again. [What to do when pre-publish fails](%s)", s.RunURL, p.Tag, p.File, PrePublishDocs)
 	}
 	return ""
 }
@@ -170,12 +214,28 @@ func (s Status) summary() string {
 	switch {
 	case s.Merged:
 		if published {
-			if p.Tag != "" {
+			outputs := s.Jobs["publish"].Outputs
+			switch {
+			case p.Tag != "" && outputs["release"] == "already-published":
+				line("✅ %s was already published from `%s`.\n", s.release(p.Tag), short(p.Commit))
+			case p.Tag != "":
 				line("✅ Published %s from `%s`.\n", s.release(p.Tag), short(p.Commit))
 			}
+			// Without publish's notes output, as from an older run, an edit that succeeded updated them.
+			var edited []EditedNotes
+			_ = json.Unmarshal([]byte(outputs["notes"]), &edited)
 			for _, e := range p.Edits {
-				line("✅ Updated the notes of %s.\n", s.release(e.Tag))
+				i := slices.IndexFunc(edited, func(x EditedNotes) bool { return x.Tag == e.Tag })
+				if i >= 0 && !edited[i].Changed {
+					line("✅ The notes of %s were already up to date.\n", s.release(e.Tag))
+				} else {
+					line("✅ Updated the notes of %s.\n", s.release(e.Tag))
+				}
 			}
+		}
+		if why := s.stopped(p, failed); why != "" {
+			line("%s\n", why)
+			break
 		}
 		failure("Once the cause is fixed, use **Re-run failed jobs** on that run. It uses the same release commit and files, and changes nothing that already succeeded.")
 	default:
@@ -184,6 +244,9 @@ func (s Status) summary() string {
 			break
 		}
 		line("**When you merge this PR:**")
+		if p.Tag != "" && s.PrePublish != "" {
+			line("- First, `%s` runs on the release commit. If it fails, the release isn't published.", s.PrePublish)
+		}
 		if p.Tag != "" {
 			line("- The release commit, `%s`, is tagged `%s`.", short(p.Commit), p.Tag)
 			files := ""
@@ -270,13 +333,14 @@ func (s Status) status() string {
 				}
 				row(icon, "Run "+t.label(), s.details(s.RunJobs, t.Job(), s.RunURL))
 			}
-		case j.id == "publish" && !s.Merged && p != nil && !p.Empty():
-			row("⏸️", j.label, "Runs when you merge")
+		case j.id == "publish" && !s.Merged && p != nil && !p.Empty(),
+			j.id == "pre-publish" && !s.Merged && p != nil && p.Tag != "" && s.PrePublish != "":
+			row("⏸️", s.label(j.id, j.label), "Runs when you merge")
 		case result == "skipped" && p != nil && p.Reused && (j.id == "release-checks" || j.id == "release-assets" || j.id == "attest"):
 			build := fmt.Sprintf("%s/%s/actions/runs/%d", s.Server, s.Repository, p.BuildRun)
 			row("♻️", j.label, fmt.Sprintf("[Reused from the pull request](%s)", jobURL(s.BuildJobs, j.id, build)))
 		case icons[result] != "":
-			icon, label := icons[result], j.label
+			icon, label := icons[result], s.label(j.id, j.label)
 			if j.id == "validate" && warnings > 0 {
 				label += fmt.Sprintf(" (%d %s)", warnings, plural(warnings, "warning"))
 				if result == "success" {

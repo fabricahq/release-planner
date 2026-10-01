@@ -527,6 +527,7 @@ type job struct {
 	Concurrency map[string]any    `yaml:"concurrency"`
 	Steps       []step            `yaml:"steps"`
 	With        map[string]string `yaml:"with"`
+	Outputs     map[string]string `yaml:"outputs"`
 }
 
 type step struct {
@@ -631,6 +632,14 @@ func TestWorkflowCombinations(t *testing.T) {
 			guard := "(needs.validate.outputs.tag == '' || needs.pre-publish.result == 'success')"
 			if prePublish != strings.Contains(publish.If, guard) {
 				t.Errorf("publish runs if %q", publish.If)
+			}
+			// publish tells the report what it did.
+			if publish.Outputs["release"] != "${{ steps.publish.outputs.release }}" || publish.Outputs["notes"] != "${{ steps.publish.outputs.notes }}" ||
+				publish.named(t, "publish").Name != "Publish the approved release" {
+				t.Errorf("publish outputs %v", publish.Outputs)
+			}
+			if prePublish != strings.Contains(jobs["report"].Steps[len(jobs["report"].Steps)-1].Run, " --pre-publish migrate.yml ") {
+				t.Errorf("report runs %q", jobs["report"].Steps[len(jobs["report"].Steps)-1].Run)
 			}
 			if prePublish {
 				hook := jobs["pre-publish"]
