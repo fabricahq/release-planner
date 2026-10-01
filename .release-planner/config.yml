@@ -1,9 +1,18 @@
 # Release Planner configuration: https://release-planner.fabricahq.com/customize/configuration/
 #
-# Release Planner releases itself from the approved commit with the hand-written
-# .github/workflows/release.yml, so it does not run install. This file drives
-# guide, inventory, and validate.
+# Release Planner releases itself the way adopting repositories do, with the workflow that
+# release-planner install generates. version pins the previous release, not the code being
+# released, so a release that breaks publishing can't stop its fix from publishing. Bump it
+# in a separate pull request once a new release is out.
 
 schema-version: 1
-version: v0.3.2
+version: v0.5.0
 first-version: v0.1.0
+
+# Rescan the release commit for newly published vulnerabilities.
+release-checks:
+  workflow: release-checks.yml
+
+# The release archives and SHA256SUMS that install.sh downloads.
+release-assets:
+  workflow: build-release.yml

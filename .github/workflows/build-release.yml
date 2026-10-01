@@ -1,0 +1,62 @@
+# Build Release Planner's release archives and checksum manifest from the release commit.
+# The generated Release workflow calls this on the release pull request, with read access and
+# no secrets, then attests and publishes exactly the files it uploads.
+name: Build release
+on:
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        required: true
+      tag:
+        type: string
+        required: true
+      version:
+        type: string
+        required: true
+    outputs:
+      artifact-id:
+        value: ${{ jobs.build.outputs.artifact-id }}
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      # The build must not reuse cached output from other runs.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Build the release archives
+        env:
+          TAG: ${{ inputs.tag }}
+        run: go run ./cmd/package-binaries --version "$TAG" --output "$RUNNER_TEMP/release-assets"
+      # Install the Linux archive the way install.sh does, and check it reports the release's version.
+      - name: Check the Linux binary reports the release version
+        env:
+          TAG: ${{ inputs.tag }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          cd "$RUNNER_TEMP/release-assets"
+          sha256sum --check --strict SHA256SUMS
+          archive="release-planner_${VERSION}_linux_amd64.tar.gz"
+          mkdir "$RUNNER_TEMP/smoke"
+          tar -xzf "$archive" -C "$RUNNER_TEMP/smoke" release-planner
+          got=$("$RUNNER_TEMP/smoke/release-planner" version)
+          if [ "$got" != "$TAG" ]; then
+            echo "::error::$archive reports version $got, not $TAG"
+            exit 1
+          fi
+      - id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-assets
+          path: ${{ runner.temp }}/release-assets/
+          if-no-files-found: error
