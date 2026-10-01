@@ -529,6 +529,11 @@ func inWorkflow(ctx context.Context, out io.Writer, repo gitrepo.Repo, c config.
 			environment(ctx, gh, config.DownstreamEnvironment, c.Branch, publish.DownstreamEnvironmentDocs, warn)
 		}
 	}
+	if gh != nil && p.Tag != "" && c.PrePublish.Enabled() {
+		if err := beforePrePublish(ctx, repo, gh, c, *p, base, warn); err != nil {
+			return err
+		}
+	}
 
 	publishes := base == "" && !p.Empty()
 	outputs := fmt.Sprintf("tag=%s\nversion=%s\ncommit=%s\npublish=%t\nbuild=%t\nbuild-run=%d\nbuilt-plan-artifact=%s\nbuilt-assets-artifact=%s\n",
@@ -771,6 +776,102 @@ func escapeData(s string) string {
 
 func escapeProperty(s string) string {
 	return strings.NewReplacer("%", "%25", "\r", "%0D", "\n", "%0A", ":", "%3A", ",", "%2C").Replace(s)
+}
+
+// beforePrePublish checks what must hold before the pre-publish workflow runs for a release.
+// Its environment must keep its credentials to the release branch, and every earlier release
+// must be published, so no earlier release's workflow can still run after this one's on
+// purpose: the previous release, and any untagged lower version whose notes are on the release
+// branch. On the pull request, at base, these are warnings, since they may change before the
+// merge; after the merge, against the release branch's current tip, they stop the run, and
+// Re-run failed jobs checks again.
+func beforePrePublish(ctx context.Context, repo gitrepo.Repo, gh *publish.GitHub, c config.Config, p plan.Plan, base string, warn func(string, ...any)) error {
+	merged := base == ""
+	retry := ""
+	if merged {
+		retry = " Then use Re-run failed jobs on this run."
+	}
+	name, workflow := c.PrePublish.Environment, c.PrePublish.Workflow
+	env, err := gh.Environment(ctx, name, c.Branch)
+	if err != nil {
+		if merged {
+			return fmt.Errorf("couldn't check the %s environment before running %s: %v", name, workflow, err)
+		}
+		warn("Couldn't check the %s environment's settings: %v", name, err)
+	}
+	if err == nil {
+		refusal, warnings := publish.PrePublishEnvironment(name, c.Branch, workflow, env)
+		for _, w := range warnings {
+			warn("%s", w)
+		}
+		switch {
+		case refusal != "" && merged:
+			return fmt.Errorf("%s%s", refusal, retry)
+		case refusal != "":
+			warn("%s", refusal)
+		}
+	}
+
+	tag, file, err := waitingFor(ctx, repo, gh, c, p, base)
+	switch {
+	case err != nil && merged:
+		return fmt.Errorf("couldn't check that the releases before %s are published: %v", p.Tag, err)
+	case err != nil:
+		warn("Couldn't check that the releases before %s are published: %v", p.Tag, err)
+	case tag == "":
+	case !merged:
+		warn("%s merged before this release and isn't published yet. After you merge, this release waits until %s is published or withdrawn.", tag, tag)
+	default:
+		if err := appendEnvFile("GITHUB_OUTPUT", fmt.Sprintf("waiting-for=%s\nwaiting-for-file=%s\n", tag, file)); err != nil {
+			return err
+		}
+		if file == "" {
+			return fmt.Errorf("%s is tagged but has no published release, so %s waits for it. Publish %s by retrying its release, then use Re-run failed jobs on this run", tag, p.Tag, tag)
+		}
+		return fmt.Errorf("%s is on %s, but %s isn't published, so %s waits for it. Publish %s, or withdraw it by deleting %s in a pull request.%s", file, c.Branch, tag, p.Tag, tag, file, retry)
+	}
+	return nil
+}
+
+// waitingFor returns the earliest release the plan's release must wait for: the lowest
+// untagged version, lower than the plan's, whose notes file is on the release branch at base,
+// or after the merge at its current tip, with that file; or else the previous release, if it
+// isn't published. It returns "" when there's none.
+func waitingFor(ctx context.Context, repo gitrepo.Repo, gh *publish.GitHub, c config.Config, p plan.Plan, base string) (tag, file string, err error) {
+	ref := base
+	if ref == "" {
+		ref = "origin/" + c.Branch
+	}
+	tags, err := repo.Tags(ctx)
+	if err != nil {
+		return "", "", err
+	}
+	data, _ := repo.Run(ctx, "show", ref+":"+config.File)
+	dir := config.NotesDirIn([]byte(data))
+	files, err := plan.NotesFiles(ctx, repo, dir, ref)
+	if err != nil {
+		return "", "", err
+	}
+	current := semver.MustParse(p.Tag)
+	var lowest semver.Version
+	for _, name := range files {
+		pending := plan.NotesTag(dir, name)
+		v, ok := semver.Parse(pending)
+		if !ok || slices.Contains(tags, pending) || semver.Compare(v, current) >= 0 {
+			continue
+		}
+		if tag == "" || semver.Compare(v, lowest) < 0 {
+			tag, file, lowest = pending, name, v
+		}
+	}
+	if tag != "" || p.Previous == "" {
+		return tag, file, nil
+	}
+	published, err := publish.Published(ctx, gh, p.Previous)
+	if err != nil || published {
+		return "", "", err
+	}
+	return p.Previous, "", nil
 }
 
 // environment warns, through warn, how an environment differs from the recommended setup.

@@ -386,8 +386,10 @@ type Environment struct {
 		Type string `json:"type"`
 	} `json:"protection_rules"`
 
-	// BranchRules are the name patterns of the environment's custom branch rules, when it has any.
+	// BranchRules and TagRules are the name patterns of the environment's custom branch and
+	// tag rules, when it has any.
 	BranchRules []string `json:"-"`
+	TagRules    []string `json:"-"`
 	// BranchProtected reports whether the release branch is protected, when the environment
 	// allows only protected branches.
 	BranchProtected bool `json:"-"`
@@ -420,8 +422,11 @@ func (g *GitHub) Environment(ctx context.Context, name, branch string) (*Environ
 			}
 			for _, rule := range page.BranchPolicies {
 				// Rules without a type predate tag rules and apply to branches.
-				if rule.Type == "" || rule.Type == "branch" {
+				switch rule.Type {
+				case "", "branch":
 					env.BranchRules = append(env.BranchRules, rule.Name)
+				case "tag":
+					env.TagRules = append(env.TagRules, rule.Name)
 				}
 			}
 		}
@@ -503,6 +508,43 @@ func EnvironmentWarnings(name, branch, docs string, env *Environment) []string {
 		}
 	}
 	return warnings
+}
+
+// PrePublishDocs explains how to set up the pre-publish workflow's environment.
+const PrePublishDocs = "https://release-planner.fabricahq.com/customize/pre-publish/#set-up-the-environment"
+
+// PrePublishEnvironment checks the environment the pre-publish workflow's jobs run in, which
+// holds its credentials. refusal is why the workflow can't run safely, or can't run at all:
+// the environment is missing, which GitHub would fill in with no branch rule, lets any branch
+// use it, or doesn't let the release branch use it. warnings are the other ways it differs
+// from the recommended setup, a branch rule for the release branch and nothing else.
+func PrePublishEnvironment(name, branch, workflow string, env *Environment) (refusal string, warnings []string) {
+	docs := PrePublishDocs
+	if env == nil {
+		return fmt.Sprintf("The %s environment doesn't exist, so %s can't run safely: GitHub would create it, with no branch rule, the first time a job names it. Create it with a branch rule for %s only: %s", name, workflow, branch, docs), nil
+	}
+	switch policy := env.DeploymentBranchPolicy; {
+	case policy == nil:
+		return fmt.Sprintf("The %s environment has no deployment branch rule, so %s can't run safely: any branch could use its credentials. Add a branch rule for %s only: %s", name, workflow, branch, docs), nil
+	case policy.ProtectedBranches && !env.BranchProtected:
+		return fmt.Sprintf("The %s environment allows only protected branches, and %s isn't protected, so %s can't run in it. Add a branch rule for %s: %s", name, branch, workflow, branch, docs), nil
+	case policy.ProtectedBranches:
+		warnings = append(warnings, fmt.Sprintf("The %s environment lets every protected branch use it. Use a branch rule for %s only: %s", name, branch, docs))
+	case !slices.ContainsFunc(env.BranchRules, func(rule string) bool { return branchRule(rule, branch) }):
+		return fmt.Sprintf("The %s environment's branch rules don't include %s, so %s can't run in it. Add a branch rule for %s: %s", name, branch, workflow, branch, docs), nil
+	}
+	if others := slices.DeleteFunc(slices.Clone(env.BranchRules), func(rule string) bool { return rule == branch }); len(others) > 0 {
+		warnings = append(warnings, fmt.Sprintf("The %s environment also lets branches matching %s use it, so their workflows could use its credentials. Keep one branch rule, for %s: %s", name, strings.Join(others, ", "), branch, docs))
+	}
+	if len(env.TagRules) > 0 {
+		warnings = append(warnings, fmt.Sprintf("The %s environment also lets tags matching %s use it, so a workflow run for such a tag could use its credentials. Remove its tag rules: %s", name, strings.Join(env.TagRules, ", "), docs))
+	}
+	for _, rule := range env.ProtectionRules {
+		if rule.Type == "required_reviewers" {
+			warnings = append(warnings, fmt.Sprintf("The %s environment requires reviewers, so every release waits for a second approval after the merge before %s runs. Merging the release pull request is the approval; remove the reviewers unless you want both: %s", name, workflow, docs))
+		}
+	}
+	return "", warnings
 }
 
 // PublishDraft makes an existing draft release public, creating its tag on commit if the

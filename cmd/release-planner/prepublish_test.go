@@ -1,0 +1,153 @@
+package main
+
+import (
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+const prePublishConfig = "pre-publish:\n  workflow: migrate.yml\n  environment: production\n"
+
+// production is the recommended pre-publish environment: only main can use it.
+func production(routes map[string]any) map[string]any {
+	all := map[string]any{
+		"GET /environments/production":                            map[string]any{"deployment_branch_policy": map[string]bool{"custom_branch_policies": true}, "protection_rules": []any{}},
+		"GET /environments/production/deployment-branch-policies": map[string]any{"branch_policies": []any{map[string]string{"name": "main", "type": "branch"}}},
+		"GET /releases": []any{map[string]any{"tag_name": "v0.9.0", "draft": false}},
+	}
+	for k, v := range routes {
+		all[k] = v
+	}
+	return all
+}
+
+// laterOrigin is an origin whose v0.9.0 is published, and whose pull request #2 requests v1.0.0
+// while main gains more, with later changing main after the merge.
+func laterOrigin(t *testing.T, config string, onMain, later func(o *origin)) (*origin, string) {
+	t.Helper()
+	o := newOrigin(t, config)
+	o.git("tag", "v0.9.0", o.release)
+	if onMain != nil {
+		onMain(o)
+	}
+	merged := o.merge("merge")
+	if later != nil {
+		later(o)
+	}
+	return o, merged
+}
+
+// With a pre-publish workflow, a release waits after its merge, before anything runs, while an
+// earlier release isn't published: the previous one, or one merged on main that isn't tagged.
+// Once that release is published or withdrawn, Re-run failed jobs runs validate again.
+func TestValidateAfterMergeWaitsForEarlierReleases(t *testing.T) {
+	pending := func(o *origin) {
+		o.write("_releases/v0.9.5.md", "Pending\n")
+		o.repo.commit("Release v0.9.5 (#4)")
+	}
+	withdraw := func(o *origin) {
+		o.git("rm", "-q", "_releases/v0.9.5.md")
+		o.repo.commit("Withdraw v0.9.5 (#5)")
+	}
+	for name, tc := range map[string]struct {
+		config         string
+		onMain, later  func(o *origin)
+		routes         map[string]any
+		want, waitsFor string
+		waitsForFile   string
+	}{
+		"earlier request pending": {prePublishConfig, pending, nil, nil,
+			"_releases/v0.9.5.md is on main, but v0.9.5 isn't published, so v1.0.0 waits for it. Publish v0.9.5, or withdraw it by deleting _releases/v0.9.5.md in a pull request. Then use Re-run failed jobs on this run", "v0.9.5", "_releases/v0.9.5.md"},
+		"earlier request withdrawn": {prePublishConfig, pending, withdraw, nil, "", "", ""},
+		"later request pending":     {prePublishConfig, func(o *origin) { o.write("_releases/v1.1.0.md", "Later\n"); o.repo.commit("Release v1.1.0 (#4)") }, nil, nil, "", "", ""},
+		"previous release missing": {prePublishConfig, nil, nil, map[string]any{"GET /releases": []any{}},
+			"v0.9.0 is tagged but has no published release, so v1.0.0 waits for it. Publish v0.9.0 by retrying its release, then use Re-run failed jobs on this run", "v0.9.0", ""},
+		"previous release a draft": {prePublishConfig, nil, nil, map[string]any{"GET /releases": []any{map[string]any{"tag_name": "v0.9.0", "draft": true}}},
+			"v0.9.0 is tagged but has no published release", "v0.9.0", ""},
+		"without pre-publish": {"", pending, nil, map[string]any{"GET /releases": []any{}}, "", "", ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			o, merged := laterOrigin(t, tc.config, tc.onMain, tc.later)
+			output := actionsFiles(t)
+			mergedAPI(t, o, merged, production(tc.routes))
+			p, out, errOut := validateMerged(t, o.checkout(t), merged)
+			if tc.want == "" {
+				if p.Tag != "v1.0.0" || strings.Contains(output("output"), "waiting-for=v") {
+					t.Fatalf("%+v\n%s %s\n%s", p, out, errOut, output("output"))
+				}
+				return
+			}
+			if p.Tag != "" || !strings.Contains(errOut, tc.want) {
+				t.Fatalf("%+v\n%s %s", p, out, errOut)
+			}
+			if want := "waiting-for=" + tc.waitsFor + "\nwaiting-for-file=" + tc.waitsForFile + "\n"; !strings.Contains(output("output"), want) {
+				t.Fatalf("outputs lack %q:\n%s", want, output("output"))
+			}
+		})
+	}
+}
+
+// On the release pull request, an earlier unpublished release is a warning: it may publish
+// before the merge.
+func TestValidateWarnsThatAReleaseWillWait(t *testing.T) {
+	o := newOrigin(t, prePublishConfig)
+	o.write("_releases/v0.9.5.md", "Pending\n")
+	o.git("tag", "v0.9.0", o.release)
+	base := o.repo.commit("Release v0.9.5 (#4)")
+	output := actionsFiles(t)
+	newAPI(t, production(nil))
+	file := filepath.Join(t.TempDir(), "plan.json")
+	if code, _, errOut := cli(t, "validate", "--dir", o.dir, "--ci", "--base", base, "--head", o.head, "--out", file); code != 0 {
+		t.Fatal(errOut)
+	}
+	if p, err := readPlan(file); err != nil || !strings.Contains(strings.Join(p.Warnings, "\n"), "v0.9.5 merged before this release and isn't published yet. After you merge, this release waits until v0.9.5 is published or withdrawn.") {
+		t.Fatalf("%+v %v\n%s", p.Warnings, err, output("summary"))
+	}
+}
+
+// After the merge, the pre-publish workflow runs only if its environment keeps its credentials
+// to the release branch; on the pull request, the same problems are warnings.
+func TestValidateChecksThePrePublishEnvironment(t *testing.T) {
+	custom := map[string]any{"deployment_branch_policy": map[string]bool{"custom_branch_policies": true}, "protection_rules": []any{}}
+	rules := func(r ...map[string]string) map[string]any {
+		var list []any
+		for _, x := range r {
+			list = append(list, x)
+		}
+		return map[string]any{"branch_policies": list}
+	}
+	for name, tc := range map[string]struct {
+		env, rules any
+		refuse     string
+		warn       string
+	}{
+		"recommended":    {custom, rules(map[string]string{"name": "main", "type": "branch"}), "", ""},
+		"missing":        {status{404, nil}, nil, "The production environment doesn't exist", ""},
+		"unrestricted":   {map[string]any{"deployment_branch_policy": nil, "protection_rules": []any{}}, nil, "The production environment has no deployment branch rule", ""},
+		"other branch":   {custom, rules(map[string]string{"name": "develop", "type": "branch"}), "The production environment's branch rules don't include main", ""},
+		"tag rule":       {custom, rules(map[string]string{"name": "main", "type": "branch"}, map[string]string{"name": "v*", "type": "tag"}), "", "The production environment also lets tags matching v* use it"},
+		"extra branch":   {custom, rules(map[string]string{"name": "main", "type": "branch"}, map[string]string{"name": "develop", "type": "branch"}), "", "The production environment also lets branches matching develop use it"},
+		"protected only": {map[string]any{"deployment_branch_policy": map[string]bool{"protected_branches": true}, "protection_rules": []any{}}, nil, "", "The production environment lets every protected branch use it"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			o, merged := laterOrigin(t, prePublishConfig, nil, nil)
+			output := actionsFiles(t)
+			mergedAPI(t, o, merged, production(map[string]any{
+				"GET /environments/production":                            tc.env,
+				"GET /environments/production/deployment-branch-policies": tc.rules,
+				"GET /branches/main":                                      map[string]any{"protected": true},
+			}))
+			p, out, errOut := validateMerged(t, o.checkout(t), merged)
+			if tc.refuse != "" {
+				if p.Tag != "" || !strings.Contains(errOut, tc.refuse) || !strings.Contains(errOut, "Then use Re-run failed jobs on this run") {
+					t.Fatalf("%+v\n%s %s", p, out, errOut)
+				}
+				return
+			}
+			warned := strings.Contains(output("summary"), "The production environment")
+			if p.Tag != "v1.0.0" || warned != (tc.warn != "") || !strings.Contains(output("summary"), tc.warn) {
+				t.Fatalf("%+v\n%s %s\n%s", p, out, errOut, output("summary"))
+			}
+		})
+	}
+}
