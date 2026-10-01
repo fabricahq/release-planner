@@ -96,7 +96,12 @@ Release Planner publishes releases in order, but it doesn't know what's deployed
 
 ## What it can reach
 
-The workflow gets read access to the repository and an OIDC token. It never receives your repository's secrets or a token that publishes releases. Everything else comes from the environment.
+The release workflow gives your workflow at most two permissions:
+
+- **`contents: read`:** read access to the repository.
+- **`id-token: write`:** lets it request an OIDC token, which your cloud provider can exchange for credentials.
+
+Your workflow's own `permissions:` can narrow these but not widen them. A workflow that doesn't reach a cloud provider can leave out `id-token: write`, and then gets no OIDC token. It never gets your repository's secrets or a token that can publish releases. Anything else it needs, such as secrets and variables, comes from its environment.
 
 Trust exactly the environment's OIDC subject in your cloud provider. Look up its format:
 
