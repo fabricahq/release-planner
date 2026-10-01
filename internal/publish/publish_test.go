@@ -49,6 +49,9 @@ type fakeGitHub struct {
 	server      *httptest.Server
 	// auth records each request's method and token.
 	auth []string
+	// checks counts the approval checks publish asked for, and refuse is what they return.
+	checks int
+	refuse error
 }
 
 // pull is a pull request as the commits/{sha}/pulls endpoint lists it for commit.
@@ -215,7 +218,14 @@ func runWith(t *testing.T, f *fakeGitHub, p plan.Plan, assets []File) (Result, e
 		t.Cleanup(f.server.Close)
 	}
 	gh := &GitHub{BaseURL: f.server.URL, Token: "token", Repository: "fabricahq/example", HTTP: f.server.Client()}
-	return Publish(context.Background(), gh, p, "main", assets, nil)
+	// A real approval check, as the publish command passes, so every test proves when it runs.
+	approved := func(context.Context) error {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.checks++
+		return f.refuse
+	}
+	return Publish(context.Background(), gh, p, "main", assets, approved)
 }
 
 func minor() plan.Plan {
@@ -269,9 +279,12 @@ func TestRetryAfterPublicationMakesNoWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.writes = nil
+	// A published release is reported as such, even once its notes file is withdrawn: there's
+	// nothing left to write, so nothing to check.
+	f.checks, f.refuse = 0, errors.New("withdrawn")
 	res, err := run(t, f, minor())
-	if err != nil || !res.AlreadyPublished || len(f.writes) != 0 {
-		t.Fatalf("%+v %v %v", res, err, f.writes)
+	if err != nil || !res.AlreadyPublished || len(f.writes) != 0 || f.checks != 0 {
+		t.Fatalf("%+v %v %v %d", res, err, f.writes, f.checks)
 	}
 }
 
@@ -304,8 +317,8 @@ func TestPublishesMatchingDraft(t *testing.T) {
 	if _, err := run(t, f, minor()); err != nil {
 		t.Fatal(err)
 	}
-	if len(f.writes) != 1 || f.writes[0] != "publish draft" {
-		t.Fatal(f.writes)
+	if len(f.writes) != 1 || f.writes[0] != "publish draft" || f.checks != 1 {
+		t.Fatal(f.writes, f.checks)
 	}
 }
 
@@ -456,12 +469,19 @@ func TestResumesAnInterruptedDraft(t *testing.T) {
 	}
 	f.releases[1].Draft = true
 	delete(f.tags, "v1.1.0")
-	f.writes = nil
+
+	// The retry checks the approval again before it publishes the draft it resumed, and stops
+	// there once the request is withdrawn.
+	f.writes, f.checks, f.refuse = nil, 0, errors.New("withdrawn")
+	if _, err := runWith(t, f, minor(), assets); err == nil || strings.Join(f.writes, ",") != "upload b.tar.gz" || f.checks != 1 {
+		t.Fatalf("%v: writes %v, %d checks", err, f.writes, f.checks)
+	}
+	f.writes, f.checks, f.refuse = nil, 0, nil
 	if _, err := runWith(t, f, minor(), assets); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(f.writes, ",") != "upload b.tar.gz,publish draft" {
-		t.Fatalf("writes %v", f.writes)
+	if strings.Join(f.writes, ",") != "publish draft" || f.checks != 1 {
+		t.Fatalf("writes %v, %d checks", f.writes, f.checks)
 	}
 }
 
