@@ -524,9 +524,9 @@ func inWorkflow(ctx context.Context, out io.Writer, repo gitrepo.Repo, c config.
 		}
 	}
 	if gh != nil && !p.Empty() {
-		environment(ctx, gh, releaseEnvironment, c.Branch, publish.EnvironmentDocs, warn)
+		environment(ctx, gh, config.ReleaseEnvironment, c.Branch, publish.EnvironmentDocs, warn)
 		if p.Tag != "" && len(c.Downstream) > 0 {
-			environment(ctx, gh, downstreamEnvironment, c.Branch, publish.DownstreamEnvironmentDocs, warn)
+			environment(ctx, gh, config.DownstreamEnvironment, c.Branch, publish.DownstreamEnvironmentDocs, warn)
 		}
 	}
 
@@ -772,12 +772,6 @@ func escapeData(s string) string {
 func escapeProperty(s string) string {
 	return strings.NewReplacer("%", "%25", "\r", "%0D", "\n", "%0A", ":", "%3A", ",", "%2C").Replace(s)
 }
-
-// The environments the generated workflow publishes from, and runs downstream workflows from.
-const (
-	releaseEnvironment    = "release"
-	downstreamEnvironment = "downstream"
-)
 
 // environment warns, through warn, how an environment differs from the recommended setup.
 func environment(ctx context.Context, gh *publish.GitHub, name, branch, docs string, warn func(string, ...any)) {

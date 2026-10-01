@@ -54,6 +54,8 @@ type Config struct {
 	Branch        string        `yaml:"release-branch"`
 	ReleaseChecks ReleaseChecks `yaml:"release-checks"`
 	ReleaseAssets ReleaseAssets `yaml:"release-assets"`
+	// PrePublish names a workflow to run after the merge and before publication.
+	PrePublish PrePublish `yaml:"pre-publish"`
 	// Downstream lists workflows in other repositories to run after each new stable release.
 	Downstream        []Downstream      `yaml:"downstream"`
 	ReleaseNotesStyle ReleaseNotesStyle `yaml:"release-notes-style"`
@@ -121,6 +123,29 @@ type ReleaseAssets struct {
 	Workflow string `yaml:"workflow"`
 }
 
+// PrePublish names a workflow of the repository's own that runs after the release pull
+// request merges and before the release is tagged, such as one that applies database
+// migrations. If it fails, the release isn't published. It may run again, late, and alongside
+// itself, so it must be safe to.
+type PrePublish struct {
+	// Workflow names a workflow in .github/workflows that accepts workflow_call with string
+	// inputs ref, tag, and version, and checks out ref. It gets no secrets, only read access
+	// to the repository and an OIDC token.
+	Workflow string `yaml:"workflow"`
+	// Environment is the deployment environment every job of Workflow runs in, which holds
+	// its credentials.
+	Environment string `yaml:"environment"`
+}
+
+// Enabled reports whether the repository has a pre-publish workflow.
+func (p PrePublish) Enabled() bool { return p.Workflow != "" || p.Environment != "" }
+
+// The environments Release Planner's own jobs use, which a pre-publish workflow can't share.
+const (
+	ReleaseEnvironment    = "release"
+	DownstreamEnvironment = "downstream"
+)
+
 // Downstream is a workflow in another repository, run with the new release's tag and
 // version after each stable release, such as one that updates a Homebrew tap.
 type Downstream struct {
@@ -159,6 +184,7 @@ var (
 	branchName   = regexp.MustCompile(`^[0-9A-Za-z._/-]+$`)
 	workflowFile = regexp.MustCompile(`^[0-9A-Za-z._-]+\.ya?ml$`)
 	repository   = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
+	environment  = regexp.MustCompile(`^[0-9A-Za-z._-]+$`)
 )
 
 // GeneratedWorkflow is the Release workflow's file name, which can't also be a workflow it calls.
@@ -297,6 +323,24 @@ func (c Config) check() error {
 	}
 	if w := c.ReleaseAssets.Workflow; w != "" && (!workflowFile.MatchString(w) || w == GeneratedWorkflow) {
 		add("release-assets.workflow: name a workflow file in .github/workflows other than %s, such as build-release.yml", GeneratedWorkflow)
+	}
+	if p := c.PrePublish; p.Enabled() {
+		switch w := p.Workflow; {
+		case w == "" || !workflowFile.MatchString(w) || w == GeneratedWorkflow:
+			add("pre-publish.workflow: name a workflow file in .github/workflows other than %s, such as migrate.yml", GeneratedWorkflow)
+		case w == c.ReleaseChecks.Workflow:
+			add("pre-publish.workflow: %s is also the release-checks workflow; use a workflow of its own", w)
+		case w == c.ReleaseAssets.Workflow:
+			add("pre-publish.workflow: %s is also the release-assets workflow; use a workflow of its own", w)
+		}
+		switch e := p.Environment; {
+		case e == "":
+			add("pre-publish.environment: name the environment every job of %s runs in, such as production", p.Workflow)
+		case !environment.MatchString(e):
+			add("pre-publish.environment: %q isn't an environment name; use letters, digits, and . _ -", e)
+		case strings.EqualFold(e, ReleaseEnvironment) || strings.EqualFold(e, DownstreamEnvironment):
+			add("pre-publish.environment: %s is an environment Release Planner uses for its own credentials; name one of its own, such as production", e)
+		}
 	}
 	for i, d := range c.Downstream {
 		switch {

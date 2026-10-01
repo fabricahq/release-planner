@@ -114,48 +114,70 @@ func TestParseReadsAssetsAndDownstream(t *testing.T) {
 
 func TestParseRejectsInvalidSettings(t *testing.T) {
 	for name, tc := range map[string]struct{ yaml, want string }{
-		"missing version":   {"schema-version: 1\nrelease-checks:\n  run: x\n", "version:"},
-		"missing schema":    {"version: v0.2.0\nrelease-checks:\n  run: x\n", "reads schema-version 1, not 0"},
-		"future schema":     {"schema-version: 2\nversion: v0.2.0\nrelease-checks:\n  run: x\n", "reads schema-version 1, not 2"},
-		"branch pin":        {"schema-version: 1\nversion: main\nrelease-checks:\n  run: x\n", "version:"},
-		"short sha":         {"schema-version: 1\nversion: 0123456\nrelease-checks:\n  run: x\n", "version:"},
-		"bad first":         {"schema-version: 1\nversion: v0.2.0\nfirst-version: 1.0\nrelease-checks:\n  run: x\n", "first-version"},
-		"escaping dir":      {"schema-version: 1\nversion: v0.2.0\nrelease-notes-dir: ../x\nrelease-checks:\n  run: x\n", "release-notes-dir"},
-		"absolute dir":      {"schema-version: 1\nversion: v0.2.0\nrelease-notes-dir: /x\nrelease-checks:\n  run: x\n", "release-notes-dir"},
-		"pattern dir":       {"schema-version: 1\nversion: v0.2.0\nrelease-notes-dir: rel*\n", "path filters treat as patterns"},
-		"config dir":        {"schema-version: 1\nversion: v0.2.0\nrelease-notes-dir: .release-planner/notes\nrelease-checks:\n  run: x\n", "release-notes-dir"},
-		"run and workflow":  {"schema-version: 1\nversion: v0.2.0\nrelease-checks:\n  run: x\n  workflow: ci.yml\n", "run or workflow, not both"},
-		"workflow tools":    {"schema-version: 1\nversion: v0.2.0\nrelease-checks:\n  go: '1.27.x'\n  workflow: ci.yml\n", "set up toolchains in ci.yml"},
-		"workflow path":     {"schema-version: 1\nversion: v0.2.0\nrelease-checks:\n  workflow: ../ci.yml\n", "release-checks.workflow"},
-		"tools, no run":     {"schema-version: 1\nversion: v0.2.0\nrelease-checks:\n  go: '1.27.x'\n", "no run script"},
-		"injected tool":     {"schema-version: 1\nversion: v0.2.0\nrelease-checks:\n  go: \"1.2'\\n  x: y\"\n  run: x\n", "release-checks.go"},
-		"unknown key":       {"schema-version: 1\nversion: v0.2.0\nnotes:\n  sections: []\nrelease-checks:\n  run: x\n", "field notes not found"},
-		"unknown style key": {"schema-version: 1\nversion: v0.2.0\nrelease-notes-style:\n  path: s.md\n  mode: append\n", "field path not found"},
-		"unknown check key": {"schema-version: 1\nversion: v0.2.0\nrelease-checks:\n  ruby: '3'\n  run: x\n", "field ruby not found"},
-		"style shorthand":   {"schema-version: 1\nversion: v0.2.0\nrelease-notes-style: replace\n", "needs a file and a mode"},
-		"bad style mode":    {"schema-version: 1\nversion: v0.2.0\nrelease-notes-style:\n  file: s.md\n  mode: overwrite\n", "use append or replace, not \"overwrite\""},
-		"no style mode":     {"schema-version: 1\nversion: v0.2.0\nrelease-notes-style:\n  file: s.md\n", "use append or replace, not \"\""},
-		"no style file":     {"schema-version: 1\nversion: v0.2.0\nrelease-notes-style:\n  mode: append\n", "name your style file"},
-		"style outside":     {"schema-version: 1\nversion: v0.2.0\nrelease-notes-style:\n  file: ../s.md\n  mode: append\n", "inside the repository"},
-		"old validate key":  {"schema-version: 1\nversion: v0.2.0\nvalidate:\n  run: x\n", "field validate not found"},
-		"unknown rule":      {"schema-version: 1\nversion: v0.2.0\nrelease-notes-rules:\n  no-long-heading: off\n  no-todo-opening: off\n", `release-notes-rules: "no-todo-opening" is not a release notes rule; run release-planner validate --rules to list them`},
-		"bad rule setting":  {"schema-version: 1\nversion: v0.2.0\nrelease-notes-rules:\n  no-long-heading: 100\n", `release-notes-rules.no-long-heading: use off, not "100"`},
-		"rules as a list":   {"schema-version: 1\nversion: v0.2.0\nrelease-notes-rules: [no-long-heading]\n", "cannot unmarshal"},
-		"style not md":      {"schema-version: 1\nversion: v0.2.0\nrelease-notes-style:\n  file: style.txt\n  mode: append\n", "a .md file"},
-		"checks self":       {"schema-version: 1\nversion: v0.2.0\nrelease-checks:\n  workflow: release-planner.yml\n", "other than release-planner.yml"},
-		"assets self":       {"schema-version: 1\nversion: v0.2.0\nrelease-assets:\n  workflow: release-planner.yml\n", "release-assets.workflow: name a workflow file in .github/workflows other than release-planner.yml"},
-		"assets path":       {"schema-version: 1\nversion: v0.2.0\nrelease-assets:\n  workflow: .github/workflows/build.yml\n", "release-assets.workflow"},
-		"assets key":        {"schema-version: 1\nversion: v0.2.0\nrelease-assets:\n  run: make\n", "field run not found"},
-		"downstream repo":   {"schema-version: 1\nversion: v0.2.0\ndownstream:\n  - repository: homebrew-tap\n    workflow: update.yml\n", `downstream[0].repository: name the repository as owner/name, not "homebrew-tap"`},
-		"downstream owner":  {"schema-version: 1\nversion: v0.2.0\ndownstream:\n  - repository: o/tap\n    workflow: a.yml\n  - repository: p/tap\n    workflow: a.yml\n", "downstream[1].repository: every downstream repository must belong to o"},
-		"downstream file":   {"schema-version: 1\nversion: v0.2.0\ndownstream:\n  - repository: o/tap\n    workflow: update\n", "downstream[0].workflow"},
-		"downstream twice":  {"schema-version: 1\nversion: v0.2.0\ndownstream:\n  - repository: o/tap\n    workflow: a.yml\n  - repository: o/tap\n    workflow: a.yml\n", "listed twice"},
-		"downstream key":    {"schema-version: 1\nversion: v0.2.0\ndownstream:\n  - repository: o/tap\n    workflow: a.yml\n    ref: main\n", "field ref not found"},
+		"missing version":                 {"schema-version: 1\nrelease-checks:\n  run: x\n", "version:"},
+		"missing schema":                  {"version: v0.2.0\nrelease-checks:\n  run: x\n", "reads schema-version 1, not 0"},
+		"future schema":                   {"schema-version: 2\nversion: v0.2.0\nrelease-checks:\n  run: x\n", "reads schema-version 1, not 2"},
+		"branch pin":                      {"schema-version: 1\nversion: main\nrelease-checks:\n  run: x\n", "version:"},
+		"short sha":                       {"schema-version: 1\nversion: 0123456\nrelease-checks:\n  run: x\n", "version:"},
+		"bad first":                       {"schema-version: 1\nversion: v0.2.0\nfirst-version: 1.0\nrelease-checks:\n  run: x\n", "first-version"},
+		"escaping dir":                    {"schema-version: 1\nversion: v0.2.0\nrelease-notes-dir: ../x\nrelease-checks:\n  run: x\n", "release-notes-dir"},
+		"absolute dir":                    {"schema-version: 1\nversion: v0.2.0\nrelease-notes-dir: /x\nrelease-checks:\n  run: x\n", "release-notes-dir"},
+		"pattern dir":                     {"schema-version: 1\nversion: v0.2.0\nrelease-notes-dir: rel*\n", "path filters treat as patterns"},
+		"config dir":                      {"schema-version: 1\nversion: v0.2.0\nrelease-notes-dir: .release-planner/notes\nrelease-checks:\n  run: x\n", "release-notes-dir"},
+		"run and workflow":                {"schema-version: 1\nversion: v0.2.0\nrelease-checks:\n  run: x\n  workflow: ci.yml\n", "run or workflow, not both"},
+		"workflow tools":                  {"schema-version: 1\nversion: v0.2.0\nrelease-checks:\n  go: '1.27.x'\n  workflow: ci.yml\n", "set up toolchains in ci.yml"},
+		"workflow path":                   {"schema-version: 1\nversion: v0.2.0\nrelease-checks:\n  workflow: ../ci.yml\n", "release-checks.workflow"},
+		"tools, no run":                   {"schema-version: 1\nversion: v0.2.0\nrelease-checks:\n  go: '1.27.x'\n", "no run script"},
+		"injected tool":                   {"schema-version: 1\nversion: v0.2.0\nrelease-checks:\n  go: \"1.2'\\n  x: y\"\n  run: x\n", "release-checks.go"},
+		"unknown key":                     {"schema-version: 1\nversion: v0.2.0\nnotes:\n  sections: []\nrelease-checks:\n  run: x\n", "field notes not found"},
+		"unknown style key":               {"schema-version: 1\nversion: v0.2.0\nrelease-notes-style:\n  path: s.md\n  mode: append\n", "field path not found"},
+		"unknown check key":               {"schema-version: 1\nversion: v0.2.0\nrelease-checks:\n  ruby: '3'\n  run: x\n", "field ruby not found"},
+		"style shorthand":                 {"schema-version: 1\nversion: v0.2.0\nrelease-notes-style: replace\n", "needs a file and a mode"},
+		"bad style mode":                  {"schema-version: 1\nversion: v0.2.0\nrelease-notes-style:\n  file: s.md\n  mode: overwrite\n", "use append or replace, not \"overwrite\""},
+		"no style mode":                   {"schema-version: 1\nversion: v0.2.0\nrelease-notes-style:\n  file: s.md\n", "use append or replace, not \"\""},
+		"no style file":                   {"schema-version: 1\nversion: v0.2.0\nrelease-notes-style:\n  mode: append\n", "name your style file"},
+		"style outside":                   {"schema-version: 1\nversion: v0.2.0\nrelease-notes-style:\n  file: ../s.md\n  mode: append\n", "inside the repository"},
+		"old validate key":                {"schema-version: 1\nversion: v0.2.0\nvalidate:\n  run: x\n", "field validate not found"},
+		"unknown rule":                    {"schema-version: 1\nversion: v0.2.0\nrelease-notes-rules:\n  no-long-heading: off\n  no-todo-opening: off\n", `release-notes-rules: "no-todo-opening" is not a release notes rule; run release-planner validate --rules to list them`},
+		"bad rule setting":                {"schema-version: 1\nversion: v0.2.0\nrelease-notes-rules:\n  no-long-heading: 100\n", `release-notes-rules.no-long-heading: use off, not "100"`},
+		"rules as a list":                 {"schema-version: 1\nversion: v0.2.0\nrelease-notes-rules: [no-long-heading]\n", "cannot unmarshal"},
+		"style not md":                    {"schema-version: 1\nversion: v0.2.0\nrelease-notes-style:\n  file: style.txt\n  mode: append\n", "a .md file"},
+		"checks self":                     {"schema-version: 1\nversion: v0.2.0\nrelease-checks:\n  workflow: release-planner.yml\n", "other than release-planner.yml"},
+		"assets self":                     {"schema-version: 1\nversion: v0.2.0\nrelease-assets:\n  workflow: release-planner.yml\n", "release-assets.workflow: name a workflow file in .github/workflows other than release-planner.yml"},
+		"assets path":                     {"schema-version: 1\nversion: v0.2.0\nrelease-assets:\n  workflow: .github/workflows/build.yml\n", "release-assets.workflow"},
+		"assets key":                      {"schema-version: 1\nversion: v0.2.0\nrelease-assets:\n  run: make\n", "field run not found"},
+		"downstream repo":                 {"schema-version: 1\nversion: v0.2.0\ndownstream:\n  - repository: homebrew-tap\n    workflow: update.yml\n", `downstream[0].repository: name the repository as owner/name, not "homebrew-tap"`},
+		"downstream owner":                {"schema-version: 1\nversion: v0.2.0\ndownstream:\n  - repository: o/tap\n    workflow: a.yml\n  - repository: p/tap\n    workflow: a.yml\n", "downstream[1].repository: every downstream repository must belong to o"},
+		"downstream file":                 {"schema-version: 1\nversion: v0.2.0\ndownstream:\n  - repository: o/tap\n    workflow: update\n", "downstream[0].workflow"},
+		"downstream twice":                {"schema-version: 1\nversion: v0.2.0\ndownstream:\n  - repository: o/tap\n    workflow: a.yml\n  - repository: o/tap\n    workflow: a.yml\n", "listed twice"},
+		"downstream key":                  {"schema-version: 1\nversion: v0.2.0\ndownstream:\n  - repository: o/tap\n    workflow: a.yml\n    ref: main\n", "field ref not found"},
+		"pre-publish without environment": {"schema-version: 1\nversion: v0.2.0\npre-publish:\n  workflow: migrate.yml\n", "pre-publish.environment: name the environment every job of migrate.yml runs in, such as production"},
+		"pre-publish without workflow":    {"schema-version: 1\nversion: v0.2.0\npre-publish:\n  environment: production\n", "pre-publish.workflow: name a workflow file in .github/workflows"},
+		"pre-publish self":                {"schema-version: 1\nversion: v0.2.0\npre-publish:\n  workflow: release-planner.yml\n  environment: production\n", "pre-publish.workflow: name a workflow file in .github/workflows other than release-planner.yml"},
+		"pre-publish path":                {"schema-version: 1\nversion: v0.2.0\npre-publish:\n  workflow: ../migrate.yml\n  environment: production\n", "pre-publish.workflow"},
+		"pre-publish is the build": {"schema-version: 1\nversion: v0.2.0\nrelease-assets:\n  workflow: build.yml\npre-publish:\n  workflow: build.yml\n  environment: production\n",
+			"pre-publish.workflow: build.yml is also the release-assets workflow; use a workflow of its own"},
+		"pre-publish is the checks": {"schema-version: 1\nversion: v0.2.0\nrelease-checks:\n  workflow: ci.yml\npre-publish:\n  workflow: ci.yml\n  environment: production\n",
+			"pre-publish.workflow: ci.yml is also the release-checks workflow; use a workflow of its own"},
+		"pre-publish in release":    {"schema-version: 1\nversion: v0.2.0\npre-publish:\n  workflow: migrate.yml\n  environment: Release\n", "pre-publish.environment: Release is an environment Release Planner uses for its own credentials; name one of its own"},
+		"pre-publish in downstream": {"schema-version: 1\nversion: v0.2.0\npre-publish:\n  workflow: migrate.yml\n  environment: downstream\n", "pre-publish.environment: downstream is an environment Release Planner uses"},
+		"pre-publish environment":   {"schema-version: 1\nversion: v0.2.0\npre-publish:\n  workflow: migrate.yml\n  environment: '${{ vars.ENV }}'\n", "pre-publish.environment: \"${{ vars.ENV }}\" isn't an environment name"},
+		"pre-publish key":           {"schema-version: 1\nversion: v0.2.0\npre-publish:\n  workflow: migrate.yml\n  environment: production\n  secrets: inherit\n", "field secrets not found"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := Parse([]byte(tc.yaml), ""); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("got %v, want %q", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestParseReadsPrePublish(t *testing.T) {
+	c, err := Parse([]byte("schema-version: 1\nversion: v0.2.0\npre-publish:\n  workflow: migrate.yml\n  environment: production\n"), "")
+	if err != nil || !c.PrePublish.Enabled() || c.PrePublish.Workflow != "migrate.yml" || c.PrePublish.Environment != "production" {
+		t.Fatal(c, err)
+	}
+	if c, err := Parse([]byte("schema-version: 1\nversion: v0.2.0\n"), ""); err != nil || c.PrePublish.Enabled() {
+		t.Fatal(c, err)
 	}
 }
