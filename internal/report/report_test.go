@@ -699,7 +699,9 @@ func TestRendersARunThatStoppedOnPurpose(t *testing.T) {
 	// Re-run failed jobs reuses validate, so publish finds the withdrawal.
 	stale = status(release(), true, results("validate", "success", "pre-publish", "success", "publish", "failure"))
 	stale.Jobs["publish"] = Job{Result: "failure", Outputs: map[string]string{"release": "withdrawn"}}
-	contains(t, render(t, stale).Summary, "**\n\n"+withdrawn)
+	// The notes file is gone from main, so there's no link to edit it.
+	equal(t, render(t, stale).Summary[:len(withdrawn)], withdrawn)
+	lacks(t, render(t, stale).Summary, "Edit the v1.2.0 release notes")
 }
 
 // The summary reports what publish did, from its outputs, not just that it succeeded.

@@ -199,11 +199,15 @@ func (s Status) summary() string {
 	}
 	published := s.Jobs["publish"].Result == "success"
 
-	if p.Tag != "" && p.File != "" {
-		line("%s\n", s.edit(p.Tag, p.File))
-	}
-	for _, e := range p.Edits {
-		line("%s\n", s.edit(e.Tag, e.File))
+	// A withdrawn or replaced request's file is gone or changed on the release branch, so
+	// there's nothing of this pull request's to edit.
+	if s.Jobs["publish"].Outputs["release"] != "withdrawn" {
+		if p.Tag != "" && p.File != "" {
+			line("%s\n", s.edit(p.Tag, p.File))
+		}
+		for _, e := range p.Edits {
+			line("%s\n", s.edit(e.Tag, e.File))
+		}
 	}
 
 	failure := func(fix string) {
