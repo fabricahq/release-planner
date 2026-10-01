@@ -483,16 +483,31 @@ func (s Status) details(run []publish.RunJob, name, fallback string) string {
 	return fmt.Sprintf("[Details](%s)", jobURL(run, name, fallback))
 }
 
-// jobURL returns the page of the run's job with the name, or of the first job of the
-// reusable workflow that job calls, whose jobs are named like "release-assets / build", or
-// fallback when the run has none.
+// jobURL returns the page of the run's job with the name, or of a job of the reusable
+// workflow that job calls, whose jobs are named like "release-assets / build", or fallback
+// when the run has none. Jobs only count from the latest attempt that lists any of them:
+// GitHub names a calling job alone in an attempt that skips it, and by its called jobs in one
+// that runs them, so after Re-run failed jobs an earlier attempt's job can stand under the
+// other name. Of the called jobs, the first that failed or was cancelled shows why the row
+// did, and otherwise the first.
 func jobURL(run []publish.RunJob, name, fallback string) string {
+	var latest []publish.RunJob
 	for _, j := range run {
-		if (j.Name == name || strings.HasPrefix(j.Name, name+" / ")) && j.URL != "" {
-			return j.URL
+		switch {
+		case (j.Name != name && !strings.HasPrefix(j.Name, name+" / ")) || j.URL == "":
+		case len(latest) == 0 || j.RunAttempt > latest[0].RunAttempt:
+			latest = []publish.RunJob{j}
+		case j.RunAttempt == latest[0].RunAttempt:
+			latest = append(latest, j)
 		}
 	}
-	return fallback
+	if len(latest) == 0 {
+		return fallback
+	}
+	if i := slices.IndexFunc(latest, func(j publish.RunJob) bool { return j.Conclusion == "failure" || j.Conclusion == "cancelled" }); i >= 0 {
+		return latest[i].URL
+	}
+	return latest[0].URL
 }
 
 func plural(n int, word string) string {

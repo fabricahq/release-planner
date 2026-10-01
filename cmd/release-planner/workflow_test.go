@@ -224,6 +224,108 @@ func TestReportListsEachPostPublishWorkflow(t *testing.T) {
 	}
 }
 
+// sandboxJobs are the jobs of release run 36933131243 in
+// fabricahq/release-planner-pre-publish-sandbox, as the Actions API lists them with
+// filter=all, through the attempt. In attempt 1, warm-caches.yml failed, so publish and the
+// post-publish jobs were skipped; a skipped job that calls a workflow is listed by its own
+// name. After Re-run failed jobs, attempt 2 ran deploy.yml, listed by its called job
+// "post-publish (deploy.yml) / run", which failed, and attempt 3 ran it again. Each attempt
+// copies the jobs that succeeded before with new IDs.
+func sandboxJobs(attempt int) []any {
+	var jobs []any
+	for _, j := range []struct {
+		id, attempt     int
+		name, concluded string
+	}{
+		{110607041269, 1, "validate", "success"},
+		{110607321965, 1, "pre-publish (warm-caches.yml) / run", "failure"},
+		{110607321993, 1, "pre-publish (migrate-database.yml) / migrate", "success"},
+		{110607378940, 1, "report", "success"},
+		{110607379813, 1, "publish", "skipped"},
+		{110607380382, 1, "post-publish (deploy.yml)", "skipped"},
+		{110607380500, 1, "post-publish (fabricahq/release-planner-sandbox:update.yml)", "skipped"},
+		{110607835554, 2, "pre-publish (warm-caches.yml) / run", "success"},
+		{110607835573, 2, "validate", "success"},
+		{110607836789, 2, "pre-publish (migrate-database.yml) / migrate", "success"},
+		{110607905494, 2, "publish", "success"},
+		{110608183369, 2, "post-publish (fabricahq/release-planner-sandbox:update.yml)", "failure"},
+		{110608183785, 2, "post-publish (deploy.yml) / run", "failure"},
+		{110608244983, 2, "report", "success"},
+		{110608819989, 3, "validate", "success"},
+		{110608821335, 3, "pre-publish (migrate-database.yml) / migrate", "success"},
+		{110608822213, 3, "post-publish (fabricahq/release-planner-sandbox:update.yml)", "failure"},
+		{110608822302, 3, "pre-publish (warm-caches.yml) / run", "success"},
+		{110608822417, 3, "post-publish (deploy.yml) / run", "success"},
+		{110608822796, 3, "publish", "success"},
+		{110608883630, 3, "report", "success"},
+	} {
+		if j.attempt <= attempt {
+			jobs = append(jobs, map[string]any{"name": j.name, "conclusion": j.concluded, "run_attempt": j.attempt,
+				"html_url": fmt.Sprintf("https://github.com/fabricahq/example/actions/runs/100/job/%d", j.id)})
+		}
+	}
+	return jobs
+}
+
+// After Re-run failed jobs, each hook's row links to its job in the latest attempt that ran
+// it, not to the job an earlier attempt skipped, as in the sandbox's release run.
+func TestReportLinksEachHookAtTheLatestAttempt(t *testing.T) {
+	actionsFiles(t)
+	t.Setenv("GITHUB_RUN_ID", "100")
+	hooks := `[{"job":"pre-publish-1","name":"pre-publish (migrate-database.yml)","when":"pre-publish","workflow":"migrate-database.yml","title":"Migrate the database"},` +
+		`{"job":"pre-publish-2","name":"pre-publish (warm-caches.yml)","when":"pre-publish","workflow":"warm-caches.yml","title":"Warm the caches"},` +
+		`{"job":"post-publish-1","name":"post-publish (deploy.yml)","when":"post-publish","workflow":"deploy.yml","title":"Deploy"},` +
+		`{"job":"post-publish-2","name":"post-publish (fabricahq/release-planner-sandbox:update.yml)","when":"post-publish","workflow":"update.yml","repository":"fabricahq/release-planner-sandbox"}]`
+	file := writePlan(t, plan.Plan{Tag: "v0.14.0", Commit: strings.Repeat("a", 40), PullRequest: 2})
+	for _, tc := range []struct {
+		attempt int
+		deploy  string
+		want    []string
+	}{
+		{2, "failure", []string{
+			"| ❌ | Deploy | [Details](https://github.com/fabricahq/example/actions/runs/100/job/110608183785) |",
+			"| ❌ | Run fabricahq/release-planner-sandbox `update.yml` | [Details](https://github.com/fabricahq/example/actions/runs/100/job/110608183369) |",
+		}},
+		{3, "success", []string{
+			"| ✅ | Deploy | [Details](https://github.com/fabricahq/example/actions/runs/100/job/110608822417) |",
+			"| ❌ | Run fabricahq/release-planner-sandbox `update.yml` | [Details](https://github.com/fabricahq/example/actions/runs/100/job/110608822213) |",
+		}},
+	} {
+		t.Run(fmt.Sprintf("attempt %d", tc.attempt), func(t *testing.T) {
+			t.Setenv("GITHUB_RUN_ATTEMPT", fmt.Sprint(tc.attempt))
+			api := newAPI(t, map[string]any{
+				"GET /actions/runs/100/jobs": map[string]any{"jobs": sandboxJobs(tc.attempt)},
+				"GET /pulls/2":               map[string]any{"body": "Why v0.14.0? End-to-end test."},
+				"PATCH /pulls/2":             map[string]any{},
+				"GET /issues/2/comments":     []any{},
+				"POST /issues/2/comments":    map[string]any{},
+			})
+			needs := `{"validate":{"result":"success","outputs":{}},"pre-publish-1":{"result":"success","outputs":{}},"pre-publish-2":{"result":"success","outputs":{}},` +
+				`"publish":{"result":"success","outputs":{}},"post-publish-1":{"result":"` + tc.deploy + `","outputs":{}},"post-publish-2":{"result":"failure","outputs":{}}}`
+			if code, out, errOut := cli(t, "report", "--needs", needs, "--branch", "main", "--merged", merged, "--plan", file, "--hooks", hooks); code != 0 {
+				t.Fatalf("%d %s %s", code, out, errOut)
+			}
+			body := api.sent("PATCH /pulls/2")
+			for _, want := range append(tc.want,
+				"| ✅ | Migrate the database | [Details](https://github.com/fabricahq/example/actions/runs/100/job/110608821335) |",
+				"| ✅ | Warm the caches | [Details](https://github.com/fabricahq/example/actions/runs/100/job/110608822302) |",
+				"| ✅ | Publish | [Details](https://github.com/fabricahq/example/actions/runs/100/job/110608822796) |",
+			) {
+				if tc.attempt == 2 {
+					// Attempt 2 copied migrate-database.yml and ran the rest itself.
+					want = strings.NewReplacer("110608821335", "110607836789", "110608822302", "110607835554", "110608822796", "110607905494").Replace(want)
+				}
+				if !strings.Contains(body, want) {
+					t.Errorf("lacks %q:\n%s", want, body)
+				}
+			}
+			if strings.Contains(body, "110607380382") {
+				t.Errorf("links attempt 1's skipped deploy.yml job:\n%s", body)
+			}
+		})
+	}
+}
+
 // A prerelease starts only the post-publish workflows that opt in.
 func TestDispatchSkipsPrereleasesUnlessTheyOptIn(t *testing.T) {
 	output := actionsFiles(t)

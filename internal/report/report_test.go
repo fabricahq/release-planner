@@ -418,6 +418,39 @@ func TestJobURLMatchesTheJobOrItsCalledWorkflow(t *testing.T) {
 	}
 }
 
+// After Re-run failed jobs, the run's jobs hold each name at its latest attempt, but a job
+// that calls a workflow is named alone when an attempt skipped it, and with its called jobs
+// when one ran it, so both names can stand. The link follows the latest attempt.
+func TestJobURLFollowsTheLatestAttempt(t *testing.T) {
+	job := func(name string, attempt, id int) publish.RunJob {
+		return publish.RunJob{Name: name, Conclusion: "success", RunAttempt: attempt, URL: fmt.Sprintf("https://github.com/o/r/actions/runs/1/job/%d", id)}
+	}
+	failed := func(j publish.RunJob) publish.RunJob {
+		j.Conclusion = "failure"
+		return j
+	}
+	for _, tc := range []struct {
+		name string
+		jobs []publish.RunJob
+		want int
+	}{
+		{"skipped, then ran", []publish.RunJob{job("deploy", 1, 1), job("deploy / run", 2, 2)}, 2},
+		{"skipped, then ran twice", []publish.RunJob{job("deploy", 1, 1), job("deploy / run", 3, 3)}, 3},
+		{"ran, then skipped", []publish.RunJob{job("deploy / run", 1, 1), job("deploy", 2, 2)}, 2},
+		// A called workflow's jobs each stand at their latest attempt; one that succeeded was
+		// copied into the new attempt, with a new ID.
+		{"several called jobs", []publish.RunJob{job("deploy / build", 2, 1), job("deploy / ship", 2, 2), job("deploy", 1, 3)}, 1},
+		// The called job that failed shows why the row did.
+		{"several called jobs, one failed", []publish.RunJob{job("deploy / build", 2, 1), failed(job("deploy / ship", 2, 2))}, 2},
+		{"a called job only an earlier attempt lists", []publish.RunJob{job("deploy / build", 1, 1), job("deploy / ship", 2, 2)}, 2},
+	} {
+		want := fmt.Sprintf("https://github.com/o/r/actions/runs/1/job/%d", tc.want)
+		if got := jobURL(tc.jobs, "deploy", "fallback"); got != want {
+			t.Errorf("%s: got %s, want %s", tc.name, got, want)
+		}
+	}
+}
+
 func TestRendersNothingWithoutARequest(t *testing.T) {
 	if blocks := render(t, status(&plan.Plan{}, false, results("validate", "success", "publish", "skipped"))); blocks != (Blocks{}) {
 		t.Fatal(blocks)
