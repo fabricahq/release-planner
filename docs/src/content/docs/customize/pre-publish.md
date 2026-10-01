@@ -49,7 +49,7 @@ jobs:
       - run: make migrate
 ```
 
-`release-planner install` and `check` fail if the workflow doesn't declare the three inputs as strings, if a job doesn't run in the environment, or if it requires secrets.
+`release-planner install` and `check` fail if the workflow doesn't declare the three inputs as strings, if a job doesn't run in the environment, or if it requires secrets. The release status on each release pull request names the workflow by its `name:`, such as **Migrate the database**, so give it one that says what it does. Run `install` again after you rename it.
 
 ## Make it safe to run again, late, and twice at once
 

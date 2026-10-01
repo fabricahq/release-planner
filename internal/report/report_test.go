@@ -714,3 +714,21 @@ func TestRendersWhatPublishDid(t *testing.T) {
 		"✅ The notes of [v1.0.0](https://github.com/o/r/releases/tag/v1.0.0) were already up to date.\n\n"+
 		"✅ Updated the notes of [v1.1.0](https://github.com/o/r/releases/tag/v1.1.0).\n\n")
 }
+
+// The pre-publish workflow appears by the name it declares, or by its file name without one.
+func TestRendersThePrePublishWorkflowsName(t *testing.T) {
+	s := status(release(), false, results("validate", "success", "pre-publish", "skipped", "publish", "skipped"))
+	s.PrePublish = "Migrate the database"
+	blocks := render(t, s)
+	contains(t, blocks.Summary, "- First, **Migrate the database** runs on the release commit. If it fails, the release isn't published.\n")
+	contains(t, blocks.Status, "| ⏸️ | Migrate the database | Runs when you merge |\n")
+
+	// Markdown in a name stays text, and can't break the table.
+	s.PrePublish = "Migrate | *all* the [databases]"
+	contains(t, render(t, s).Status, "| ⏸️ | Migrate \\| \\*all\\* the \\[databases\\] | Runs when you merge |\n")
+
+	s.PrePublish = "migrate-database.yml"
+	blocks = render(t, s)
+	contains(t, blocks.Summary, "- First, `migrate-database.yml` runs on the release commit.")
+	contains(t, blocks.Status, "| ⏸️ | Run `migrate-database.yml` | Runs when you merge |\n")
+}

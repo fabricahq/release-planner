@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -89,7 +90,8 @@ type Status struct {
 	MergedBy string
 	// Downstream lists the downstream workflows, with their jobs' results.
 	Downstream []Target
-	// PrePublish is the pre-publish workflow's file name, or "" when there's none.
+	// PrePublish names the pre-publish workflow, by the name it declares or else its file
+	// name, or is "" when there's none.
 	PrePublish string
 }
 
@@ -122,13 +124,34 @@ func (s Status) Failed() string {
 	return ""
 }
 
-// label is the job's row label: the pre-publish workflow's own name, or the job's.
+// label is the job's row label: the pre-publish workflow's own, or the job's.
 func (s Status) label(id, label string) string {
 	if id == "pre-publish" && s.PrePublish != "" {
-		return "Run `" + s.PrePublish + "`"
+		if workflowFile.MatchString(s.PrePublish) {
+			return "Run `" + s.PrePublish + "`"
+		}
+		return markdownText(s.PrePublish)
 	}
 	return label
 }
+
+// prePublish names the pre-publish workflow in a sentence: its name in bold, or its file name.
+func (s Status) prePublish() string {
+	if workflowFile.MatchString(s.PrePublish) {
+		return "`" + s.PrePublish + "`"
+	}
+	return "**" + markdownText(s.PrePublish) + "**"
+}
+
+// workflowFile matches a workflow's file name, which the report shows when it has no name.
+var workflowFile = regexp.MustCompile(`^[0-9A-Za-z._-]+\.ya?ml$`)
+
+// markdownText escapes text so Markdown shows it as written, even in a table cell.
+func markdownText(s string) string {
+	return markdownSpecial.ReplaceAllString(s, `\$0`)
+}
+
+var markdownSpecial = regexp.MustCompile("[\\\\`*_\\[\\]<>|#]")
 
 // PrePublishDocs explains what to do when the pre-publish workflow fails.
 const PrePublishDocs = "https://release-planner.fabricahq.com/customize/pre-publish/#if-it-fails"
@@ -249,7 +272,7 @@ func (s Status) summary() string {
 		}
 		line("**When you merge this PR:**")
 		if p.Tag != "" && s.PrePublish != "" {
-			line("- First, `%s` runs on the release commit. If it fails, the release isn't published.", s.PrePublish)
+			line("- First, %s runs on the release commit. If it fails, the release isn't published.", s.prePublish())
 		}
 		if p.Tag != "" {
 			line("- The release commit, `%s`, is tagged `%s`.", short(p.Commit), p.Tag)

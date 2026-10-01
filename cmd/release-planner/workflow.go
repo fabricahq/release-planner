@@ -18,7 +18,7 @@ import (
 )
 
 func cmdReport(ctx context.Context, args []string, out io.Writer) error {
-	fs, _ := flags("report", "report --needs <json> --branch <name> (--pull-request <number> [--head-sha <sha>] [--head-ref <branch>] [--head-repository <owner/name>] | --merged <sha>) [--plan <file>] [--assets <dir>] [--pre-publish <workflow.yml>] [--downstream <owner/name:workflow.yml>...]")
+	fs, _ := flags("report", "report --needs <json> --branch <name> (--pull-request <number> [--head-sha <sha>] [--head-ref <branch>] [--head-repository <owner/name>] | --merged <sha>) [--plan <file>] [--assets <dir>] [--pre-publish <name>] [--downstream <owner/name:workflow.yml>...]")
 	needs := fs.String("needs", "", "the Release workflow's needs context, as JSON")
 	branch := fs.String("branch", "", "release branch")
 	number := fs.String("pull-request", "", "the release pull request, in its own run")
@@ -28,7 +28,7 @@ func cmdReport(ctx context.Context, args []string, out io.Writer) error {
 	merged := fs.String("merged", "", "after the merge: the commit the release pull request merged as")
 	planFile := fs.String("plan", "", "release plan written by release-planner validate, if validate wrote one")
 	assetsDir := fs.String("assets", "", "directory of the built release assets, if any")
-	prePublish := fs.String("pre-publish", "", "the pre-publish workflow's file name, if the repository has one")
+	prePublish := fs.String("pre-publish", "", "the pre-publish workflow's name, or its file name if it has none, when the repository has one")
 	repository := fs.String("repository", os.Getenv("GITHUB_REPOSITORY"), "GitHub repository, as owner/name")
 	var downstream targets
 	fs.Var(&downstream, "downstream", "a downstream workflow, as owner/name:workflow.yml; repeat for each")

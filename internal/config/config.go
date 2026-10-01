@@ -135,6 +135,16 @@ type PrePublish struct {
 	// Environment is the deployment environment every job of Workflow runs in, which holds
 	// its credentials.
 	Environment string `yaml:"environment"`
+	// Name is the name: Workflow declares, which install reads, or "" when it declares none.
+	Name string `yaml:"-"`
+}
+
+// Label is how the release status names the workflow: its own name, or its file name.
+func (p PrePublish) Label() string {
+	if p.Name != "" {
+		return p.Name
+	}
+	return p.Workflow
 }
 
 // Enabled reports whether the repository has a pre-publish workflow.

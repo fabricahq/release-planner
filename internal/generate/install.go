@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode"
 
 	"github.com/fabricahq/release-planner/internal/config"
 	"go.yaml.in/yaml/v3"
@@ -202,6 +203,8 @@ func readFile(root, name string) (string, bool, error) {
 
 // planInstall decides every write without touching the disk.
 func planInstall(root string, c config.Config, force bool) ([]write, Problems, error) {
+	// The release status names the pre-publish workflow as the workflow names itself.
+	c.PrePublish.Name = workflowName(root, c.PrePublish.Workflow)
 	var writes []write
 	var problems Problems
 	for _, w := range wholeFiles {
@@ -346,6 +349,30 @@ func callableWorkflow(root, key, name string, want, outputs []string) (string, e
 		}
 	}
 	return "", nil
+}
+
+// workflowName returns the name: a workflow in .github/workflows declares, or "" when it
+// declares none, can't be read, or has one GitHub would evaluate as an expression where the
+// Release workflow passes it to the report.
+func workflowName(root, name string) string {
+	if name == "" {
+		return ""
+	}
+	data, _, err := readFile(root, ".github/workflows/"+name)
+	if err != nil {
+		return ""
+	}
+	var wf struct {
+		Name string `yaml:"name"`
+	}
+	if yaml.Unmarshal([]byte(data), &wf) != nil {
+		return ""
+	}
+	n := strings.TrimSpace(wf.Name)
+	if strings.Contains(n, "${{") || strings.ContainsFunc(n, unicode.IsControl) || len(n) > 100 {
+		return ""
+	}
+	return n
 }
 
 // inEnvironment checks that every job of the pre-publish workflow runs in environment, named

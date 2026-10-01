@@ -561,7 +561,10 @@ func installCombination(t *testing.T, root, extra string) map[string]job {
 	}
 	put(t, root, ".github/workflows/build-release.yml", buildWorkflow)
 	put(t, root, ".github/workflows/release-checks.yml", checksWorkflow)
-	put(t, root, ".github/workflows/migrate-database.yml", migrateWorkflow)
+	// A test may have written its own pre-publish workflow.
+	if _, err := os.Stat(filepath.Join(root, ".github/workflows/migrate-database.yml")); err != nil {
+		put(t, root, ".github/workflows/migrate-database.yml", migrateWorkflow)
+	}
 	if _, err := Install(root, c, false); err != nil {
 		t.Fatal(err)
 	}
@@ -644,8 +647,10 @@ func TestWorkflowCombinations(t *testing.T) {
 				publish.named(t, "publish").Name != "Publish the approved release" {
 				t.Errorf("publish outputs %v", publish.Outputs)
 			}
-			if prePublish != strings.Contains(jobs["report"].Steps[len(jobs["report"].Steps)-1].Run, " --pre-publish migrate-database.yml ") {
-				t.Errorf("report runs %q", jobs["report"].Steps[len(jobs["report"].Steps)-1].Run)
+			// The report names the pre-publish workflow by its own name.
+			if step := jobs["report"].Steps[len(jobs["report"].Steps)-1]; prePublish != strings.Contains(step.Run, ` --pre-publish "$PRE_PUBLISH" `) ||
+				prePublish != (step.Env["PRE_PUBLISH"] == "Migrate the database") {
+				t.Errorf("report runs %q with %v", step.Run, step.Env)
 			}
 			if prePublish {
 				hook := jobs["pre-publish"]
@@ -934,5 +939,25 @@ func TestPullRequestsThatChangeCalledWorkflowsRunTheReleaseWorkflow(t *testing.T
 	want := []string{"_releases/**", ".release-planner/**", ".github/workflows/release-planner.yml", ".github/workflows/release-checks.yml", ".github/workflows/build-release.yml", ".github/workflows/migrate-database.yml"}
 	if !slices.Equal(wf.On.PullRequest.Paths, want) {
 		t.Fatalf("%q", wf.On.PullRequest.Paths)
+	}
+}
+
+// The report shows the pre-publish workflow's own name, or its file name when it has none, or
+// one that GitHub would evaluate as an expression in the Release workflow.
+func TestReportNamesThePrePublishWorkflow(t *testing.T) {
+	for name, tc := range map[string]struct{ from, to, want string }{
+		"named":         {"", "", "Migrate the database"},
+		"unnamed":       {"name: Migrate the database\n", "", "migrate-database.yml"},
+		"quoted":        {"name: Migrate the database\n", "name: 'Migrate: the database'\n", "Migrate: the database"},
+		"an expression": {"name: Migrate the database\n", "name: Migrate ${{ github.ref }}\n", "migrate-database.yml"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			put(t, root, ".github/workflows/migrate-database.yml", strings.Replace(migrateWorkflow, tc.from, tc.to, 1))
+			jobs := installCombination(t, root, combinations["pre-publish"])
+			if got := jobs["report"].Steps[len(jobs["report"].Steps)-1].Env["PRE_PUBLISH"]; got != tc.want {
+				t.Fatalf("PRE_PUBLISH is %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
