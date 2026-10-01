@@ -13,14 +13,14 @@ Name your workflow and the environment its jobs run in, in `.release-planner/con
 
 ```yaml
 pre-publish:
-  workflow: migrate.yml
+  workflow: migrate-database.yml
   environment: production
 ```
 
 The release workflow calls it with three string inputs: `ref`, the full SHA of the release commit; `tag`, such as `v1.2.0`; and `version`, such as `1.2.0`. Your workflow must check out `ref`, and every job in it must run in the environment you named:
 
 ```yaml
-name: Migrate
+name: Migrate the database
 on:
   workflow_call:
     inputs:
@@ -101,7 +101,7 @@ Releases publish in order. If an earlier release you merged isn't published yet,
 The release isn't tagged or published. The pull request description shows the failed job, and a comment mentions whoever merged. What to do depends on where the cause is:
 
 - **Outside your repository**, such as an unreachable database or an expired credential: fix it, then use **Re-run failed jobs** on the release run. Your workflow runs again, then the release is published.
-- **In your workflow file**, such as `migrate.yml`: fix it in a pull request, then run the **Release** workflow manually on your release branch, with **merged-commit** set to the commit the release pull request merged as. **Re-run failed jobs** would use the workflow file from the original run.
+- **In your workflow file**, such as `migrate-database.yml`: fix it in a pull request, then run the **Release** workflow manually on your release branch, with **merged-commit** set to the commit the release pull request merged as. **Re-run failed jobs** would use the workflow file from the original run.
 - **In the release commit**, such as a migration that fails: withdraw the release and release again. In the pull request that fixes the cause, also delete the release's notes file, such as `_releases/v1.2.0.md`. After it merges, ask your agent for a release. It can reuse the same version, since that version was never tagged, and the new release commit includes the fix.
 
 Once you've withdrawn a release, don't re-run its old run. Publishing checks for the withdrawal immediately before each write, so it publishes nothing, but your workflow runs once more from the old commit first. If you merge the withdrawal while that run is publishing, it stops at its next write; anything it already made public stays.

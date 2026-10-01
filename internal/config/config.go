@@ -327,7 +327,7 @@ func (c Config) check() error {
 	if p := c.PrePublish; p.Enabled() {
 		switch w := p.Workflow; {
 		case w == "" || !workflowFile.MatchString(w) || w == GeneratedWorkflow:
-			add("pre-publish.workflow: name a workflow file in .github/workflows other than %s, such as migrate.yml", GeneratedWorkflow)
+			add("pre-publish.workflow: name a workflow file in .github/workflows other than %s, such as migrate-database.yml", GeneratedWorkflow)
 		case w == c.ReleaseChecks.Workflow:
 			add("pre-publish.workflow: %s is also the release-checks workflow; use a workflow of its own", w)
 		case w == c.ReleaseAssets.Workflow:

@@ -64,7 +64,7 @@ release-assets:
 # one that applies database migrations, and the environment its jobs run in.
 # Default: none.
 pre-publish:
-  workflow: migrate.yml
+  workflow: migrate-database.yml
   environment: production
 
 # Workflows in other repositories to run after each new stable release.

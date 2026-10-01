@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-const prePublishConfig = "pre-publish:\n  workflow: migrate.yml\n  environment: production\n"
+const prePublishConfig = "pre-publish:\n  workflow: migrate-database.yml\n  environment: production\n"
 
 // production is the recommended pre-publish environment: only main can use it.
 func production(routes map[string]any) map[string]any {

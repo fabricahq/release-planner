@@ -507,8 +507,8 @@ var combinations = map[string]string{
 	"downstream":        "downstream:\n  - repository: fabricahq/homebrew-tap\n    workflow: update-code-rules.yml\n",
 	"all":               "release-checks:\n  workflow: release-checks.yml\nrelease-assets:\n  workflow: build-release.yml\ndownstream:\n  - repository: fabricahq/homebrew-tap\n    workflow: update-code-rules.yml\n  - repository: fabricahq/scoop-bucket\n    workflow: update.yml\n",
 	"script-and-assets": "release-checks:\n  run: make smoke\nrelease-assets:\n  workflow: build-release.yml\n",
-	"pre-publish":       "pre-publish:\n  workflow: migrate.yml\n  environment: production\n",
-	"pre-publish-and-assets": "release-checks:\n  run: make smoke\nrelease-assets:\n  workflow: build-release.yml\npre-publish:\n  workflow: migrate.yml\n  environment: production\n" +
+	"pre-publish":       "pre-publish:\n  workflow: migrate-database.yml\n  environment: production\n",
+	"pre-publish-and-assets": "release-checks:\n  run: make smoke\nrelease-assets:\n  workflow: build-release.yml\npre-publish:\n  workflow: migrate-database.yml\n  environment: production\n" +
 		"downstream:\n  - repository: fabricahq/homebrew-tap\n    workflow: update-code-rules.yml\n",
 }
 
@@ -561,7 +561,7 @@ func installCombination(t *testing.T, root, extra string) map[string]job {
 	}
 	put(t, root, ".github/workflows/build-release.yml", buildWorkflow)
 	put(t, root, ".github/workflows/release-checks.yml", checksWorkflow)
-	put(t, root, ".github/workflows/migrate.yml", migrateWorkflow)
+	put(t, root, ".github/workflows/migrate-database.yml", migrateWorkflow)
 	if _, err := Install(root, c, false); err != nil {
 		t.Fatal(err)
 	}
@@ -644,12 +644,12 @@ func TestWorkflowCombinations(t *testing.T) {
 				publish.named(t, "publish").Name != "Publish the approved release" {
 				t.Errorf("publish outputs %v", publish.Outputs)
 			}
-			if prePublish != strings.Contains(jobs["report"].Steps[len(jobs["report"].Steps)-1].Run, " --pre-publish migrate.yml ") {
+			if prePublish != strings.Contains(jobs["report"].Steps[len(jobs["report"].Steps)-1].Run, " --pre-publish migrate-database.yml ") {
 				t.Errorf("report runs %q", jobs["report"].Steps[len(jobs["report"].Steps)-1].Run)
 			}
 			if prePublish {
 				hook := jobs["pre-publish"]
-				if hook.Uses != "./.github/workflows/migrate.yml" || hook.Secrets != nil || hook.Environment != "" ||
+				if hook.Uses != "./.github/workflows/migrate-database.yml" || hook.Secrets != nil || hook.Environment != "" ||
 					!maps.Equal(hook.Permissions, map[string]string{"contents": "read", "id-token": "write"}) ||
 					!slices.Equal(hook.Needs.([]any), wantNeeds[:len(wantNeeds)-1]) ||
 					!maps.Equal(hook.With, map[string]string{"ref": "${{ needs.validate.outputs.commit }}", "tag": "${{ needs.validate.outputs.tag }}", "version": "${{ needs.validate.outputs.version }}"}) ||
@@ -836,7 +836,7 @@ func TestReleaseAppSettingsNeedBothOrNeither(t *testing.T) {
 }
 
 // migrateWorkflow is a minimal pre-publish workflow whose jobs run in production.
-const migrateWorkflow = `name: Migrate
+const migrateWorkflow = `name: Migrate the database
 on:
   workflow_call:
     inputs:
@@ -876,17 +876,17 @@ jobs:
 // A pre-publish workflow takes the release's inputs, and every job runs in the configured
 // environment, which holds its credentials; it gets no secrets from the Release workflow.
 func TestPrePublishWorkflowRunsInItsEnvironment(t *testing.T) {
-	c, err := config.Parse([]byte("schema-version: 1\nversion: v0.2.0\npre-publish:\n  workflow: migrate.yml\n  environment: production\n"), "")
+	c, err := config.Parse([]byte("schema-version: 1\nversion: v0.2.0\npre-publish:\n  workflow: migrate-database.yml\n  environment: production\n"), "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	root := t.TempDir()
 	_, err = Install(root, c, false)
-	problemFor(t, err, ".github/workflows/migrate.yml", "missing; pre-publish.workflow")
+	problemFor(t, err, ".github/workflows/migrate-database.yml", "missing; pre-publish.workflow")
 
-	put(t, root, ".github/workflows/migrate.yml", strings.Replace(migrateWorkflow, "      version:\n        type: string\n        required: true\n", "", 1))
+	put(t, root, ".github/workflows/migrate-database.yml", strings.Replace(migrateWorkflow, "      version:\n        type: string\n        required: true\n", "", 1))
 	_, err = Install(root, c, false)
-	problemFor(t, err, ".github/workflows/migrate.yml", "has no version input")
+	problemFor(t, err, ".github/workflows/migrate-database.yml", "has no version input")
 
 	for name, tc := range map[string]struct{ from, to, want string }{
 		"no environment":    {"    environment: production\n    steps:\n      - uses", "    steps:\n      - uses", "job migrate doesn't run in the production environment; add environment: production to it"},
@@ -902,13 +902,13 @@ func TestPrePublishWorkflowRunsInItsEnvironment(t *testing.T) {
 			if !strings.Contains(migrateWorkflow, tc.from) {
 				t.Fatalf("fixture lacks %q", tc.from)
 			}
-			put(t, root, ".github/workflows/migrate.yml", strings.Replace(migrateWorkflow, tc.from, tc.to, 1))
+			put(t, root, ".github/workflows/migrate-database.yml", strings.Replace(migrateWorkflow, tc.from, tc.to, 1))
 			_, err := Install(root, c, false)
-			problemFor(t, err, ".github/workflows/migrate.yml", tc.want)
+			problemFor(t, err, ".github/workflows/migrate-database.yml", tc.want)
 		})
 	}
 
-	put(t, root, ".github/workflows/migrate.yml", migrateWorkflow)
+	put(t, root, ".github/workflows/migrate-database.yml", migrateWorkflow)
 	if _, err := Install(root, c, false); err != nil {
 		t.Fatal(err)
 	}
@@ -921,8 +921,8 @@ func TestPrePublishWorkflowRunsInItsEnvironment(t *testing.T) {
 // a called workflow that no longer fits.
 func TestPullRequestsThatChangeCalledWorkflowsRunTheReleaseWorkflow(t *testing.T) {
 	root := t.TempDir()
-	put(t, root, ".github/workflows/migrate.yml", migrateWorkflow)
-	installCombination(t, root, "release-checks:\n  workflow: release-checks.yml\nrelease-assets:\n  workflow: build-release.yml\npre-publish:\n  workflow: migrate.yml\n  environment: production\n")
+	put(t, root, ".github/workflows/migrate-database.yml", migrateWorkflow)
+	installCombination(t, root, "release-checks:\n  workflow: release-checks.yml\nrelease-assets:\n  workflow: build-release.yml\npre-publish:\n  workflow: migrate-database.yml\n  environment: production\n")
 	var wf struct {
 		On struct {
 			PullRequest struct{ Paths []string } `yaml:"pull_request"`
@@ -931,7 +931,7 @@ func TestPullRequestsThatChangeCalledWorkflowsRunTheReleaseWorkflow(t *testing.T
 	if err := yaml.Unmarshal([]byte(read(t, root, WorkflowPath)), &wf); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"_releases/**", ".release-planner/**", ".github/workflows/release-planner.yml", ".github/workflows/release-checks.yml", ".github/workflows/build-release.yml", ".github/workflows/migrate.yml"}
+	want := []string{"_releases/**", ".release-planner/**", ".github/workflows/release-planner.yml", ".github/workflows/release-checks.yml", ".github/workflows/build-release.yml", ".github/workflows/migrate-database.yml"}
 	if !slices.Equal(wf.On.PullRequest.Paths, want) {
 		t.Fatalf("%q", wf.On.PullRequest.Paths)
 	}
