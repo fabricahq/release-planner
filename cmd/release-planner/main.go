@@ -895,20 +895,17 @@ func beforePrePublish(ctx context.Context, repo gitrepo.Repo, gh *publish.GitHub
 	return nil
 }
 
-// waitingFor returns the earliest release the plan's release must wait for: the lowest
-// untagged version, lower than the plan's, whose notes file is on the release branch at base,
-// or after the merge at its current tip, with that file; or else the previous release, if it
-// isn't published. It returns "" when there's none.
+// waitingFor returns the earliest release the plan's release must wait for: the lowest version
+// below the plan's, among the previous release and every version whose notes file is on the
+// release branch at base, or after the merge at its current tip, that has no published release,
+// tagged or not. file is its notes file when it isn't tagged, so withdrawing it is an option, and
+// "" otherwise. It returns "" when there's none.
 func waitingFor(ctx context.Context, repo gitrepo.Repo, gh *publish.GitHub, c config.Config, p plan.Plan, base string) (tag, file string, err error) {
 	ref := base
 	if ref == "" {
 		if ref, err = branchTip(ctx, repo, gh, c.Branch, os.Getenv("GITHUB_TOKEN")); err != nil {
 			return "", "", err
 		}
-	}
-	tags, err := repo.Tags(ctx)
-	if err != nil {
-		return "", "", err
 	}
 	data, _ := repo.Run(ctx, "show", ref+":"+config.File)
 	dir := config.NotesDirIn([]byte(data))
@@ -917,25 +914,38 @@ func waitingFor(ctx context.Context, repo gitrepo.Repo, gh *publish.GitHub, c co
 		return "", "", err
 	}
 	current := semver.MustParse(p.Tag)
-	var lowest semver.Version
+	earlier := map[string]string{}
+	if p.Previous != "" {
+		earlier[p.Previous] = ""
+	}
 	for _, name := range files {
-		pending := plan.NotesTag(dir, name)
-		v, ok := semver.Parse(pending)
-		if !ok || slices.Contains(tags, pending) || semver.Compare(v, current) >= 0 {
-			continue
-		}
-		if tag == "" || semver.Compare(v, lowest) < 0 {
-			tag, file, lowest = pending, name, v
+		if v, ok := semver.Parse(plan.NotesTag(dir, name)); ok && semver.Compare(v, current) < 0 {
+			earlier[plan.NotesTag(dir, name)] = name
 		}
 	}
-	if tag != "" || p.Previous == "" {
-		return tag, file, nil
+	if len(earlier) == 0 {
+		return "", "", nil
 	}
-	published, err := publish.Published(ctx, gh, p.Previous)
-	if err != nil || published {
+	published, err := publish.PublishedTags(ctx, gh)
+	if err != nil {
 		return "", "", err
 	}
-	return p.Previous, "", nil
+	var lowest semver.Version
+	for t, name := range earlier {
+		if v := semver.MustParse(t); !published[t] && (tag == "" || semver.Compare(v, lowest) < 0) {
+			tag, file, lowest = t, name, v
+		}
+	}
+	if tag == "" {
+		return "", "", nil
+	}
+	// A tagged version's notes can't be deleted, so only publishing it unblocks this release.
+	if commit, err := gh.TagCommit(ctx, tag); err != nil {
+		return "", "", err
+	} else if commit != "" {
+		file = ""
+	}
+	return tag, file, nil
 }
 
 // environment warns, through warn, how an environment differs from the recommended setup.

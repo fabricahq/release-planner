@@ -141,7 +141,7 @@ It also refuses a request that a later pull request withdrew or replaced. The st
 With a [pre-publish workflow](/customize/pre-publish/), it also refuses after the merge, before anything runs, when:
 
 - the workflow's environment doesn't exist, has no deployment branch rule, or doesn't let the release branch use it; other branch rules, tag rules, protected-branches mode, and required reviewers are warnings
-- the previous release has no published release, or the release branch's current tip holds the notes file of an untagged version lower than the request; it outputs `waiting-for`, the earlier tag, and `waiting-for-file`, its notes file or empty
+- a version lower than the request has no published release, tagged or not: the previous release, or any version whose notes file is on the release branch's current tip; it outputs `waiting-for`, the lowest such tag, and `waiting-for-file`, its notes file when it isn't tagged, or empty
 
 It reads the branch's tip rather than the merged commit, so after the earlier release is published or withdrawn, **Re-run failed jobs** continues. On the pull request, these are warnings.
 

@@ -217,6 +217,22 @@ func pathEscape(name string) string {
 	return strings.Join(parts, "/")
 }
 
+// Releases lists every release, including the drafts the token can see.
+func (g *GitHub) Releases(ctx context.Context) ([]Release, error) {
+	var all []Release
+	target := "/releases?per_page=100"
+	for target != "" {
+		var page []Release
+		next, err := g.do(ctx, http.MethodGet, target, nil, &page)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, page...)
+		target = next
+	}
+	return all, nil
+}
+
 // ReleaseByTag finds a release, including drafts, which GitHub's by-tag lookup omits. It returns nil if absent.
 func (g *GitHub) ReleaseByTag(ctx context.Context, tag string) (*Release, error) {
 	target := "/releases?per_page=100"

@@ -58,6 +58,27 @@ func TestValidateAfterMergeWaitsForEarlierReleases(t *testing.T) {
 	}{
 		"earlier request pending": {prePublishConfig, pending, nil, nil,
 			"_releases/v0.9.5.md is on main, but v0.9.5 isn't published, so v1.0.0 waits for it. Publish v0.9.5, or withdraw it by deleting _releases/v0.9.5.md in a pull request. Then use Re-run failed jobs on this run", "v0.9.5", "_releases/v0.9.5.md"},
+		// Tagged but never published, below a published previous release: its notes are on
+		// main, so its pre-publish workflow may still run, and this one waits for it.
+		"earlier release tagged but unpublished": {prePublishConfig, func(o *origin) {
+			o.write("_releases/v0.9.5.md", "Tagged by hand\n")
+			o.write("_releases/v0.9.7.md", "Published\n")
+			o.repo.commit("Release v0.9.5 and v0.9.7 (#4)")
+			o.git("tag", "v0.9.5", o.release)
+			o.git("tag", "v0.9.7", o.release)
+		}, nil, map[string]any{"GET /releases": []any{map[string]any{"tag_name": "v0.9.0", "draft": false}, map[string]any{"tag_name": "v0.9.7", "draft": false}},
+			"GET /git/ref/tags/v0.9.5": map[string]any{"object": map[string]string{"type": "commit", "sha": strings.Repeat("a", 40)}}},
+			"v0.9.5 is tagged but has no published release, so v1.0.0 waits for it", "v0.9.5", ""},
+		// The tag appears on GitHub after the checkout read the tags: the plan doesn't know it,
+		// but publication is read from GitHub, so the release still waits.
+		"earlier release tagged after the plan was read": {prePublishConfig, pending, nil,
+			map[string]any{"GET /git/ref/tags/v0.9.5": map[string]any{"object": map[string]string{"type": "commit", "sha": strings.Repeat("a", 40)}}},
+			"v0.9.5 is tagged but has no published release, so v1.0.0 waits for it", "v0.9.5", ""},
+		"earlier releases all published": {prePublishConfig, func(o *origin) {
+			o.write("_releases/v0.9.5.md", "Published\n")
+			o.repo.commit("Release v0.9.5 (#4)")
+			o.git("tag", "v0.9.5", o.release)
+		}, nil, map[string]any{"GET /releases": []any{map[string]any{"tag_name": "v0.9.0", "draft": false}, map[string]any{"tag_name": "v0.9.5", "draft": false}}}, "", "", ""},
 		"earlier request withdrawn": {prePublishConfig, pending, withdraw, nil, "", "", ""},
 		"later request pending":     {prePublishConfig, func(o *origin) { o.write("_releases/v1.1.0.md", "Later\n"); o.repo.commit("Release v1.1.0 (#4)") }, nil, nil, "", "", ""},
 		"previous release missing": {prePublishConfig, nil, nil, map[string]any{"GET /releases": []any{}},

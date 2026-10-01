@@ -137,8 +137,26 @@ func Published(ctx context.Context, gh *GitHub, tag string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return release != nil && !release.Draft, nil
+	return published(release), nil
 }
+
+// PublishedTags returns the tags that have a published release, as Published defines it, from
+// one listing of the repository's releases.
+func PublishedTags(ctx context.Context, gh *GitHub) (map[string]bool, error) {
+	releases, err := gh.Releases(ctx)
+	if err != nil {
+		return nil, err
+	}
+	tags := map[string]bool{}
+	for i := range releases {
+		if published(&releases[i]) {
+			tags[releases[i].TagName] = true
+		}
+	}
+	return tags, nil
+}
+
+func published(r *Release) bool { return r != nil && !r.Draft }
 
 // editNotes replaces a published release's notes. It never touches the tag or the assets.
 func editNotes(ctx context.Context, gh *GitHub, e plan.Edit, check func() error) (Edited, error) {
