@@ -75,11 +75,11 @@ To set it up:
 2. Install the App on this repository only.
 3. Note the App's **Client ID**, and generate a **private key**.
 4. In the `release` environment, add the variable `RELEASE_APP_CLIENT_ID`, set to the Client ID, and the secret `RELEASE_APP_PRIVATE_KEY`, set to the private key.
-5. Optionally, add a tag ruleset (**Settings → Rules → Rulesets → New tag ruleset**) that targets `v*`, restricts creations, updates, and deletions, and lists only the App and repository admins under **Bypass list**.
+5. Optionally, add a tag ruleset (**Settings → Rules → Rulesets → New tag ruleset**) that targets `v*`, restricts creations, updates, and deletions, and lists only the App and repository admins under **Bypass list**. Add it after the App works: the ruleset refuses the workflow's own token, with `Cannot create ref due to creations being restricted`.
 
 The publish job mints a token for this repository only, with **Contents** and **Workflows** write, and uses it only to write; it reads with the workflow's token. With neither setting, it publishes with the workflow's token as before. With only one, it fails and names the missing one.
 
-Tags and releases the App creates start workflows, which those made with the workflow's token never do: `create` and `push` for the tag, and `release` events (`created` for the draft, then `published`, and `released` or `prereleased`). They fire before the release's assets are attested from the release branch, so don't deploy or redistribute from them. Start that work as a [downstream workflow](/customize/downstream/) instead, which runs after the attestation, or have it verify the attestation first. To find workflows these events start, run `grep -lE 'release:|tags:' .github/workflows/*`.
+Tags and releases the App creates start workflows, which those made with the workflow's token never do: `create` and `push` for the tag, and the `release` events `published`, then `released` or `prereleased`, plus `created` for a release without assets. A release with assets is staged as a draft, and drafts start no workflows. They fire before the release's assets are attested from the release branch, so don't deploy or redistribute from them. Start that work as a [downstream workflow](/customize/downstream/) instead, which runs after the attestation, or have it verify the attestation first. To find workflows these events start, run `grep -lE 'release:|tags:' .github/workflows/*`.
 
 ## 6. Commit and release
 
