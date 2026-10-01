@@ -61,6 +61,17 @@ func (o *origin) checkout(t *testing.T) string {
 	return dir
 }
 
+// runCheckout clones origin the way actions/checkout does in a run for commit sha, such as
+// Re-run failed jobs on the merge's run: it moves origin/main back to sha, whatever main is now.
+func (o *origin) runCheckout(t *testing.T, sha string) string {
+	t.Helper()
+	dir := o.checkout(t)
+	r := &repo{t: t, dir: dir}
+	r.git("update-ref", "refs/remotes/origin/main", sha)
+	r.git("checkout", "-q", sha)
+	return dir
+}
+
 // mergedAPI serves pull request #2 merged as merged, and whatever else routes adds.
 func mergedAPI(t *testing.T, o *origin, merged string, routes map[string]any) *fakeAPI {
 	t.Helper()
@@ -69,6 +80,7 @@ func mergedAPI(t *testing.T, o *origin, merged string, routes map[string]any) *f
 		"GET /pulls/2":                                         map[string]any{"head": map[string]any{"sha": o.head, "repo": map[string]string{"full_name": "fabricahq/example"}}, "merged_by": map[string]string{"login": "mona"}},
 		"GET /environments/release":                            map[string]any{"deployment_branch_policy": map[string]bool{"custom_branch_policies": true}, "protection_rules": []any{}},
 		"GET /environments/release/deployment-branch-policies": map[string]any{"branch_policies": []any{map[string]string{"name": "main", "type": "branch"}}},
+		"GET /git/ref/heads/main":                              map[string]any{"object": map[string]string{"type": "commit", "sha": o.git("rev-parse", "main")}},
 	}
 	for k, v := range routes {
 		all[k] = v
@@ -308,7 +320,7 @@ func TestValidateAfterMergeRefusesAWithdrawnRequest(t *testing.T) {
 			tc.after(o)
 			output := actionsFiles(t)
 			mergedAPI(t, o, merged, nil)
-			p, out, errOut := validateMerged(t, o.checkout(t), merged)
+			p, out, errOut := validateMerged(t, o.runCheckout(t, merged), merged)
 			if tc.want == "" {
 				if p.Tag != "v1.0.0" {
 					t.Fatalf("%+v\n%s %s", p, out, errOut)
@@ -347,7 +359,7 @@ func TestValidateAfterMergeRefusesAReplacedNotesEdit(t *testing.T) {
 		"GET /commits/" + edit + "/pulls": []any{map[string]any{"number": 9, "merged_at": "2026-09-25T12:00:00Z", "merge_commit_sha": edit, "base": map[string]string{"ref": "main"}}},
 		"GET /pulls/9":                    map[string]any{"head": map[string]any{"sha": head, "repo": map[string]string{"full_name": "fabricahq/example"}}, "merged_by": map[string]string{"login": "mona"}},
 	})
-	if _, _, errOut := validateMerged(t, o.checkout(t), edit); !strings.Contains(errOut, "so this run doesn't replace the v1.0.0 notes; the newer change's run does") {
+	if _, _, errOut := validateMerged(t, o.runCheckout(t, edit), edit); !strings.Contains(errOut, "so this run doesn't replace the v1.0.0 notes; the newer change's run does") {
 		t.Fatal(errOut)
 	}
 }
@@ -365,10 +377,10 @@ func TestPublishRefusesARequestWithdrawnAfterValidation(t *testing.T) {
 	}
 	o.git("rm", "-q", "_releases/v1.0.0.md")
 	o.repo.commit("Fix the migration and withdraw v1.0.0 (#4)")
-	api := newAPI(t, map[string]any{})
+	api := newAPI(t, map[string]any{"GET /git/ref/heads/main": map[string]any{"object": map[string]string{"type": "commit", "sha": o.git("rev-parse", "main")}}})
 	output := actionsFiles(t)
-	code, _, errOut := cli(t, "publish", "--dir", o.checkout(t), "--plan", file, "--built-plan", file, "--branch", "main")
-	if code != 1 || !strings.Contains(errOut, "so v1.0.0 was withdrawn or requested again") || len(api.requests) != 0 {
+	code, _, errOut := cli(t, "publish", "--dir", o.runCheckout(t, merged), "--plan", file, "--built-plan", file, "--branch", "main")
+	if code != 1 || !strings.Contains(errOut, "so v1.0.0 was withdrawn or requested again") || strings.Join(api.requests, ",") != "GET /git/ref/heads/main" {
 		t.Fatalf("%d %s %v", code, errOut, api.requests)
 	}
 	// The report says the run stopped on purpose.

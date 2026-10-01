@@ -475,10 +475,33 @@ func readMerged(ctx context.Context, repo gitrepo.Repo, c config.Config, opts pl
 		}
 	}
 	p.PullRequest, p.Merged, p.MergedBy = pr.Number, merged, pr.MergedBy
-	if err := plan.StillApproved(ctx, repo, c.Branch, p); err != nil {
+	tip, err := branchTip(ctx, repo, api(token, opts.Repository), c.Branch, token)
+	if err != nil {
+		return empty, err
+	}
+	if err := plan.StillApproved(ctx, repo, c.Branch, tip, p); err != nil {
 		return empty, err
 	}
 	return p, nil
+}
+
+// branchTip returns the release branch's current commit, read from GitHub and fetched if the
+// checkout lacks it. origin/<branch> won't do: in a re-run, or a run that started before the
+// branch moved on, actions/checkout points it at the run's own commit.
+func branchTip(ctx context.Context, repo gitrepo.Repo, gh *publish.GitHub, branch, token string) (string, error) {
+	tip, err := gh.BranchCommit(ctx, branch)
+	if err != nil {
+		return "", err
+	}
+	if !fullSHA.MatchString(tip) {
+		return "", fmt.Errorf("%s's commit is %q, not a full commit SHA", branch, tip)
+	}
+	if !repo.HasCommit(ctx, tip) {
+		if err := repo.FetchCommit(ctx, tip, token); err != nil {
+			return "", fmt.Errorf("fetching %s's current commit: %v", branch, err)
+		}
+	}
+	return tip, nil
 }
 
 // inWorkflow completes the plan in the Release workflow: it decides which run's release
@@ -739,7 +762,15 @@ func cmdPublish(ctx context.Context, args []string, out io.Writer) error {
 	}
 	// Re-run failed jobs reuses validate's plan, so check again that a later commit on the
 	// release branch hasn't withdrawn or replaced what the merge approved.
-	if err := plan.StillApproved(ctx, gitrepo.Repo{Dir: *dir}, *branch, p); err != nil {
+	gh := api(token, *repository)
+	// A release GitHub App's token, when the release environment configures one, makes the writes.
+	gh.WriteToken = os.Getenv("RELEASE_TOKEN")
+	repo := gitrepo.Repo{Dir: *dir}
+	tip, err := branchTip(ctx, repo, gh, *branch, token)
+	if err != nil {
+		return err
+	}
+	if err := plan.StillApproved(ctx, repo, *branch, tip, p); err != nil {
 		if errors.As(err, new(plan.WithdrawnError)) {
 			if err := appendEnvFile("GITHUB_OUTPUT", "release=withdrawn\n"); err != nil {
 				return err
@@ -747,9 +778,6 @@ func cmdPublish(ctx context.Context, args []string, out io.Writer) error {
 		}
 		return err
 	}
-	gh := api(token, *repository)
-	// A release GitHub App's token, when the release environment configures one, makes the writes.
-	gh.WriteToken = os.Getenv("RELEASE_TOKEN")
 	res, err := publish.Publish(ctx, gh, p, *branch, assets)
 	if err != nil {
 		return err
@@ -869,7 +897,9 @@ func beforePrePublish(ctx context.Context, repo gitrepo.Repo, gh *publish.GitHub
 func waitingFor(ctx context.Context, repo gitrepo.Repo, gh *publish.GitHub, c config.Config, p plan.Plan, base string) (tag, file string, err error) {
 	ref := base
 	if ref == "" {
-		ref = "origin/" + c.Branch
+		if ref, err = branchTip(ctx, repo, gh, c.Branch, os.Getenv("GITHUB_TOKEN")); err != nil {
+			return "", "", err
+		}
 	}
 	tags, err := repo.Tags(ctx)
 	if err != nil {

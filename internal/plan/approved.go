@@ -37,7 +37,7 @@ func shortSHA(sha string) string {
 	return sha
 }
 
-// StillApproved checks a merged plan against the release branch's current tip, origin/branch:
+// StillApproved checks a merged plan against tip, the release branch's current commit:
 // no commit after the plan's merge may have changed the notes files it acts on. Deleting a
 // request's file withdraws it, and changing it requests that version again, so an older run
 // must not publish it; a later notes edit replaces an older one. The requested release's file
@@ -46,8 +46,10 @@ func shortSHA(sha string) string {
 //
 // --full-history also finds a file deleted and added back on a side branch, which git's
 // default history simplification hides.
-func StillApproved(ctx context.Context, repo gitrepo.Repo, branch string, p Plan) error {
-	tip := "origin/" + branch
+//
+// tip must come from the branch itself, not origin/branch: in a re-run, actions/checkout moves
+// origin/branch back to the run's commit.
+func StillApproved(ctx context.Context, repo gitrepo.Repo, branch, tip string, p Plan) error {
 	data, _ := repo.Run(ctx, "show", tip+":"+config.File)
 	dir := config.NotesDirIn([]byte(data))
 	check := func(file, tag string, edit bool) error {

@@ -197,6 +197,26 @@ func (g *GitHub) TagCommit(ctx context.Context, tag string) (string, error) {
 	return annotated.Object.SHA, nil
 }
 
+// BranchCommit returns the commit a branch points to now.
+func (g *GitHub) BranchCommit(ctx context.Context, branch string) (string, error) {
+	var ref struct {
+		Object struct{ SHA string } `json:"object"`
+	}
+	if _, err := g.do(ctx, http.MethodGet, "/git/ref/heads/"+pathEscape(branch), nil, &ref); err != nil {
+		return "", fmt.Errorf("get %s's commit in %s: %v", branch, g.Repository, err)
+	}
+	return ref.Object.SHA, nil
+}
+
+// pathEscape escapes each segment of a ref name such as release/v1, keeping its slashes.
+func pathEscape(name string) string {
+	parts := strings.Split(name, "/")
+	for i, part := range parts {
+		parts[i] = url.PathEscape(part)
+	}
+	return strings.Join(parts, "/")
+}
+
 // ReleaseByTag finds a release, including drafts, which GitHub's by-tag lookup omits. It returns nil if absent.
 func (g *GitHub) ReleaseByTag(ctx context.Context, tag string) (*Release, error) {
 	target := "/releases?per_page=100"

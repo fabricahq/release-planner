@@ -70,7 +70,7 @@ func TestValidateAfterMergeWaitsForEarlierReleases(t *testing.T) {
 			o, merged := laterOrigin(t, tc.config, tc.onMain, tc.later)
 			output := actionsFiles(t)
 			mergedAPI(t, o, merged, production(tc.routes))
-			p, out, errOut := validateMerged(t, o.checkout(t), merged)
+			p, out, errOut := validateMerged(t, o.runCheckout(t, merged), merged)
 			if tc.want == "" {
 				if p.Tag != "v1.0.0" || strings.Contains(output("output"), "waiting-for=v") {
 					t.Fatalf("%+v\n%s %s\n%s", p, out, errOut, output("output"))
