@@ -118,6 +118,16 @@ func Publish(ctx context.Context, gh *GitHub, p plan.Plan, branch string, assets
 	return res, nil
 }
 
+// Published reports whether tag has a published GitHub release: one that exists and isn't a
+// draft. A draft the token can't see counts as unpublished.
+func Published(ctx context.Context, gh *GitHub, tag string) (bool, error) {
+	release, err := gh.ReleaseByTag(ctx, tag)
+	if err != nil {
+		return false, err
+	}
+	return release != nil && !release.Draft, nil
+}
+
 // editNotes replaces a published release's notes. It never touches the tag or the assets.
 func editNotes(ctx context.Context, gh *GitHub, e plan.Edit) (Edited, error) {
 	release, err := gh.ReleaseByTag(ctx, e.Tag)
@@ -166,11 +176,11 @@ func release(ctx context.Context, gh *GitHub, p plan.Plan, assets []File) (Resul
 	}
 
 	if p.Previous != "" {
-		previous, err := gh.ReleaseByTag(ctx, p.Previous)
+		published, err := Published(ctx, gh, p.Previous)
 		if err != nil {
 			return Result{}, err
 		}
-		if previous == nil || previous.Draft {
+		if !published {
 			return Result{}, fmt.Errorf("publish %s first", p.Previous)
 		}
 	}

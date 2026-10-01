@@ -644,3 +644,16 @@ func TestEnvironmentReadsSettingsOrReportsMissing(t *testing.T) {
 		t.Fatalf("missing environment: %+v %v", env, err)
 	}
 }
+
+func TestPublishedMeansAReleaseThatIsNotADraft(t *testing.T) {
+	f := withPrevious()
+	f.release("v1.1.0", true, "Draft")
+	f.server = httptest.NewServer(f)
+	t.Cleanup(f.server.Close)
+	gh := &GitHub{BaseURL: f.server.URL, Token: "token", Repository: "fabricahq/example", HTTP: f.server.Client()}
+	for tag, want := range map[string]bool{"v1.0.0": true, "v1.1.0": false, "v1.2.0": false} {
+		if got, err := Published(context.Background(), gh, tag); err != nil || got != want {
+			t.Errorf("Published(%s) = %v, %v; want %v", tag, got, err, want)
+		}
+	}
+}
