@@ -69,7 +69,7 @@ The tag is created only at the last step, so a version never exists without the 
 
 ## Run your own steps around a release
 
-You can have the release workflow run your own GitHub Actions workflows before it publishes a release or after:
+You can have the release workflow run your own GitHub Actions workflows before it publishes a release, after it publishes it, or both. Each workflow can be in this repository or in another repository you own, though one in another repository can't run before publishing yet:
 
 | | In this repository | In another repository |
 | --- | --- | --- |
