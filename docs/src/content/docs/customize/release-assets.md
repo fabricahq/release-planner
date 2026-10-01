@@ -3,7 +3,7 @@ title: Release assets
 description: Build files on the release pull request and attach them to the release.
 ---
 
-Release assets are optional files attached to each GitHub release, such as binaries, archives, or a checksum manifest. One of your workflows builds them from the release commit while the release pull request is open, so a broken build shows up before you approve anything. Merging publishes exactly the files the pull request built.
+Release assets are optional files attached to each GitHub release, such as binaries, archives, or a checksum manifest. One of your GitHub Actions workflows builds them from the release commit while the release pull request is open, so a broken build shows up before you approve anything. Merging publishes exactly the files the pull request built.
 
 ## Set it up
 
@@ -14,7 +14,7 @@ release-assets:
   workflow: build-release.yml
 ```
 
-The release workflow calls it with three string inputs:
+The release workflow that Release Planner generates calls it with three string inputs:
 
 - `ref`: the full SHA of the release commit
 - `tag`: the release's tag, such as `v1.2.0`
@@ -83,6 +83,6 @@ Keep the build reproducible. If an upload is interrupted and the files have to b
 ## Requirements
 
 - Artifact attestations are available for public repositories, and for private and internal repositories on GitHub Enterprise Cloud.
-- The workflow can't be `release-planner.yml`, the release workflow itself.
+- The build workflow can't be `release-planner.yml`, the release workflow itself.
 
 Once a release is published, its files never change. Editing a release's notes later leaves them as they are.

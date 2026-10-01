@@ -3,9 +3,9 @@ title: Release Planner vs. other tools
 description: Which kind of release tool Release Planner is, how it compares with the others of its kind, and who should use something else.
 ---
 
-There are quite a few release automation tools available today. They all streamline releasing and let you customize how, but they differ in the human workflow: how release notes are prepared, reviewed, and finalized.
+There are quite a few release automation tools available today. They all streamline releasing and let you customize how, but they differ on the human side: how release notes are prepared, reviewed, and finalized.
 
-The approaches to human workflows broadly fall into three categories:
+Their approaches broadly fall into three categories:
 
 - **Computed release notes**, generated from commit messages or pull request titles.
 - **Written release notes**, written by a person or an agent, usually in a dedicated release pull request.
@@ -33,7 +33,7 @@ With Release Planner, contributors write nothing extra. At release time, your ag
 
 ## Release Planner vs. build and packaging tools
 
-Tools like GoReleaser build and package your software, and Release Planner doesn't replace them. Run them from your [build workflow](/customize/release-assets/) with their own publishing turned off, and Release Planner publishes the files with your notes, then starts any [downstream workflows](/customize/downstream/), such as a Homebrew tap update.
+Tools like GoReleaser build and package your software, and Release Planner doesn't replace them. Run them in a GitHub Actions [build workflow](/customize/release-assets/) with their own publishing turned off, and Release Planner publishes the files with your notes, then starts any [downstream workflows](/customize/downstream/), such as a Homebrew tap update.
 
 ## Who Release Planner is not for
 
