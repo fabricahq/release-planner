@@ -262,14 +262,16 @@ func planInstall(root string, c config.Config, force bool) ([]write, Problems, e
 	for _, called := range []struct {
 		key, workflow string
 		inputs        []string
+		outputs       []string
 	}{
-		{"release-checks.workflow", c.ReleaseChecks.Workflow, []string{"ref"}},
-		{"release-assets.workflow", c.ReleaseAssets.Workflow, []string{"ref", "tag", "version"}},
+		{"release-checks.workflow", c.ReleaseChecks.Workflow, []string{"ref"}, nil},
+		// The Release workflow downloads the assets by the ID of the upload the workflow made.
+		{"release-assets.workflow", c.ReleaseAssets.Workflow, []string{"ref", "tag", "version"}, []string{"artifact-id"}},
 	} {
 		if called.workflow == "" {
 			continue
 		}
-		if problem, err := callableWorkflow(root, called.key, called.workflow, called.inputs); err != nil {
+		if problem, err := callableWorkflow(root, called.key, called.workflow, called.inputs, called.outputs); err != nil {
 			return nil, nil, err
 		} else if problem != "" {
 			problems = append(problems, Problem{".github/workflows/" + called.workflow, problem})
@@ -287,8 +289,9 @@ func planInstall(root string, c config.Config, force bool) ([]write, Problems, e
 }
 
 // callableWorkflow checks that the workflow the config key names can be called with the
-// string inputs the Release workflow passes, and needs no others.
-func callableWorkflow(root, key, name string, want []string) (string, error) {
+// string inputs the Release workflow passes, needs no others, and declares the outputs the
+// Release workflow reads.
+func callableWorkflow(root, key, name string, want, outputs []string) (string, error) {
 	data, ok, err := readFile(root, ".github/workflows/"+name)
 	if err != nil || !ok {
 		return "missing; " + key + " in " + config.File + " names it", err
@@ -330,8 +333,17 @@ func callableWorkflow(root, key, name string, want []string) (string, error) {
 		slices.Sort(extra)
 		return fmt.Sprintf("requires inputs the Release workflow can't supply (%s); give them defaults or make them optional", strings.Join(extra, ", ")), nil
 	}
+	declared, _ := callMap["outputs"].(map[string]any)
+	for _, output := range outputs {
+		if _, ok := declared[output]; !ok {
+			return fmt.Sprintf("has no %s output, but the Release workflow downloads the release assets by the ID of the upload this workflow makes; declare a workflow_call output named %s, set from the artifact-id output of the upload-artifact step: %s", output, output, ReleaseAssetsDocs), nil
+		}
+	}
 	return "", nil
 }
+
+// ReleaseAssetsDocs explains the release-assets workflow's contract.
+const ReleaseAssetsDocs = "https://release-planner.fabricahq.com/customize/release-assets/"
 
 // Install writes or updates every generated file. It changes nothing if any file blocks it.
 func Install(root string, c config.Config, force bool) ([]Change, error) {

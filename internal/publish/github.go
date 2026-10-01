@@ -599,15 +599,22 @@ func (g *GitHub) SuccessfulPullRequestRuns(ctx context.Context, workflow, head s
 	return page.Runs, nil
 }
 
-// Artifacts lists the names of a workflow run's artifacts that haven't expired.
-func (g *GitHub) Artifacts(ctx context.Context, run int64) ([]string, error) {
-	var names []string
+// Artifact is a workflow run's artifact.
+type Artifact struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
+// Artifacts lists a workflow run's artifacts that haven't expired. Two jobs can upload
+// artifacts with the same name, so a name doesn't identify one.
+func (g *GitHub) Artifacts(ctx context.Context, run int64) ([]Artifact, error) {
+	var all []Artifact
 	target := fmt.Sprintf("/actions/runs/%d/artifacts?per_page=100", run)
 	for target != "" {
 		var page struct {
 			Artifacts []struct {
-				Name    string `json:"name"`
-				Expired bool   `json:"expired"`
+				Artifact
+				Expired bool `json:"expired"`
 			} `json:"artifacts"`
 		}
 		next, err := g.do(ctx, http.MethodGet, target, nil, &page)
@@ -616,34 +623,12 @@ func (g *GitHub) Artifacts(ctx context.Context, run int64) ([]string, error) {
 		}
 		for _, a := range page.Artifacts {
 			if !a.Expired {
-				names = append(names, a.Name)
+				all = append(all, a.Artifact)
 			}
 		}
 		target = next
 	}
-	return names, nil
-}
-
-// ArtifactID returns the ID of a workflow run's unexpired artifact with the name, or 0 if it
-// has none.
-func (g *GitHub) ArtifactID(ctx context.Context, run int64, name string) (int64, error) {
-	var page struct {
-		Artifacts []struct {
-			ID      int64  `json:"id"`
-			Name    string `json:"name"`
-			Expired bool   `json:"expired"`
-		} `json:"artifacts"`
-	}
-	query := url.Values{"name": {name}, "per_page": {"100"}}
-	if _, err := g.do(ctx, http.MethodGet, fmt.Sprintf("/actions/runs/%d/artifacts?%s", run, query.Encode()), nil, &page); err != nil {
-		return 0, fmt.Errorf("list the artifacts of run %d in %s: %v", run, g.Repository, err)
-	}
-	for _, a := range page.Artifacts {
-		if a.Name == name && !a.Expired {
-			return a.ID, nil
-		}
-	}
-	return 0, nil
+	return all, nil
 }
 
 // RunJob is one job of a workflow run, at its latest attempt.

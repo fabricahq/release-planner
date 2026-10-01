@@ -64,6 +64,11 @@ jobs:
       publish: ${{"{{"}} steps.validate.outputs.publish {{"}}"}}
       build: ${{"{{"}} steps.validate.outputs.build {{"}}"}}
       build-run: ${{"{{"}} steps.validate.outputs.build-run {{"}}"}}
+      # The artifacts publish uses, by ID: this run's plan, and the pull request run's plan and
+      # assets when this run reuses them. Downloading by name would take any job's upload.
+      plan-artifact: ${{"{{"}} steps.upload-plan.outputs.artifact-id {{"}}"}}
+      built-plan-artifact: ${{"{{"}} steps.validate.outputs.built-plan-artifact {{"}}"}}
+      built-assets-artifact: ${{"{{"}} steps.validate.outputs.built-assets-artifact {{"}}"}}
     steps:
       - uses: {{.Actions.Checkout}}
         with:
@@ -91,7 +96,8 @@ jobs:
           else
             release-planner validate --ci --merged "$MERGED" --out "$RUNNER_TEMP/release-plan.json"
           fi
-      - uses: {{.Actions.UploadArtifact}}
+      - id: upload-plan
+        uses: {{.Actions.UploadArtifact}}
         with:
           name: release-plan
           path: ${{"{{"}} runner.temp {{"}}"}}/release-plan.json
@@ -140,7 +146,7 @@ jobs:
 {{end}}
 {{- if .ReleaseAssets.Workflow}}
   # Build the release assets from the release commit, with read-only access and no secrets.
-  # The called workflow uploads them as one artifact named release-assets.
+  # The called workflow uploads them as one artifact named release-assets, and outputs its ID.
   release-assets:
     needs: validate
     if: needs.validate.outputs.build == 'true'
@@ -153,22 +159,38 @@ jobs:
       version: ${{"{{"}} needs.validate.outputs.version {{"}}"}}
 
   # Attest each asset's build provenance, so publish can check the files came from this
-  # workflow. This job runs no repository code.
+  # workflow, and record which plan and assets artifacts the release uses, in the name of a
+  # release-binding artifact, so the merge can reuse exactly those. It waits for every job that
+  # runs repository code, so nothing can add a second binding after it. This job runs no
+  # repository code.
   attest:
-    needs: [validate, release-assets]
+    needs: [validate, release-assets{{if .ReleaseChecks.Enabled}}, release-checks{{end}}]
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
       attestations: write
+    outputs:
+      assets-artifact: ${{"{{"}} needs.release-assets.outputs.artifact-id {{"}}"}}
     steps:
       - uses: {{.Actions.DownloadArtifact}}
         with:
-          name: release-assets
+          artifact-ids: ${{"{{"}} needs.release-assets.outputs.artifact-id {{"}}"}}
           path: ${{"{{"}} runner.temp {{"}}"}}/release-assets
       - uses: {{.Actions.AttestBuildProvenance}}
         with:
           subject-path: '${{"{{"}} runner.temp {{"}}"}}/release-assets/*'
+      - name: Record the artifacts the release uses
+        env:
+          PLAN: ${{"{{"}} needs.validate.outputs.plan-artifact {{"}}"}}
+          ASSETS: ${{"{{"}} needs.release-assets.outputs.artifact-id {{"}}"}}
+        run: printf 'plan=%s\nassets=%s\n' "$PLAN" "$ASSETS" > "$RUNNER_TEMP/release-binding"
+      - uses: {{.Actions.UploadArtifact}}
+        with:
+          name: release-binding-${{"{{"}} needs.validate.outputs.plan-artifact {{"}}"}}-${{"{{"}} needs.release-assets.outputs.artifact-id {{"}}"}}
+          path: ${{"{{"}} runner.temp {{"}}"}}/release-binding
+          overwrite: false
+          if-no-files-found: error
 {{end}}
   # The only job that can write, and only after the merge. It runs the pinned Release Planner
   # version and no repository code. It tags the release commit and publishes the approved
@@ -204,13 +226,13 @@ jobs:
 {{- template "install" .}}
       - uses: {{.Actions.DownloadArtifact}}
         with:
-          name: release-plan
+          artifact-ids: ${{"{{"}} needs.validate.outputs.plan-artifact {{"}}"}}
           path: ${{"{{"}} runner.temp {{"}}"}}/plan
       # The run that checked and built the release: the pull request's, or this one.
       - uses: {{.Actions.DownloadArtifact}}
         if: needs.validate.outputs.tag != ''
         with:
-          name: release-plan
+          artifact-ids: ${{"{{"}} needs.validate.outputs.built-plan-artifact || needs.validate.outputs.plan-artifact {{"}}"}}
           path: ${{"{{"}} runner.temp {{"}}"}}/built
           run-id: ${{"{{"}} needs.validate.outputs.build-run {{"}}"}}
           github-token: ${{"{{"}} github.token {{"}}"}}
@@ -218,7 +240,7 @@ jobs:
       - uses: {{.Actions.DownloadArtifact}}
         if: needs.validate.outputs.tag != ''
         with:
-          name: release-assets
+          artifact-ids: ${{"{{"}} needs.validate.outputs.built-assets-artifact || needs.attest.outputs.assets-artifact {{"}}"}}
           path: ${{"{{"}} runner.temp {{"}}"}}/release-assets
           run-id: ${{"{{"}} needs.validate.outputs.build-run {{"}}"}}
           github-token: ${{"{{"}} github.token {{"}}"}}
@@ -315,16 +337,17 @@ jobs:
 {{- template "install" .}}
       # Missing when validation failed; the report says which job did.
       - uses: {{.Actions.DownloadArtifact}}
+        if: needs.validate.outputs.plan-artifact != ''
         continue-on-error: true
         with:
-          name: release-plan
+          artifact-ids: ${{"{{"}} needs.validate.outputs.plan-artifact {{"}}"}}
           path: ${{"{{"}} runner.temp {{"}}"}}/plan
 {{- if .ReleaseAssets.Workflow}}
       - uses: {{.Actions.DownloadArtifact}}
-        if: needs.validate.outputs.tag != ''
+        if: needs.validate.outputs.built-assets-artifact != '' || needs.attest.outputs.assets-artifact != ''
         continue-on-error: true
         with:
-          name: release-assets
+          artifact-ids: ${{"{{"}} needs.validate.outputs.built-assets-artifact || needs.attest.outputs.assets-artifact {{"}}"}}
           path: ${{"{{"}} runner.temp {{"}}"}}/release-assets
           run-id: ${{"{{"}} needs.validate.outputs.build-run {{"}}"}}
           github-token: ${{"{{"}} github.token {{"}}"}}

@@ -31,7 +31,8 @@ first-version: {{.FirstVersion}}
 # Optional files to attach to each release, built from the release commit on the release
 # pull request by one of your workflows, then attested and published when you merge. It
 # needs a workflow_call trigger with string inputs ref, tag, and version; it must check out
-# ref and upload the files as one artifact named release-assets. It gets no secrets.
+# ref, upload the files as one artifact named release-assets, and output that upload's ID as
+# artifact-id. It gets no secrets.
 # release-assets:
 #   workflow: build-release.yml
 

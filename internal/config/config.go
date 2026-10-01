@@ -115,8 +115,9 @@ func (v ReleaseChecks) Enabled() bool { return v.Run != "" || v.Workflow != "" }
 // release pull request, before approval.
 type ReleaseAssets struct {
 	// Workflow names a workflow in .github/workflows that accepts workflow_call with string
-	// inputs ref, tag, and version, checks out ref, and uploads the files as one artifact
-	// named release-assets. It gets no secrets and can only read the repository.
+	// inputs ref, tag, and version, checks out ref, uploads the files as one artifact named
+	// release-assets, and outputs that upload's ID as artifact-id. It gets no secrets and can
+	// only read the repository.
 	Workflow string `yaml:"workflow"`
 }
 

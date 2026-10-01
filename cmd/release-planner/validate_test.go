@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -154,33 +155,43 @@ func TestValidateAfterMergeRefusesWhatThePullRequestDidNotApprove(t *testing.T) 
 }
 
 // The pull request's successful run already checked the release commit and built its
-// assets, so the merge reuses it while its artifacts last. Anything else builds again.
+// assets, so the merge reuses it while its artifacts last: the one plan it uploaded, or with
+// assets, exactly the plan and assets its one release-binding names. Anything else builds again.
 func TestValidateAfterMergeReusesThePullRequestRun(t *testing.T) {
 	run := func(id int, head, repository string) map[string]any {
 		return map[string]any{"id": id, "head_sha": head, "event": "pull_request", "conclusion": "success", "head_repository": map[string]string{"full_name": repository}}
 	}
-	artifacts := func(names ...string) map[string]any {
-		var list []any
-		for _, n := range names {
-			list = append(list, map[string]any{"name": n, "expired": false})
+	// artifacts lists a run's artifacts, given as "id:name".
+	artifacts := func(list ...string) map[string]any {
+		var all []any
+		for _, a := range list {
+			id, name, _ := strings.Cut(a, ":")
+			all = append(all, map[string]any{"id": json.Number(id), "name": name, "expired": false})
 		}
-		return map[string]any{"artifacts": list}
+		return map[string]any{"artifacts": all}
 	}
+	const assets = "release-assets:\n  workflow: build-release.yml\n"
+	const rebuild = "build=true\nbuild-run=100\nbuilt-plan-artifact=\nbuilt-assets-artifact=\n"
 	for name, tc := range map[string]struct {
 		config string
 		routes map[string]any
 		want   string
 	}{
-		"reuse": {"", map[string]any{"/runs": []any{run(77, "", "fabricahq/example")}, "/77": artifacts("release-plan")}, "build=false\nbuild-run=77\n"},
-		"reuse with assets": {"release-assets:\n  workflow: build-release.yml\n",
-			map[string]any{"/runs": []any{run(77, "", "fabricahq/example")}, "/77": artifacts("release-plan", "release-assets")}, "build=false\nbuild-run=77\n"},
-		"assets expired": {"release-assets:\n  workflow: build-release.yml\n",
-			map[string]any{"/runs": []any{run(77, "", "fabricahq/example")}, "/77": artifacts("release-plan")}, "build=true\nbuild-run=100\n"},
-		"fork run":   {"", map[string]any{"/runs": []any{run(77, "", "someone/example")}, "/77": artifacts("release-plan")}, "build=true\nbuild-run=100\n"},
-		"other head": {"", map[string]any{"/runs": []any{run(77, strings.Repeat("e", 40), "fabricahq/example")}, "/77": artifacts("release-plan")}, "build=true\nbuild-run=100\n"},
-		"newest usable": {"", map[string]any{"/runs": []any{run(78, "", "someone/example"), run(77, "", "fabricahq/example")}, "/77": artifacts("release-plan")},
-			"build=false\nbuild-run=77\n"},
-		"lookup fails": {"", map[string]any{"/runs": status{500, "boom"}}, "build=true\nbuild-run=100\n"},
+		"reuse": {"", map[string]any{"/runs": []any{run(77, "", "fabricahq/example")}, "/77": artifacts("5:release-plan")}, "build=false\nbuild-run=77\nbuilt-plan-artifact=5\nbuilt-assets-artifact=\n"},
+		"reuse with assets": {assets, map[string]any{"/runs": []any{run(77, "", "fabricahq/example")},
+			"/77": artifacts("5:release-plan", "6:release-assets", "7:release-binding-5-6")}, "build=false\nbuild-run=77\nbuilt-plan-artifact=5\nbuilt-assets-artifact=6\n"},
+		"assets expired": {assets, map[string]any{"/runs": []any{run(77, "", "fabricahq/example")}, "/77": artifacts("5:release-plan", "7:release-binding-5-6")}, rebuild},
+		"no binding":     {assets, map[string]any{"/runs": []any{run(77, "", "fabricahq/example")}, "/77": artifacts("5:release-plan", "6:release-assets")}, rebuild},
+		"two bindings": {assets, map[string]any{"/runs": []any{run(77, "", "fabricahq/example")},
+			"/77": artifacts("5:release-plan", "6:release-assets", "8:release-assets", "7:release-binding-5-6", "9:release-binding-5-8")}, rebuild},
+		"binding names another artifact": {assets, map[string]any{"/runs": []any{run(77, "", "fabricahq/example")},
+			"/77": artifacts("5:release-plan", "6:release-assets", "7:release-binding-5-8")}, rebuild},
+		"two plans":  {"", map[string]any{"/runs": []any{run(77, "", "fabricahq/example")}, "/77": artifacts("5:release-plan", "8:release-plan")}, rebuild},
+		"fork run":   {"", map[string]any{"/runs": []any{run(77, "", "someone/example")}, "/77": artifacts("5:release-plan")}, rebuild},
+		"other head": {"", map[string]any{"/runs": []any{run(77, strings.Repeat("e", 40), "fabricahq/example")}, "/77": artifacts("5:release-plan")}, rebuild},
+		"newest usable": {"", map[string]any{"/runs": []any{run(78, "", "someone/example"), run(77, "", "fabricahq/example")}, "/77": artifacts("5:release-plan")},
+			"build=false\nbuild-run=77\nbuilt-plan-artifact=5\n"},
+		"lookup fails": {"", map[string]any{"/runs": status{500, "boom"}}, rebuild},
 	} {
 		t.Run(name, func(t *testing.T) {
 			o := newOrigin(t, tc.config)
@@ -205,7 +216,7 @@ func TestValidateAfterMergeReusesThePullRequestRun(t *testing.T) {
 				"GET /actions/runs/77/artifacts":                  tc.routes["/77"],
 			})
 			p, out, errOut := validateMerged(t, o.checkout(t), merged)
-			if p.Tag != "v1.0.0" || !strings.Contains(output("output"), tc.want) || p.Reused != strings.Contains(tc.want, "false") {
+			if p.Tag != "v1.0.0" || !strings.Contains(output("output"), tc.want) || p.Reused != strings.Contains(tc.want, "build=false") {
 				t.Fatalf("%+v\n%s\n%s %s", p, output("output"), out, errOut)
 			}
 			if name == "lookup fails" && !strings.Contains(output("summary"), "Couldn't look for the pull request's run") {

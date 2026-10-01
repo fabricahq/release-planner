@@ -493,6 +493,7 @@ func inWorkflow(ctx context.Context, out io.Writer, repo gitrepo.Repo, c config.
 	warn := func(format string, args ...any) { p.Warnings = append(p.Warnings, fmt.Sprintf(format, args...)) }
 	runID, _ := strconv.ParseInt(os.Getenv("GITHUB_RUN_ID"), 10, 64)
 	build := false
+	var reused buildRun
 	if p.Tag != "" {
 		p.BuildRun, build = runID, true
 		switch {
@@ -502,8 +503,9 @@ func inWorkflow(ctx context.Context, out io.Writer, repo gitrepo.Repo, c config.
 		case gh != nil:
 			if run, err := reusableRun(ctx, gh, c, p.Head, repository); err != nil {
 				warn("Couldn't look for the pull request's run to reuse its checks and assets, so this run repeats them: %v", err)
-			} else if run != 0 {
-				p.BuildRun, p.Reused, build = run, true, false
+			} else if run.id != 0 {
+				p.BuildRun, p.Reused, build = run.id, true, false
+				reused = run
 			}
 		}
 	}
@@ -529,7 +531,8 @@ func inWorkflow(ctx context.Context, out io.Writer, repo gitrepo.Repo, c config.
 	}
 
 	publishes := base == "" && !p.Empty()
-	outputs := fmt.Sprintf("tag=%s\nversion=%s\ncommit=%s\npublish=%t\nbuild=%t\nbuild-run=%d\n", p.Tag, p.Version, p.Commit, publishes, build, p.BuildRun)
+	outputs := fmt.Sprintf("tag=%s\nversion=%s\ncommit=%s\npublish=%t\nbuild=%t\nbuild-run=%d\nbuilt-plan-artifact=%s\nbuilt-assets-artifact=%s\n",
+		p.Tag, p.Version, p.Commit, publishes, build, p.BuildRun, artifactID(reused.plan), artifactID(reused.assets))
 	if err := appendEnvFile("GITHUB_OUTPUT", outputs); err != nil {
 		return err
 	}
@@ -571,34 +574,83 @@ func inWorkflow(ctx context.Context, out io.Writer, repo gitrepo.Repo, c config.
 	return appendEnvFile("GITHUB_STEP_SUMMARY", summary.String())
 }
 
+// buildRun is a pull request's run whose release checks and assets the release reuses, with
+// the IDs of the plan and assets artifacts it built.
+type buildRun struct{ id, plan, assets int64 }
+
+func artifactID(id int64) string {
+	if id == 0 {
+		return ""
+	}
+	return strconv.FormatInt(id, 10)
+}
+
 // reusableRun returns the pull request's successful run of this workflow at head, from the
 // same repository, whose release plan and any release assets haven't expired: it already
 // ran the release checks on the release commit, and built and attested the assets. It
-// returns 0 if there is none.
-func reusableRun(ctx context.Context, gh *publish.GitHub, c config.Config, head, repository string) (int64, error) {
+// returns a zero buildRun if there is none.
+//
+// Any job can upload an artifact under any name, so the run's artifacts must identify what
+// it built. Without assets, that's its one release-plan. With assets, its attest job names
+// the plan and assets it used in one release-binding-<plan>-<assets> artifact, after every job
+// that runs the repository's code; a run with any other binding isn't reused.
+func reusableRun(ctx context.Context, gh *publish.GitHub, c config.Config, head, repository string) (buildRun, error) {
 	// GITHUB_WORKFLOW_REF is owner/name/.github/workflows/<file>@<ref>.
 	ref, _, _ := strings.Cut(os.Getenv("GITHUB_WORKFLOW_REF"), "@")
 	if ref == "" {
-		return 0, nil
+		return buildRun{}, nil
 	}
 	runs, err := gh.SuccessfulPullRequestRuns(ctx, path.Base(ref), head)
 	if err != nil {
-		return 0, err
+		return buildRun{}, err
 	}
 	for _, r := range runs {
 		// A fork's run built nothing; only this repository's own branches do.
 		if r.HeadSHA != head || r.Conclusion != "success" || r.HeadRepository.FullName != repository {
 			continue
 		}
-		names, err := gh.Artifacts(ctx, r.ID)
+		artifacts, err := gh.Artifacts(ctx, r.ID)
 		if err != nil {
-			return 0, err
+			return buildRun{}, err
 		}
-		if slices.Contains(names, "release-plan") && (c.ReleaseAssets.Workflow == "" || slices.Contains(names, "release-assets")) {
-			return r.ID, nil
+		if built, ok := boundArtifacts(artifacts, c.ReleaseAssets.Workflow != ""); ok {
+			built.id = r.ID
+			return built, nil
 		}
 	}
-	return 0, nil
+	return buildRun{}, nil
+}
+
+// boundArtifacts finds the plan and any assets a run built, as reusableRun describes.
+func boundArtifacts(artifacts []publish.Artifact, assets bool) (buildRun, bool) {
+	named := func(id int64, name string) bool {
+		return slices.ContainsFunc(artifacts, func(a publish.Artifact) bool { return a.ID == id && a.Name == name })
+	}
+	var plans, bindings []publish.Artifact
+	for _, a := range artifacts {
+		switch {
+		case a.Name == "release-plan":
+			plans = append(plans, a)
+		case strings.HasPrefix(a.Name, "release-binding"):
+			bindings = append(bindings, a)
+		}
+	}
+	if !assets {
+		if len(plans) != 1 {
+			return buildRun{}, false
+		}
+		return buildRun{plan: plans[0].ID}, true
+	}
+	if len(bindings) != 1 {
+		return buildRun{}, false
+	}
+	var built buildRun
+	if n, _ := fmt.Sscanf(bindings[0].Name, "release-binding-%d-%d", &built.plan, &built.assets); n != 2 ||
+		bindings[0].Name != fmt.Sprintf("release-binding-%d-%d", built.plan, built.assets) ||
+		!named(built.plan, "release-plan") || !named(built.assets, "release-assets") {
+		return buildRun{}, false
+	}
+	return built, true
 }
 
 // normalize ignores the line endings and trailing whitespace GitHub may change in a release body.

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -68,9 +69,15 @@ func cmdReport(ctx context.Context, args []string, out io.Writer) error {
 
 	gh := api(os.Getenv("GITHUB_TOKEN"), *repository)
 	if len(s.Assets) > 0 && s.Plan != nil && s.Plan.BuildRun != 0 {
-		// Link the zip of the run that built the assets; without its ID, the report just omits the link.
-		if id, err := gh.ArtifactID(ctx, s.Plan.BuildRun, "release-assets"); err == nil && id != 0 {
-			s.Archive = fmt.Sprintf("%s/%s/actions/runs/%d/artifacts/%d", server, *repository, s.Plan.BuildRun, id)
+		// Link the zip of the assets the release uses while it lasts; without it, the report
+		// just omits the link.
+		id := s.Jobs["validate"].Outputs["built-assets-artifact"]
+		if id == "" {
+			id = s.Jobs["attest"].Outputs["assets-artifact"]
+		}
+		if artifacts, err := gh.Artifacts(ctx, s.Plan.BuildRun); err == nil &&
+			slices.ContainsFunc(artifacts, func(a publish.Artifact) bool { return strconv.FormatInt(a.ID, 10) == id }) {
+			s.Archive = fmt.Sprintf("%s/%s/actions/runs/%d/artifacts/%s", server, *repository, s.Plan.BuildRun, id)
 		}
 	}
 	// Each job links to its page; without the jobs, the report links the run instead.

@@ -82,14 +82,16 @@ func TestReportLinksTheAssetsArtifact(t *testing.T) {
 		t.Fatal(err)
 	}
 	file := writePlan(t, plan.Plan{Tag: "v1.2.0", Commit: strings.Repeat("a", 40), BuildRun: 77})
-	needs := `{"validate":{"result":"success","outputs":{"build":"true"}},"publish":{"result":"skipped","outputs":{}}}`
+	// The link is to the artifact attest bound, never another upload under the same name.
+	needs := `{"validate":{"result":"success","outputs":{"build":"true"}},"attest":{"result":"success","outputs":{"assets-artifact":"9"}},"publish":{"result":"skipped","outputs":{}}}`
 	for name, c := range map[string]struct {
 		artifacts any
 		want      string
 	}{
-		"found":   {map[string]any{"artifacts": []any{map[string]any{"id": 9, "name": "release-assets", "expired": false}}}, "[Download all (zip)](https://github.com/fabricahq/example/actions/runs/77/artifacts/9)"},
-		"expired": {map[string]any{"artifacts": []any{map[string]any{"id": 9, "name": "release-assets", "expired": true}}}, ""},
-		"denied":  {status{403, map[string]string{"message": "no"}}, ""},
+		"found":    {map[string]any{"artifacts": []any{map[string]any{"id": 8, "name": "release-assets", "expired": false}, map[string]any{"id": 9, "name": "release-assets", "expired": false}}}, "[Download all (zip)](https://github.com/fabricahq/example/actions/runs/77/artifacts/9)"},
+		"replaced": {map[string]any{"artifacts": []any{map[string]any{"id": 8, "name": "release-assets", "expired": false}}}, ""},
+		"expired":  {map[string]any{"artifacts": []any{map[string]any{"id": 9, "name": "release-assets", "expired": true}}}, ""},
+		"denied":   {status{403, map[string]string{"message": "no"}}, ""},
 	} {
 		t.Run(name, func(t *testing.T) {
 			api := newAPI(t, map[string]any{"GET /actions/runs/77/artifacts": c.artifacts, "GET /pulls/7": map[string]any{"body": ""}, "PATCH /pulls/7": map[string]any{}})

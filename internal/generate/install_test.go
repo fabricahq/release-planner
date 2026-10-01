@@ -426,6 +426,11 @@ func TestReleaseAssetsNeedsTheReleaseInputs(t *testing.T) {
 	_, err = Install(root, c, false)
 	problemFor(t, err, ".github/workflows/build.yml", "declares tag without type: string")
 
+	// The Release workflow downloads the assets by the ID of the upload the workflow made.
+	put(t, root, ".github/workflows/build.yml", strings.Replace(buildWorkflow, "    outputs:\n      artifact-id:\n        value: ${{ jobs.build.outputs.artifact-id }}\n", "", 1))
+	_, err = Install(root, c, false)
+	problemFor(t, err, ".github/workflows/build.yml", "has no artifact-id output")
+
 	put(t, root, ".github/workflows/build.yml", buildWorkflow)
 	if _, err := Install(root, c, false); err != nil {
 		t.Fatal(err)
@@ -450,11 +455,16 @@ on:
       version:
         type: string
         required: true
+    outputs:
+      artifact-id:
+        value: ${{ jobs.build.outputs.artifact-id }}
 permissions:
   contents: read
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -463,7 +473,8 @@ jobs:
       - run: mkdir dist && echo "$VERSION" > dist/version.txt
         env:
           VERSION: ${{ inputs.version }}
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-assets
           path: dist/
@@ -601,6 +612,36 @@ func TestWorkflowCombinations(t *testing.T) {
 			for _, step := range publish.Steps {
 				if step.With["run-id"] != "" && (step.With["run-id"] != "${{ needs.validate.outputs.build-run }}" || step.If != "needs.validate.outputs.tag != ''") {
 					t.Errorf("publish downloads from %+v", step)
+				}
+			}
+
+			// Every download names the artifact the producing job uploaded, by its ID, so no
+			// other job can swap it by uploading under the same name.
+			for id, j := range jobs {
+				for _, step := range j.Steps {
+					if strings.HasPrefix(step.Uses, "actions/download-artifact@") && (step.With["name"] != "" || step.With["artifact-ids"] == "") {
+						t.Errorf("%s downloads %+v, not by the producer's artifact ID", id, step.With)
+					}
+				}
+			}
+			for _, step := range jobs["publish"].Steps {
+				if step.With["path"] == "${{ runner.temp }}/plan" && step.With["artifact-ids"] != "${{ needs.validate.outputs.plan-artifact }}" {
+					t.Errorf("publish downloads the plan %q", step.With["artifact-ids"])
+				}
+			}
+			if assets {
+				attest := jobs["attest"]
+				wantNeeds := []any{"validate", "release-assets"}
+				if checks {
+					// No repository code runs in a pull request's run after attest records the IDs.
+					wantNeeds = append(wantNeeds, "release-checks")
+				}
+				if !slices.Equal(attest.Needs.([]any), wantNeeds) || attest.Steps[0].With["artifact-ids"] != "${{ needs.release-assets.outputs.artifact-id }}" {
+					t.Errorf("attest: %+v", attest)
+				}
+				binding := attest.Steps[len(attest.Steps)-1]
+				if !strings.HasPrefix(binding.Uses, "actions/upload-artifact@") || binding.With["name"] != "release-binding-${{ needs.validate.outputs.plan-artifact }}-${{ needs.release-assets.outputs.artifact-id }}" || binding.With["overwrite"] != "false" {
+					t.Errorf("attest binds the artifacts with %+v", binding)
 				}
 			}
 
