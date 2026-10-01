@@ -45,7 +45,8 @@ func shortSHA(sha string) string {
 // unchanged into the notes directory the tip configures isn't a change.
 //
 // --full-history also finds a file deleted and added back on a side branch, which git's
-// default history simplification hides.
+// default history simplification hides, and --diff-merges=first-parent a change a merge commit
+// makes itself, which git log otherwise doesn't show.
 //
 // tip must come from the branch itself, not origin/branch: in a re-run, actions/checkout moves
 // origin/branch back to the run's commit.
@@ -57,7 +58,7 @@ func StillApproved(ctx context.Context, repo gitrepo.Repo, branch, tip string, p
 		if moved := path.Join(dir, tag+".md"); moved != file {
 			paths = append(paths, moved)
 		}
-		out, err := repo.Run(ctx, append([]string{"log", "--full-history", "--format=%x00%H", "--name-status", "--find-renames=100%", tip, "^" + p.Merged, "--"}, paths...)...)
+		out, err := repo.Run(ctx, append([]string{"log", "--full-history", "--diff-merges=first-parent", "--format=%x00%H", "--name-status", "--find-renames=100%", tip, "^" + p.Merged, "--"}, paths...)...)
 		if err != nil {
 			return err
 		}

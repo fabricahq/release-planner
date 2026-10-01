@@ -304,6 +304,24 @@ func TestValidateAfterMergeRefusesAWithdrawnRequest(t *testing.T) {
 			o.git("checkout", "-q", "main")
 			o.git("merge", "-q", "--no-ff", "side", "-m", "Merge pull request #6 from fabricahq/side")
 		}, "so v1.0.0 was withdrawn or requested again"},
+		"deleted in a merge commit": {func(o *origin) {
+			o.git("checkout", "-q", "-b", "fix")
+			o.write("fix.go", "package fix\n")
+			o.repo.commit("Fix the migration")
+			o.git("checkout", "-q", "main")
+			o.git("merge", "-q", "--no-ff", "--no-commit", "fix")
+			o.git("rm", "-q", "_releases/v1.0.0.md")
+			o.repo.commit("Merge pull request #11 from fabricahq/fix")
+		}, "so v1.0.0 was withdrawn or requested again"},
+		"replaced in a merge commit": {func(o *origin) {
+			o.git("checkout", "-q", "-b", "fix")
+			o.write("fix.go", "package fix\n")
+			o.repo.commit("Fix the migration")
+			o.git("checkout", "-q", "main")
+			o.git("merge", "-q", "--no-ff", "--no-commit", "fix")
+			o.write("_releases/v1.0.0.md", "Notes with the fix\n")
+			o.repo.commit("Merge pull request #12 from fabricahq/fix")
+		}, "so v1.0.0 was withdrawn or requested again"},
 		"unrelated change": {func(o *origin) {
 			o.write("later.go", "package later // changed\n")
 			o.repo.commit("Unrelated change (#7)")
