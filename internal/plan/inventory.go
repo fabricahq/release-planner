@@ -104,7 +104,7 @@ func Take(ctx context.Context, repo gitrepo.Repo, opts Options, head string) (In
 	}
 	slices.Sort(inv.PullRequests)
 
-	files, err := notesFiles(ctx, repo, opts.NotesDir, head)
+	files, err := NotesFiles(ctx, repo, opts.NotesDir, head)
 	if err != nil {
 		return Inventory{}, err
 	}

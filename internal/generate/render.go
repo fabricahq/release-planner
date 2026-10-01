@@ -6,11 +6,15 @@ import (
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"slices"
 	"strings"
 	"text/template"
 
 	"github.com/fabricahq/release-planner/internal/config"
 	"github.com/fabricahq/release-planner/internal/publish"
+	"github.com/fabricahq/release-planner/internal/report"
 	"github.com/fabricahq/release-planner/internal/semver"
 )
 
@@ -57,8 +61,42 @@ type data struct {
 	StartsBeforeOne bool
 	// Needs lists the jobs publication waits for.
 	Needs string
-	// DownstreamDocs explains how to set up the downstream environment.
-	DownstreamDocs string
+	// DispatchDocs explains how to set up the dispatch environment.
+	DispatchDocs string
+	// ReleaseAppDocs explains how to set up the optional release GitHub App.
+	ReleaseAppDocs string
+	// CalledWorkflows are the repository's workflows the Release workflow calls, so a pull
+	// request that changes one runs check.
+	CalledWorkflows []string
+	// PreJobs are the pre-publish workflows' jobs, and PrePublishSucceeded the condition that
+	// all of them succeeded. PostJobs are the post-publish workflows' jobs.
+	PreJobs             []hookJob
+	PrePublishSucceeded string
+	PostJobs            []hookJob
+	// HooksJSON describes the hook jobs to the report, as a JSON list of report.Hook.
+	HooksJSON string
+}
+
+// hookJob is the Release workflow job that runs one hook workflow.
+type hookJob struct {
+	config.Hook
+	// ID is the job's ID, and Name its name, such as "pre-publish (migrate-database.yml)" or
+	// "post-publish (octo-org/tap:update.yml)".
+	ID, Name    string
+	Prereleases bool
+	// Owner and RepositoryName split Repository, for a workflow in another repository.
+	Owner, RepositoryName string
+}
+
+// hookJob gives a hook the job numbered n, in the order the config lists them, since job IDs
+// can't hold every character a workflow file name can.
+func newHookJob(when string, n int, h config.Hook, prereleases bool) hookJob {
+	j := hookJob{Hook: h, ID: fmt.Sprintf("%s-%d", when, n), Name: fmt.Sprintf("%s (%s)", when, h.Workflow), Prereleases: prereleases}
+	if h.Repository != "" {
+		j.Name = fmt.Sprintf("%s (%s:%s)", when, h.Repository, h.Workflow)
+		j.Owner, j.RepositoryName, _ = strings.Cut(h.Repository, "/")
+	}
+	return j
 }
 
 func render(name string, c config.Config, marker string) string {
@@ -80,10 +118,37 @@ func render(name string, c config.Config, marker string) string {
 	if c.ReleaseAssets.Workflow != "" {
 		needs = append(needs, "release-assets", "attest")
 	}
-	d := data{Config: c, Module: Module, Actions: Actions, Marker: marker, ReleaseChecksRun: run.String(),
+	called := slices.DeleteFunc([]string{c.ReleaseChecks.Workflow, c.ReleaseAssets.Workflow}, func(w string) bool { return w == "" })
+	var pre, post []hookJob
+	var succeeded []string
+	var hooks []report.Hook
+	for i, h := range c.PrePublish {
+		j := newHookJob("pre-publish", i+1, h, true)
+		pre = append(pre, j)
+		called = append(called, j.Workflow)
+		succeeded = append(succeeded, fmt.Sprintf("needs.%s.result == 'success'", j.ID))
+		hooks = append(hooks, report.Hook{Job: j.ID, Name: j.Name, When: "pre-publish", Workflow: j.Workflow, Title: j.Hook.Name})
+	}
+	for i, h := range c.PostPublish {
+		j := newHookJob("post-publish", i+1, h.Hook, h.Prereleases)
+		post = append(post, j)
+		if j.Repository == "" {
+			called = append(called, j.Workflow)
+		}
+		hooks = append(hooks, report.Hook{Job: j.ID, Name: j.Name, When: "post-publish", Workflow: j.Workflow, Repository: j.Repository, Title: j.Hook.Name, Prereleases: j.Prereleases})
+	}
+	condition := strings.Join(succeeded, " && ")
+	if len(succeeded) > 1 {
+		condition = "(" + condition + ")"
+	}
+	var hooksJSON []byte
+	if len(hooks) > 0 {
+		hooksJSON, _ = json.Marshal(hooks)
+	}
+	d := data{Config: c, CalledWorkflows: called, PreJobs: pre, PrePublishSucceeded: condition, PostJobs: post, HooksJSON: string(hooksJSON), Module: Module, Actions: Actions, Marker: marker, ReleaseChecksRun: run.String(),
 		PolicyPath: config.Policy, StyleText: style(c), IsRelease: IsRelease(c.Version), Install: InstallCommand(c.Version),
 		StartsBeforeOne: semver.MustParse(c.FirstVersion).Major == 0, Needs: strings.Join(needs, ", "),
-		DownstreamDocs: publish.DownstreamEnvironmentDocs}
+		DispatchDocs: publish.DispatchEnvironmentDocs, ReleaseAppDocs: publish.ReleaseAppDocs}
 	if err := parsed.ExecuteTemplate(&b, name, d); err != nil {
 		// Templates are embedded and the config is validated, so this is a programming error.
 		panic(err)

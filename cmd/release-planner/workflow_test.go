@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/fabricahq/release-planner/internal/plan"
+	"github.com/fabricahq/release-planner/internal/publish"
 )
 
 func writePlan(t *testing.T, p plan.Plan) string {
@@ -82,14 +83,16 @@ func TestReportLinksTheAssetsArtifact(t *testing.T) {
 		t.Fatal(err)
 	}
 	file := writePlan(t, plan.Plan{Tag: "v1.2.0", Commit: strings.Repeat("a", 40), BuildRun: 77})
-	needs := `{"validate":{"result":"success","outputs":{"build":"true"}},"publish":{"result":"skipped","outputs":{}}}`
+	// The link is to the artifact attest bound, never another upload under the same name.
+	needs := `{"validate":{"result":"success","outputs":{"build":"true"}},"attest":{"result":"success","outputs":{"assets-artifact":"9"}},"publish":{"result":"skipped","outputs":{}}}`
 	for name, c := range map[string]struct {
 		artifacts any
 		want      string
 	}{
-		"found":   {map[string]any{"artifacts": []any{map[string]any{"id": 9, "name": "release-assets", "expired": false}}}, "[Download all (zip)](https://github.com/fabricahq/example/actions/runs/77/artifacts/9)"},
-		"expired": {map[string]any{"artifacts": []any{map[string]any{"id": 9, "name": "release-assets", "expired": true}}}, ""},
-		"denied":  {status{403, map[string]string{"message": "no"}}, ""},
+		"found":    {map[string]any{"artifacts": []any{map[string]any{"id": 8, "name": "release-assets", "expired": false}, map[string]any{"id": 9, "name": "release-assets", "expired": false}}}, "[Download all (zip)](https://github.com/fabricahq/example/actions/runs/77/artifacts/9)"},
+		"replaced": {map[string]any{"artifacts": []any{map[string]any{"id": 8, "name": "release-assets", "expired": false}}}, ""},
+		"expired":  {map[string]any{"artifacts": []any{map[string]any{"id": 9, "name": "release-assets", "expired": true}}}, ""},
+		"denied":   {status{403, map[string]string{"message": "no"}}, ""},
 	} {
 		t.Run(name, func(t *testing.T) {
 			api := newAPI(t, map[string]any{"GET /actions/runs/77/artifacts": c.artifacts, "GET /pulls/7": map[string]any{"body": ""}, "PATCH /pulls/7": map[string]any{}})
@@ -147,14 +150,14 @@ func TestReportDegradesWithoutWriteAccess(t *testing.T) {
 	}
 }
 
-func TestDownstreamRunsEachTargetWithTheRelease(t *testing.T) {
+func TestDispatchStartsEachTargetWithTheRelease(t *testing.T) {
 	output := actionsFiles(t)
 	api := newAPI(t, map[string]any{
 		"GET /repos/fabricahq/homebrew-tap":                                          map[string]string{"default_branch": "main"},
 		"POST /repos/fabricahq/homebrew-tap/actions/workflows/update.yml/dispatches": status{204, nil},
 	})
-	code, out, errOut := cli(t, "downstream", "--tag", "v1.2.0", "--target", "fabricahq/homebrew-tap:update.yml", "--target", "fabricahq/scoop-bucket:update.yml")
-	if code != 1 || !strings.Contains(out, "Ran update.yml in fabricahq/homebrew-tap for v1.2.0") || !strings.Contains(errOut, "1 of 2 downstream workflows didn't start; v1.2.0 is published either way") {
+	code, out, errOut := cli(t, "dispatch", "--tag", "v1.2.0", "--target", "fabricahq/homebrew-tap:update.yml", "--target", "fabricahq/scoop-bucket:update.yml")
+	if code != 1 || !strings.Contains(out, "Started update.yml in fabricahq/homebrew-tap for v1.2.0") || !strings.Contains(errOut, "1 of 2 post-publish workflows didn't start; v1.2.0 is published either way") {
 		t.Fatalf("%d %s %s", code, out, errOut)
 	}
 	var sent struct {
@@ -165,14 +168,13 @@ func TestDownstreamRunsEachTargetWithTheRelease(t *testing.T) {
 		sent.Ref != "main" || sent.Inputs["tag"] != "v1.2.0" || sent.Inputs["version"] != "1.2.0" {
 		t.Fatal(sent, err)
 	}
-	if !strings.Contains(out, "::error title=Downstream::") || !strings.Contains(out, "fabricahq/scoop-bucket") || output("output") != "" {
+	if !strings.Contains(out, "::error title=Post-publish::") || !strings.Contains(out, "fabricahq/scoop-bucket") || output("output") != "" {
 		t.Fatalf("%s %q", out, output("output"))
 	}
 }
 
-// The downstream job is a matrix with one result in the needs context, so the report reads
-// each target's job, at its latest attempt.
-func TestReportListsEachDownstreamTarget(t *testing.T) {
+// Each post-publish workflow runs in its own job, which the report links at its latest attempt.
+func TestReportListsEachPostPublishWorkflow(t *testing.T) {
 	actionsFiles(t)
 	t.Setenv("GITHUB_RUN_ID", "100")
 	job := func(name, conclusion string, attempt, id int) map[string]any {
@@ -181,10 +183,10 @@ func TestReportListsEachDownstreamTarget(t *testing.T) {
 	api := newAPI(t, map[string]any{
 		"GET /actions/runs/100/jobs": map[string]any{"jobs": []any{
 			job("publish", "success", 1, 1),
-			job("downstream (fabricahq/homebrew-tap:update.yml)", "success", 1, 2),
-			job("downstream (fabricahq/scoop-bucket:update.yml)", "failure", 1, 3),
-			job("downstream (fabricahq/winget:update.yml)", "failure", 1, 4),
-			job("downstream (fabricahq/winget:update.yml)", "success", 2, 5),
+			job("post-publish (fabricahq/homebrew-tap:update.yml)", "success", 1, 2),
+			job("post-publish (deploy.yml) / deploy", "failure", 1, 3),
+			job("post-publish (fabricahq/winget:update.yml)", "failure", 1, 4),
+			job("post-publish (fabricahq/winget:update.yml)", "success", 2, 5),
 		}},
 		"GET /actions/runs/77/jobs": map[string]any{"jobs": []any{job("validate", "success", 1, 76), job("release-assets / build", "success", 1, 77)}},
 		"GET /pulls/2":              map[string]any{"body": "Release v1.2.0"},
@@ -193,54 +195,55 @@ func TestReportListsEachDownstreamTarget(t *testing.T) {
 		"POST /issues/2/comments":   map[string]any{},
 	})
 	file := writePlan(t, plan.Plan{Tag: "v1.2.0", Commit: strings.Repeat("a", 40), PullRequest: 2, BuildRun: 77, Reused: true})
-	needs := `{"validate":{"result":"success","outputs":{}},"release-assets":{"result":"skipped","outputs":{}},"publish":{"result":"success","outputs":{}},"downstream":{"result":"failure","outputs":{}}}`
-	args := []string{"report", "--needs", needs, "--branch", "main", "--merged", merged, "--plan", file,
-		"--downstream", "fabricahq/homebrew-tap:update.yml", "--downstream", "fabricahq/scoop-bucket:update.yml", "--downstream", "fabricahq/winget:update.yml"}
-	if code, out, errOut := cli(t, args...); code != 0 {
+	needs := `{"validate":{"result":"success","outputs":{}},"release-assets":{"result":"skipped","outputs":{}},"publish":{"result":"success","outputs":{}},` +
+		`"post-publish-1":{"result":"success","outputs":{}},"post-publish-2":{"result":"failure","outputs":{}},"post-publish-3":{"result":"success","outputs":{}}}`
+	hooks := `[{"job":"post-publish-1","name":"post-publish (fabricahq/homebrew-tap:update.yml)","when":"post-publish","workflow":"update.yml","repository":"fabricahq/homebrew-tap"},` +
+		`{"job":"post-publish-2","name":"post-publish (deploy.yml)","when":"post-publish","workflow":"deploy.yml","title":"Deploy"},` +
+		`{"job":"post-publish-3","name":"post-publish (fabricahq/winget:update.yml)","when":"post-publish","workflow":"update.yml","repository":"fabricahq/winget"}]`
+	if code, out, errOut := cli(t, "report", "--needs", needs, "--branch", "main", "--merged", merged, "--plan", file, "--hooks", hooks); code != 0 {
 		t.Fatalf("%d %s %s", code, out, errOut)
 	}
 	body := api.sent("PATCH /pulls/2")
-	if !strings.Contains(api.sent("POST /issues/2/comments"), "**downstream** job failed") {
+	if !strings.Contains(api.sent("POST /issues/2/comments"), "**post-publish (deploy.yml)** job failed") {
 		t.Fatal(api.requests)
 	}
 	for _, want := range []string{
+		"✅ Published [v1.2.0]",
 		"| ♻️ | Build the release assets | [Reused from the pull request](https://github.com/fabricahq/example/actions/runs/100/job/77) |",
 		"| ✅ | Publish | [Details](https://github.com/fabricahq/example/actions/runs/100/job/1) |",
 		"| ✅ | Run fabricahq/homebrew-tap `update.yml` | [Details](https://github.com/fabricahq/example/actions/runs/100/job/2) |",
-		"| ❌ | Run fabricahq/scoop-bucket `update.yml` | [Details](https://github.com/fabricahq/example/actions/runs/100/job/3) |",
+		"| ❌ | Deploy | [Details](https://github.com/fabricahq/example/actions/runs/100/job/3) |",
 		"| ✅ | Run fabricahq/winget `update.yml` | [Details](https://github.com/fabricahq/example/actions/runs/100/job/5) |",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("lacks %q:\n%s", want, body)
 		}
 	}
-}
-
-// When every downstream job succeeded, each target did, even if the jobs can't be read.
-func TestReportListsDownstreamTargetsWithoutTheJobs(t *testing.T) {
-	actionsFiles(t)
-	t.Setenv("GITHUB_RUN_ID", "100")
-	api := newAPI(t, map[string]any{"GET /pulls/2": map[string]any{"body": ""}, "PATCH /pulls/2": map[string]any{}, "GET /issues/2/comments": []any{}})
-	file := writePlan(t, plan.Plan{Tag: "v1.2.0", Commit: strings.Repeat("a", 40), PullRequest: 2})
-	needs := `{"validate":{"result":"success","outputs":{}},"publish":{"result":"success","outputs":{}},"downstream":{"result":"success","outputs":{}}}`
-	code, out, errOut := cli(t, "report", "--needs", needs, "--branch", "main", "--merged", merged, "--plan", file, "--downstream", "fabricahq/homebrew-tap:update.yml")
-	if code != 0 || !strings.Contains(out, "::warning title=Release status::Couldn't read the jobs of this run") {
-		t.Fatalf("%d %s %s", code, out, errOut)
-	}
-	if body := api.sent("PATCH /pulls/2"); !strings.Contains(body, "| ✅ | Run fabricahq/homebrew-tap `update.yml` | [Details](https://github.com/fabricahq/example/actions/runs/100) |") {
-		t.Fatal(body)
+	if code, _, errOut := cli(t, "report", "--needs", needs, "--branch", "main", "--merged", merged, "--plan", file, "--hooks", "post-publish"); code != 1 || !strings.Contains(errOut, "--hooks") {
+		t.Fatal(errOut)
 	}
 }
 
-func TestDownstreamSkipsPrereleases(t *testing.T) {
+// A prerelease starts only the post-publish workflows that opt in.
+func TestDispatchSkipsPrereleasesUnlessTheyOptIn(t *testing.T) {
 	output := actionsFiles(t)
-	api := newAPI(t, map[string]any{})
-	code, out, _ := cli(t, "downstream", "--tag", "v1.2.0-rc.1", "--target", "fabricahq/homebrew-tap:update.yml")
+	api := newAPI(t, map[string]any{
+		"GET /repos/fabricahq/homebrew-tap":                                          map[string]string{"default_branch": "main"},
+		"POST /repos/fabricahq/homebrew-tap/actions/workflows/update.yml/dispatches": status{204, nil},
+	})
+	code, out, _ := cli(t, "dispatch", "--tag", "v1.2.0-rc.1", "--target", "fabricahq/homebrew-tap:update.yml")
 	if code != 0 || !strings.Contains(out, "prerelease") || len(api.requests) != 0 || output("output") != "" {
 		t.Fatalf("%d %s %v %q", code, out, api.requests, output("output"))
 	}
-	if code, _, errOut := cli(t, "downstream", "--tag", "v1.2.0", "--target", "homebrew-tap"); code != 1 || !strings.Contains(errOut, "owner/name:workflow.yml") {
+	if code, out, errOut := cli(t, "dispatch", "--tag", "v1.2.0-rc.1", "--target", "fabricahq/homebrew-tap:update.yml", "--prereleases"); code != 0 || !strings.Contains(out, "Started update.yml in fabricahq/homebrew-tap for v1.2.0-rc.1") {
+		t.Fatalf("%d %s %s", code, out, errOut)
+	}
+	if code, _, errOut := cli(t, "dispatch", "--tag", "v1.2.0", "--target", "homebrew-tap"); code != 1 || !strings.Contains(errOut, "owner/name:workflow.yml") {
 		t.Fatal(errOut)
+	}
+	// The old command name is gone.
+	if code, _, errOut := cli(t, "downstream", "--tag", "v1.2.0"); code != 2 || !strings.Contains(errOut, `unknown command "downstream"`) {
+		t.Fatal(code, errOut)
 	}
 }
 
@@ -285,5 +288,26 @@ func TestPublishChecksTheBuildBeforeWriting(t *testing.T) {
 	data, _ := os.ReadFile(log)
 	if !strings.Contains(string(data), "attestation verify "+filepath.Join(assets, "bad.tar.gz")+" --repo fabricahq/example --signer-workflow fabricahq/example/.github/workflows/release-planner.yml --deny-self-hosted-runners") {
 		t.Fatal(string(data))
+	}
+}
+
+// publish's outputs tell the report what it did: whether the release was new, and which
+// edited notes changed.
+func TestPublishOutputsWhatItDid(t *testing.T) {
+	for name, tc := range map[string]struct {
+		p    plan.Plan
+		res  publish.Result
+		want string
+	}{
+		"published":         {plan.Plan{Tag: "v1.2.0"}, publish.Result{}, "release=published\nnotes=[]\n"},
+		"already published": {plan.Plan{Tag: "v1.2.0"}, publish.Result{AlreadyPublished: true}, "release=already-published\nnotes=[]\n"},
+		"edits": {plan.Plan{Edits: []plan.Edit{{Tag: "v1.0.0"}, {Tag: "v1.1.0"}}}, publish.Result{Edited: []publish.Edited{{Tag: "v1.0.0"}, {Tag: "v1.1.0", Changed: true}}},
+			`release=` + "\n" + `notes=[{"tag":"v1.0.0","changed":false},{"tag":"v1.1.0","changed":true}]` + "\n"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := publishOutputs(tc.p, tc.res); got != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
 	}
 }

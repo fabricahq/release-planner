@@ -54,8 +54,12 @@ type Config struct {
 	Branch        string        `yaml:"release-branch"`
 	ReleaseChecks ReleaseChecks `yaml:"release-checks"`
 	ReleaseAssets ReleaseAssets `yaml:"release-assets"`
-	// Downstream lists workflows in other repositories to run after each new stable release.
-	Downstream        []Downstream      `yaml:"downstream"`
+	// PrePublish lists workflows to run after the merge and before publication.
+	PrePublish []Hook `yaml:"pre-publish"`
+	// PostPublish lists workflows to run after a new release publishes.
+	PostPublish []PostPublish `yaml:"post-publish"`
+	// Downstream is v0.4's setting for what PostPublish does now. It's read only to say so.
+	Downstream        yaml.Node         `yaml:"downstream"`
 	ReleaseNotesStyle ReleaseNotesStyle `yaml:"release-notes-style"`
 	// ReleaseNotesRules sets release notes rules by ID. The only setting is RuleOff, which
 	// turns a rule off.
@@ -115,41 +119,59 @@ func (v ReleaseChecks) Enabled() bool { return v.Run != "" || v.Workflow != "" }
 // release pull request, before approval.
 type ReleaseAssets struct {
 	// Workflow names a workflow in .github/workflows that accepts workflow_call with string
-	// inputs ref, tag, and version, checks out ref, and uploads the files as one artifact
-	// named release-assets. It gets no secrets and can only read the repository.
+	// inputs ref, tag, and version, checks out ref, uploads the files as one artifact named
+	// release-assets, and outputs that upload's ID as artifact-id. It gets no secrets and can
+	// only read the repository.
 	Workflow string `yaml:"workflow"`
 }
 
-// Downstream is a workflow in another repository, run with the new release's tag and
-// version after each stable release, such as one that updates a Homebrew tap.
-type Downstream struct {
-	// Repository is the owner/name the workflow is in.
+// Hook is a GitHub Actions workflow Release Planner runs around a release. A pre-publish hook
+// runs after the release pull request merges and before the release is tagged, such as one
+// that applies database migrations; if it fails, the release isn't published. It may run
+// again, late, and alongside itself, so it must be safe to.
+type Hook struct {
+	// Workflow names a workflow in .github/workflows that accepts workflow_call with string
+	// inputs ref, tag, and version, and checks out ref. It gets no secrets, only read access
+	// to the repository and an OIDC token. Its jobs name the GitHub environment that holds
+	// its credentials, which ReadHook reads.
+	Workflow string `yaml:"workflow"`
+	// Repository is the owner/name of another repository the workflow is in, for a
+	// post-publish workflow; pre-publish doesn't support it yet.
 	Repository string `yaml:"repository"`
-	// Workflow is the workflow's file name in that repository's .github/workflows. It needs a
-	// workflow_dispatch trigger with string inputs tag and version.
-	Workflow string `yaml:"workflow"`
+	// Name and Environment are what install reads from Workflow with ReadHook.
+	Name        string `yaml:"-"`
+	Environment string `yaml:"-"`
 }
 
-// DownstreamOwner is the owner of every downstream repository, which one GitHub App
-// installation token covers.
-func (c Config) DownstreamOwner() string {
-	if len(c.Downstream) == 0 {
-		return ""
-	}
-	owner, _, _ := strings.Cut(c.Downstream[0].Repository, "/")
-	return owner
+// The environments Release Planner's own jobs use, which a hook workflow can't share.
+const (
+	ReleaseEnvironment  = "release"
+	DispatchEnvironment = "dispatch"
+)
+
+// PostPublish is a GitHub Actions workflow Release Planner runs after a new release publishes,
+// such as one that deploys it or updates a Homebrew formula. Without Repository, it's one of
+// this repository's workflows, which the Release workflow calls like a pre-publish one. With
+// Repository, it's a workflow in another repository of the same owner that the Release
+// workflow starts with workflow_dispatch on that repository's default branch, with string
+// inputs tag and version, through the GitHub App in the dispatch environment. Its failure
+// leaves the release published.
+type PostPublish struct {
+	Hook `yaml:",inline"`
+	// Prereleases runs it for prereleases too, which it otherwise skips.
+	Prereleases bool `yaml:"prereleases"`
 }
 
-// DownstreamRepositories lists the names of the downstream repositories, without the owner.
-func (c Config) DownstreamRepositories() []string {
-	var names []string
-	for _, d := range c.Downstream {
-		_, name, _ := strings.Cut(d.Repository, "/")
-		if !slices.Contains(names, name) {
-			names = append(names, name)
+// DispatchOwner is the owner of every repository a post-publish workflow is in, which one
+// GitHub App covers, or "" when every post-publish workflow is in this repository.
+func (c Config) DispatchOwner() string {
+	for _, h := range c.PostPublish {
+		if h.Repository != "" {
+			owner, _, _ := strings.Cut(h.Repository, "/")
+			return owner
 		}
 	}
-	return names
+	return ""
 }
 
 var (
@@ -158,7 +180,11 @@ var (
 	branchName   = regexp.MustCompile(`^[0-9A-Za-z._/-]+$`)
 	workflowFile = regexp.MustCompile(`^[0-9A-Za-z._-]+\.ya?ml$`)
 	repository   = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
+	environment  = regexp.MustCompile(`^[0-9A-Za-z._-]+$`)
 )
+
+// PostPublishDocs explains post-publish workflows.
+const PostPublishDocs = "https://release-planner.fabricahq.com/customize/post-publish/"
 
 // GeneratedWorkflow is the Release workflow's file name, which can't also be a workflow it calls.
 const GeneratedWorkflow = "release-planner.yml"
@@ -297,20 +323,41 @@ func (c Config) check() error {
 	if w := c.ReleaseAssets.Workflow; w != "" && (!workflowFile.MatchString(w) || w == GeneratedWorkflow) {
 		add("release-assets.workflow: name a workflow file in .github/workflows other than %s, such as build-release.yml", GeneratedWorkflow)
 	}
-	for i, d := range c.Downstream {
-		switch {
-		case !repository.MatchString(d.Repository):
-			add("downstream[%d].repository: name the repository as owner/name, not %q", i, d.Repository)
-		case !strings.EqualFold(c.DownstreamOwner(), strings.Split(d.Repository, "/")[0]):
-			add("downstream[%d].repository: every downstream repository must belong to %s, so one GitHub App token covers them", i, c.DownstreamOwner())
+	for i, h := range c.PrePublish {
+		key := fmt.Sprintf("pre-publish[%d]", i)
+		switch w := h.Workflow; {
+		case !workflowFile.MatchString(w) || w == GeneratedWorkflow:
+			add("%s.workflow: name a workflow file in .github/workflows other than %s, such as migrate-database.yml", key, GeneratedWorkflow)
+		case w == c.ReleaseChecks.Workflow:
+			add("%s.workflow: %s is also the release-checks workflow; use a workflow of its own", key, w)
+		case w == c.ReleaseAssets.Workflow:
+			add("%s.workflow: %s is also the release-assets workflow; use a workflow of its own", key, w)
+		case slices.ContainsFunc(c.PrePublish[:i], func(o Hook) bool { return o.Workflow == w }):
+			add("%s: %s is listed twice", key, w)
 		}
-		if !workflowFile.MatchString(d.Workflow) {
-			add("downstream[%d].workflow: name a workflow file in %s's .github/workflows, such as update-formula.yml", i, d.Repository)
+		if h.Repository != "" {
+			add("%s.repository: running a workflow in another repository before publishing isn't supported yet; use a workflow in this repository", key)
 		}
-		for _, other := range c.Downstream[:i] {
-			if other == d {
-				add("downstream[%d]: %s in %s is listed twice", i, d.Workflow, d.Repository)
-			}
+	}
+	if c.Downstream.Kind != 0 {
+		add("downstream: Release Planner v0.5.0 runs these as post-publish workflows; move each entry under post-publish: as it is, and since GitHub can't rename an environment, set up a dispatch environment like the downstream one, with DISPATCH_APP_CLIENT_ID and DISPATCH_APP_PRIVATE_KEY in place of DOWNSTREAM_APP_CLIENT_ID and DOWNSTREAM_APP_PRIVATE_KEY: %s#set-up-the-dispatch-environment", PostPublishDocs)
+	}
+	for i, h := range c.PostPublish {
+		key := fmt.Sprintf("post-publish[%d]", i)
+		same := func(o PostPublish) bool { return o.Repository == h.Repository && o.Workflow == h.Workflow }
+		switch w := h.Workflow; {
+		case h.Repository != "" && !repository.MatchString(h.Repository):
+			add("%s.repository: name the repository as owner/name, not %q", key, h.Repository)
+		case h.Repository != "" && !strings.EqualFold(c.DispatchOwner(), strings.Split(h.Repository, "/")[0]):
+			add("%s.repository: every repository a post-publish workflow is in must belong to %s, so one GitHub App token covers them", key, c.DispatchOwner())
+		case h.Repository != "" && !workflowFile.MatchString(w):
+			add("%s.workflow: name a workflow file in %s's .github/workflows, such as update-formula.yml", key, h.Repository)
+		case h.Repository == "" && (!workflowFile.MatchString(w) || w == GeneratedWorkflow):
+			add("%s.workflow: name a workflow file in .github/workflows other than %s, such as deploy.yml", key, GeneratedWorkflow)
+		case h.Repository == "" && (w == c.ReleaseChecks.Workflow || w == c.ReleaseAssets.Workflow || slices.ContainsFunc(c.PrePublish, func(o Hook) bool { return o.Workflow == w })):
+			add("%s.workflow: %s already runs in the release as another kind of workflow; use a workflow of its own", key, w)
+		case slices.ContainsFunc(c.PostPublish[:i], same):
+			add("%s: %s is listed twice", key, strings.TrimPrefix(h.Repository+":"+w, ":"))
 		}
 	}
 	for _, id := range slices.Sorted(maps.Keys(c.ReleaseNotesRules)) {

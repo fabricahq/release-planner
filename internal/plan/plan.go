@@ -89,7 +89,8 @@ func NotesTag(notesDir, name string) string {
 	return strings.TrimSuffix(base, ".md")
 }
 
-func notesFiles(ctx context.Context, repo gitrepo.Repo, notesDir, commit string) ([]string, error) {
+// NotesFiles lists the release notes files in notesDir at commit.
+func NotesFiles(ctx context.Context, repo gitrepo.Repo, notesDir, commit string) ([]string, error) {
 	out, err := repo.Run(ctx, "ls-tree", "-r", "--name-only", "-z", commit, "--", strings.Trim(notesDir, "/")+"/")
 	if err != nil {
 		return nil, err
@@ -261,7 +262,7 @@ func Read(ctx context.Context, repo gitrepo.Repo, opts Options, base, head strin
 		return empty, err
 	}
 
-	files, err := notesFiles(ctx, repo, dir, head)
+	files, err := NotesFiles(ctx, repo, dir, head)
 	if err != nil {
 		return empty, err
 	}

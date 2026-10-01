@@ -32,13 +32,17 @@ The release contains the changes up to the commit the pull request branched from
 
 ## Merge to publish
 
-Merging the pull request is the approval. Wait for the release status to show the checks passed first. The workflow then tags the release commit and publishes the notes as the GitHub release, with the files the pull request built, and updates the description with a link to it. If you configured [downstream workflows](/customize/downstream/), it starts them next.
+Merging the pull request is the approval. Wait for the release status to show the checks passed first. The workflow then tags the release commit and publishes the notes as the GitHub release, with the files the pull request built, and updates the description with a link to it. If you configured [post-publish workflows](/customize/post-publish/), it runs them next.
 
 If anything fails, the top of the description names the failed job and how to retry, and the workflow comments on the pull request to mention you, since GitHub doesn't notify anyone about an edited description.
 
 ## If publishing fails
 
 Open the run the description links to. Once the problem is fixed, use **Re-run failed jobs** on that run. Re-running is always safe: it publishes the same release commit and files, and if the release was already published, the workflow changes nothing.
+
+If the release commit itself is broken, for example because a [pre-publish workflow](/customize/pre-publish/#if-it-fails) failed on it, re-running can't help. Withdraw the release instead: delete its notes file, such as `_releases/v1.1.0.md`, in the pull request that fixes the cause, then ask your agent for a release again. It can reuse the version, since it was never tagged. If the old run had started attaching files, it left an unpublished draft release for that version: delete the draft on GitHub before you merge the new release pull request, or its run stops and asks you to. Its old run checks immediately before each write, so once the withdrawal merges, re-running that run publishes nothing.
+
+If publishing failed with `Resource not accessible by integration`, the release commit's workflow files match no branch any more, and the workflow's own token can't tag it. [Publish with a release GitHub App](/start-here/set-up/#publish-with-a-release-github-app), then use **Re-run failed jobs**.
 
 ## Correct published notes
 

@@ -33,7 +33,7 @@ With Release Planner, contributors write nothing extra. At release time, your ag
 
 ## Release Planner vs. build and packaging tools
 
-Tools like GoReleaser build and package your software, and Release Planner doesn't replace them. Run them in a GitHub Actions [build workflow](/customize/release-assets/) with their own publishing turned off, and Release Planner publishes the files with your notes, then starts any [downstream workflows](/customize/downstream/), such as a Homebrew tap update.
+Tools like GoReleaser build and package your software, and Release Planner doesn't replace them. Run them in a GitHub Actions [build workflow](/customize/release-assets/) with their own publishing turned off, and Release Planner publishes the files with your notes, then runs any [post-publish workflows](/customize/post-publish/), such as a Homebrew tap update.
 
 ## Who Release Planner is not for
 

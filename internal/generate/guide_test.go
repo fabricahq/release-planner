@@ -60,3 +60,28 @@ func TestGuideAppendsOrReplacesTheReleaseNotesStyle(t *testing.T) {
 		t.Error("replace dropped the fixed rules")
 	}
 }
+
+// With a pre-publish workflow, the guide tells the agent how to retry by where the cause is,
+// including withdrawing a release whose commit is broken.
+func TestGuideExplainsAFailedPrePublishWorkflow(t *testing.T) {
+	if strings.Contains(guideFor(t, "", ""), "pre-publish") {
+		t.Error("the guide mentions pre-publish without one")
+	}
+	c, err := config.Parse([]byte("schema-version: 1\nversion: v0.2.0\npre-publish:\n  - workflow: migrate-database.yml\n"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	guide := Guide(c)
+	for _, want := range []string{
+		"If a `pre-publish (<workflow>)` job failed, such as `pre-publish (migrate-database.yml)`, that workflow stopped the release before it was tagged.",
+		"**Re-run failed jobs** runs the failed pre-publish workflows again, then publishes.",
+		"In the workflow's file in `.github/workflows`: a re-run uses the run's original workflow files",
+		"also delete the release's notes file, which withdraws it.",
+		"Never re-run the withdrawn release's old run.",
+		"Once that release is published or withdrawn, **Re-run failed jobs** on the waiting release's run.\n\n## Release notes style",
+	} {
+		if !strings.Contains(guide, want) {
+			t.Errorf("guide lacks %q", want)
+		}
+	}
+}

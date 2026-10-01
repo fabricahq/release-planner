@@ -18,8 +18,11 @@ import (
 
 // GitHub is the small part of the REST API that publication needs.
 type GitHub struct {
-	BaseURL    string // such as https://api.github.com
-	Token      string
+	BaseURL string // such as https://api.github.com
+	Token   string
+	// WriteToken, if set, makes every request other than a GET, such as a release App's
+	// token; reads and downloads keep Token.
+	WriteToken string
 	Repository string // owner/name
 	HTTP       *http.Client
 }
@@ -110,8 +113,12 @@ func (g *GitHub) do(ctx context.Context, method, target string, body any, out an
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-	if g.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+g.Token)
+	token := g.Token
+	if method != http.MethodGet && g.WriteToken != "" {
+		token = g.WriteToken
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", contentType)
@@ -188,6 +195,42 @@ func (g *GitHub) TagCommit(ctx context.Context, tag string) (string, error) {
 		return "", err
 	}
 	return annotated.Object.SHA, nil
+}
+
+// BranchCommit returns the commit a branch points to now.
+func (g *GitHub) BranchCommit(ctx context.Context, branch string) (string, error) {
+	var ref struct {
+		Object struct{ SHA string } `json:"object"`
+	}
+	if _, err := g.do(ctx, http.MethodGet, "/git/ref/heads/"+pathEscape(branch), nil, &ref); err != nil {
+		return "", fmt.Errorf("get %s's commit in %s: %v", branch, g.Repository, err)
+	}
+	return ref.Object.SHA, nil
+}
+
+// pathEscape escapes each segment of a ref name such as release/v1, keeping its slashes.
+func pathEscape(name string) string {
+	parts := strings.Split(name, "/")
+	for i, part := range parts {
+		parts[i] = url.PathEscape(part)
+	}
+	return strings.Join(parts, "/")
+}
+
+// Releases lists every release, including the drafts the token can see.
+func (g *GitHub) Releases(ctx context.Context) ([]Release, error) {
+	var all []Release
+	target := "/releases?per_page=100"
+	for target != "" {
+		var page []Release
+		next, err := g.do(ctx, http.MethodGet, target, nil, &page)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, page...)
+		target = next
+	}
+	return all, nil
 }
 
 // ReleaseByTag finds a release, including drafts, which GitHub's by-tag lookup omits. It returns nil if absent.
@@ -379,8 +422,10 @@ type Environment struct {
 		Type string `json:"type"`
 	} `json:"protection_rules"`
 
-	// BranchRules are the name patterns of the environment's custom branch rules, when it has any.
+	// BranchRules and TagRules are the name patterns of the environment's custom branch and
+	// tag rules, when it has any.
 	BranchRules []string `json:"-"`
+	TagRules    []string `json:"-"`
 	// BranchProtected reports whether the release branch is protected, when the environment
 	// allows only protected branches.
 	BranchProtected bool `json:"-"`
@@ -413,8 +458,11 @@ func (g *GitHub) Environment(ctx context.Context, name, branch string) (*Environ
 			}
 			for _, rule := range page.BranchPolicies {
 				// Rules without a type predate tag rules and apply to branches.
-				if rule.Type == "" || rule.Type == "branch" {
+				switch rule.Type {
+				case "", "branch":
 					env.BranchRules = append(env.BranchRules, rule.Name)
+				case "tag":
+					env.TagRules = append(env.TagRules, rule.Name)
 				}
 			}
 		}
@@ -467,10 +515,11 @@ func branchRule(pattern, branch string) bool {
 	return err == nil && matched
 }
 
-// Pages that explain how to set up the release and downstream environments.
+// Pages that explain how to set up the release and dispatch environments.
 const (
-	EnvironmentDocs           = "https://release-planner.fabricahq.com/start-here/set-up/#create-the-release-environment"
-	DownstreamEnvironmentDocs = "https://release-planner.fabricahq.com/customize/downstream/#set-up-the-downstream-environment"
+	EnvironmentDocs         = "https://release-planner.fabricahq.com/start-here/set-up/#create-the-release-environment"
+	DispatchEnvironmentDocs = "https://release-planner.fabricahq.com/customize/post-publish/#set-up-the-dispatch-environment"
+	ReleaseAppDocs          = "https://release-planner.fabricahq.com/start-here/set-up/#publish-with-a-release-github-app"
 )
 
 // EnvironmentWarnings explains how an environment differs from the recommended setup, which
@@ -495,6 +544,45 @@ func EnvironmentWarnings(name, branch, docs string, env *Environment) []string {
 		}
 	}
 	return warnings
+}
+
+// PrePublishDocs and PostPublishDocs explain how to set up a hook workflow's environment.
+const (
+	PrePublishDocs  = "https://release-planner.fabricahq.com/customize/pre-publish/#set-up-the-environment"
+	PostPublishDocs = "https://release-planner.fabricahq.com/customize/post-publish/#set-up-the-environment"
+)
+
+// HookEnvironment checks the environment a hook workflow's jobs run in, which holds its
+// credentials, and docs explains how to set it up. refusal is why the workflow can't run safely, or can't run at all:
+// the environment is missing, which GitHub would fill in with no branch rule, lets any branch
+// use it, or doesn't let the release branch use it. warnings are the other ways it differs
+// from the recommended setup, a branch rule for the release branch and nothing else.
+func HookEnvironment(name, branch, workflow, docs string, env *Environment) (refusal string, warnings []string) {
+	if env == nil {
+		return fmt.Sprintf("The %s environment doesn't exist, so %s can't run safely: GitHub would create it, with no branch rule, the first time a job names it. Create it with a branch rule for %s only: %s", name, workflow, branch, docs), nil
+	}
+	switch policy := env.DeploymentBranchPolicy; {
+	case policy == nil:
+		return fmt.Sprintf("The %s environment has no deployment branch rule, so %s can't run safely: any branch could use its credentials. Add a branch rule for %s only: %s", name, workflow, branch, docs), nil
+	case policy.ProtectedBranches && !env.BranchProtected:
+		return fmt.Sprintf("The %s environment allows only protected branches, and %s isn't protected, so %s can't run in it. Add a branch rule for %s: %s", name, branch, workflow, branch, docs), nil
+	case policy.ProtectedBranches:
+		warnings = append(warnings, fmt.Sprintf("The %s environment lets every protected branch use it. Use a branch rule for %s only: %s", name, branch, docs))
+	case !slices.ContainsFunc(env.BranchRules, func(rule string) bool { return branchRule(rule, branch) }):
+		return fmt.Sprintf("The %s environment's branch rules don't include %s, so %s can't run in it. Add a branch rule for %s: %s", name, branch, workflow, branch, docs), nil
+	}
+	if others := slices.DeleteFunc(slices.Clone(env.BranchRules), func(rule string) bool { return rule == branch }); len(others) > 0 {
+		warnings = append(warnings, fmt.Sprintf("The %s environment also lets branches matching %s use it, so their workflows could use its credentials. Keep one branch rule, for %s: %s", name, strings.Join(others, ", "), branch, docs))
+	}
+	if len(env.TagRules) > 0 {
+		warnings = append(warnings, fmt.Sprintf("The %s environment also lets tags matching %s use it, so a workflow run for such a tag could use its credentials. Remove its tag rules: %s", name, strings.Join(env.TagRules, ", "), docs))
+	}
+	for _, rule := range env.ProtectionRules {
+		if rule.Type == "required_reviewers" {
+			warnings = append(warnings, fmt.Sprintf("The %s environment requires reviewers, so every release waits for a second approval after the merge before %s runs. Merging the release pull request is the approval; remove the reviewers unless you want both: %s", name, workflow, docs))
+		}
+	}
+	return "", warnings
 }
 
 // PublishDraft makes an existing draft release public, creating its tag on commit if the
@@ -599,15 +687,22 @@ func (g *GitHub) SuccessfulPullRequestRuns(ctx context.Context, workflow, head s
 	return page.Runs, nil
 }
 
-// Artifacts lists the names of a workflow run's artifacts that haven't expired.
-func (g *GitHub) Artifacts(ctx context.Context, run int64) ([]string, error) {
-	var names []string
+// Artifact is a workflow run's artifact.
+type Artifact struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
+// Artifacts lists a workflow run's artifacts that haven't expired. Two jobs can upload
+// artifacts with the same name, so a name doesn't identify one.
+func (g *GitHub) Artifacts(ctx context.Context, run int64) ([]Artifact, error) {
+	var all []Artifact
 	target := fmt.Sprintf("/actions/runs/%d/artifacts?per_page=100", run)
 	for target != "" {
 		var page struct {
 			Artifacts []struct {
-				Name    string `json:"name"`
-				Expired bool   `json:"expired"`
+				Artifact
+				Expired bool `json:"expired"`
 			} `json:"artifacts"`
 		}
 		next, err := g.do(ctx, http.MethodGet, target, nil, &page)
@@ -616,34 +711,12 @@ func (g *GitHub) Artifacts(ctx context.Context, run int64) ([]string, error) {
 		}
 		for _, a := range page.Artifacts {
 			if !a.Expired {
-				names = append(names, a.Name)
+				all = append(all, a.Artifact)
 			}
 		}
 		target = next
 	}
-	return names, nil
-}
-
-// ArtifactID returns the ID of a workflow run's unexpired artifact with the name, or 0 if it
-// has none.
-func (g *GitHub) ArtifactID(ctx context.Context, run int64, name string) (int64, error) {
-	var page struct {
-		Artifacts []struct {
-			ID      int64  `json:"id"`
-			Name    string `json:"name"`
-			Expired bool   `json:"expired"`
-		} `json:"artifacts"`
-	}
-	query := url.Values{"name": {name}, "per_page": {"100"}}
-	if _, err := g.do(ctx, http.MethodGet, fmt.Sprintf("/actions/runs/%d/artifacts?%s", run, query.Encode()), nil, &page); err != nil {
-		return 0, fmt.Errorf("list the artifacts of run %d in %s: %v", run, g.Repository, err)
-	}
-	for _, a := range page.Artifacts {
-		if a.Name == name && !a.Expired {
-			return a.ID, nil
-		}
-	}
-	return 0, nil
+	return all, nil
 }
 
 // RunJob is one job of a workflow run, at its latest attempt.

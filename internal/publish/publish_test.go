@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -46,6 +47,11 @@ type fakeGitHub struct {
 	content     map[int64][]byte
 	pulls       map[int]pull
 	server      *httptest.Server
+	// auth records each request's method and token.
+	auth []string
+	// checks counts the approval checks publish asked for, and refuse is what they return.
+	checks int
+	refuse error
 }
 
 // pull is a pull request as the commits/{sha}/pulls endpoint lists it for commit.
@@ -67,10 +73,12 @@ func (f *fakeGitHub) release(tag string, draft bool, body string) {
 func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if r.Header.Get("Authorization") != "Bearer token" {
+	token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if token != "token" && token != "write" {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	f.auth = append(f.auth, r.Method+" "+token)
 	path := strings.TrimPrefix(r.URL.Path, "/repos/fabricahq/example")
 	f.host = r.Host
 	send := func(v any) { _ = json.NewEncoder(w).Encode(v) }
@@ -210,7 +218,14 @@ func runWith(t *testing.T, f *fakeGitHub, p plan.Plan, assets []File) (Result, e
 		t.Cleanup(f.server.Close)
 	}
 	gh := &GitHub{BaseURL: f.server.URL, Token: "token", Repository: "fabricahq/example", HTTP: f.server.Client()}
-	return Publish(context.Background(), gh, p, "main", assets)
+	// A real approval check, as the publish command passes, so every test proves when it runs.
+	approved := func(context.Context) error {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.checks++
+		return f.refuse
+	}
+	return Publish(context.Background(), gh, p, "main", assets, approved)
 }
 
 func minor() plan.Plan {
@@ -264,9 +279,12 @@ func TestRetryAfterPublicationMakesNoWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.writes = nil
+	// A published release is reported as such, even once its notes file is withdrawn: there's
+	// nothing left to write, so nothing to check.
+	f.checks, f.refuse = 0, errors.New("withdrawn")
 	res, err := run(t, f, minor())
-	if err != nil || !res.AlreadyPublished || len(f.writes) != 0 {
-		t.Fatalf("%+v %v %v", res, err, f.writes)
+	if err != nil || !res.AlreadyPublished || len(f.writes) != 0 || f.checks != 0 {
+		t.Fatalf("%+v %v %v %d", res, err, f.writes, f.checks)
 	}
 }
 
@@ -299,8 +317,8 @@ func TestPublishesMatchingDraft(t *testing.T) {
 	if _, err := run(t, f, minor()); err != nil {
 		t.Fatal(err)
 	}
-	if len(f.writes) != 1 || f.writes[0] != "publish draft" {
-		t.Fatal(f.writes)
+	if len(f.writes) != 1 || f.writes[0] != "publish draft" || f.checks != 1 {
+		t.Fatal(f.writes, f.checks)
 	}
 }
 
@@ -323,16 +341,25 @@ func TestRefusesUnsafePublication(t *testing.T) {
 			f.tags["v1.1.0"] = ref{"tag", "tagobject"}
 			f.annotated["tagobject"] = other
 		}, nil, "already points to"},
-		"different release": {func(f *fakeGitHub) { f.release("v1.1.0", true, "Other") }, nil, "differs from the approved notes"},
-		"tags changed":      {func(f *fakeGitHub) { f.tags["v1.2.0"] = ref{"commit", other} }, nil, "changed since planning"},
-		"draft previous":    {func(f *fakeGitHub) { f.releases[0].Draft = true }, nil, "publish v1.0.0 first"},
-		"missing previous":  {func(f *fakeGitHub) { f.releases = nil }, nil, "publish v1.0.0 first"},
-		"short commit":      {nil, func(p *plan.Plan) { p.Commit = "aaaaaaa" }, "not a full commit SHA"},
-		"no release":        {nil, func(p *plan.Plan) { p.Tag = "" }, "requests no release"},
-		"not merged":        {nil, func(p *plan.Plan) { p.Merged = "" }, "names no merged pull request"},
-		"other head":        {nil, func(p *plan.Plan) { p.Head = other }, "not the planned #7"},
-		"other pull":        {nil, func(p *plan.Plan) { p.PullRequest = 8 }, "not the planned #8"},
-		"direct push":       {func(f *fakeGitHub) { f.pulls = nil }, nil, "a direct push publishes nothing"},
+		// A withdrawn attempt left a draft with its own notes and commit; requesting the version
+		// again finds it, and the message says how to clear it.
+		"draft from an earlier request": {func(f *fakeGitHub) {
+			f.release("v1.1.0", true, "Other")
+			f.releases[1].TargetCommitish = other
+		}, nil, "an unpublished v1.1.0 draft release, left by an earlier attempt, has other notes than this request; delete that draft on GitHub, then retry"},
+		"published release with other settings": {func(f *fakeGitHub) {
+			f.release("v1.1.0", false, "## Notes\n")
+			f.releases[1].Prerelease = true
+		}, nil, "differs from the approved notes"},
+		"tags changed":     {func(f *fakeGitHub) { f.tags["v1.2.0"] = ref{"commit", other} }, nil, "changed since planning"},
+		"draft previous":   {func(f *fakeGitHub) { f.releases[0].Draft = true }, nil, "publish v1.0.0 first"},
+		"missing previous": {func(f *fakeGitHub) { f.releases = nil }, nil, "publish v1.0.0 first"},
+		"short commit":     {nil, func(p *plan.Plan) { p.Commit = "aaaaaaa" }, "not a full commit SHA"},
+		"no release":       {nil, func(p *plan.Plan) { p.Tag = "" }, "requests no release"},
+		"not merged":       {nil, func(p *plan.Plan) { p.Merged = "" }, "names no merged pull request"},
+		"other head":       {nil, func(p *plan.Plan) { p.Head = other }, "not the planned #7"},
+		"other pull":       {nil, func(p *plan.Plan) { p.PullRequest = 8 }, "not the planned #8"},
+		"direct push":      {func(f *fakeGitHub) { f.pulls = nil }, nil, "a direct push publishes nothing"},
 		"unmerged pull": {func(f *fakeGitHub) {
 			f.pulls = map[int]pull{7: {commit: merged, merge: merged, base: "main", head: head}}
 		}, nil, "a direct push publishes nothing"},
@@ -451,12 +478,19 @@ func TestResumesAnInterruptedDraft(t *testing.T) {
 	}
 	f.releases[1].Draft = true
 	delete(f.tags, "v1.1.0")
-	f.writes = nil
+
+	// The retry checks the approval again before it publishes the draft it resumed, and stops
+	// there once the request is withdrawn.
+	f.writes, f.checks, f.refuse = nil, 0, errors.New("withdrawn")
+	if _, err := runWith(t, f, minor(), assets); err == nil || strings.Join(f.writes, ",") != "upload b.tar.gz" || f.checks != 1 {
+		t.Fatalf("%v: writes %v, %d checks", err, f.writes, f.checks)
+	}
+	f.writes, f.checks, f.refuse = nil, 0, nil
 	if _, err := runWith(t, f, minor(), assets); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(f.writes, ",") != "upload b.tar.gz,publish draft" {
-		t.Fatalf("writes %v", f.writes)
+	if strings.Join(f.writes, ",") != "publish draft" || f.checks != 1 {
+		t.Fatalf("writes %v, %d checks", f.writes, f.checks)
 	}
 }
 
@@ -643,4 +677,91 @@ func TestEnvironmentReadsSettingsOrReportsMissing(t *testing.T) {
 	if env, err := gh.Environment(context.Background(), "staging", "main"); env != nil || err != nil {
 		t.Fatalf("missing environment: %+v %v", env, err)
 	}
+}
+
+func TestPublishedMeansAReleaseThatIsNotADraft(t *testing.T) {
+	f := withPrevious()
+	f.release("v1.1.0", true, "Draft")
+	f.server = httptest.NewServer(f)
+	t.Cleanup(f.server.Close)
+	gh := &GitHub{BaseURL: f.server.URL, Token: "token", Repository: "fabricahq/example", HTTP: f.server.Client()}
+	for tag, want := range map[string]bool{"v1.0.0": true, "v1.1.0": false, "v1.2.0": false} {
+		if got, err := Published(context.Background(), gh, tag); err != nil || got != want {
+			t.Errorf("Published(%s) = %v, %v; want %v", tag, got, err, want)
+		}
+	}
+}
+
+// With a release App, only writes use its token; reads and downloads keep the workflow's.
+func TestWritesUseTheWriteToken(t *testing.T) {
+	f := withPrevious()
+	f.server = httptest.NewServer(f)
+	t.Cleanup(f.server.Close)
+	gh := &GitHub{BaseURL: f.server.URL, Token: "token", WriteToken: "write", Repository: "fabricahq/example", HTTP: f.server.Client()}
+	if _, err := Publish(context.Background(), gh, minor(), "main", files(t, map[string]string{"a.tar.gz": "a"}), nil); err != nil {
+		t.Fatal(err)
+	}
+	writes := 0
+	for _, a := range f.auth {
+		method, token, _ := strings.Cut(a, " ")
+		if (method == http.MethodGet) != (token == "token") {
+			t.Errorf("%s", a)
+		}
+		if token == "write" {
+			writes++
+		}
+	}
+	if writes != 3 {
+		t.Fatalf("%d writes with the App token: %v", writes, f.auth)
+	}
+}
+
+// The approval is checked again immediately before each write that publishes or edits notes,
+// so a release withdrawn while its assets upload isn't published.
+func TestChecksTheApprovalBeforeEachWrite(t *testing.T) {
+	withdrawn := errors.New("withdrawn")
+	for name, tc := range map[string]struct {
+		plan    plan.Plan
+		assets  map[string]string
+		failAt  int
+		want    string
+		wantErr bool
+	}{
+		"assets":                    {minor(), map[string]string{"a.tar.gz": "a"}, 0, "check,draft v1.1.0,upload a.tar.gz,check,publish draft", false},
+		"withdrawn while uploading": {minor(), map[string]string{"a.tar.gz": "a"}, 2, "check,draft v1.1.0,upload a.tar.gz,check", true},
+		"withdrawn before writing":  {minor(), nil, 1, "check", true},
+		"release and edit":          {withEdit(minor()), nil, 0, "check,create v1.1.0,check,edit v1.0.0", false},
+		"edit replaced":             {withEdit(minor()), nil, 2, "check,create v1.1.0,check", true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := withPrevious()
+			f.server = httptest.NewServer(f)
+			t.Cleanup(f.server.Close)
+			gh := &GitHub{BaseURL: f.server.URL, Token: "token", Repository: "fabricahq/example", HTTP: f.server.Client()}
+			var assets []File
+			if tc.assets != nil {
+				assets = files(t, tc.assets)
+			}
+			checks := 0
+			approved := func(context.Context) error {
+				checks++
+				f.mu.Lock()
+				f.writes = append(f.writes, "check")
+				f.mu.Unlock()
+				if checks == tc.failAt {
+					return withdrawn
+				}
+				return nil
+			}
+			_, err := Publish(context.Background(), gh, tc.plan, "main", assets, approved)
+			if (err != nil) != tc.wantErr || (tc.wantErr && !errors.Is(err, withdrawn)) || strings.Join(f.writes, ",") != tc.want {
+				t.Fatalf("%v: %v", err, f.writes)
+			}
+		})
+	}
+}
+
+func withEdit(p plan.Plan) plan.Plan {
+	p.Edits = []plan.Edit{{Tag: "v1.0.0", File: "_releases/v1.0.0.md", Notes: "Corrected"}}
+	return p
 }

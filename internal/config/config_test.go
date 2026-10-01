@@ -101,14 +101,17 @@ func TestLoadReadsOnlyTheNamedStyleFile(t *testing.T) {
 	}
 }
 
-func TestParseReadsAssetsAndDownstream(t *testing.T) {
-	c, err := Parse([]byte("schema-version: 1\nversion: v0.2.0\nrelease-assets:\n  workflow: build-release.yml\ndownstream:\n  - repository: fabricahq/homebrew-tap\n    workflow: update-code-rules.yml\n  - repository: fabricahq/scoop-bucket\n    workflow: update.yml\n  - repository: fabricahq/homebrew-tap\n    workflow: update-other.yml\n"), "")
+func TestParseReadsAssetsAndPostPublish(t *testing.T) {
+	c, err := Parse([]byte("schema-version: 1\nversion: v0.2.0\nrelease-assets:\n  workflow: build-release.yml\npost-publish:\n  - workflow: deploy.yml\n    prereleases: true\n  - repository: fabricahq/homebrew-tap\n    workflow: update-code-rules.yml\n  - repository: fabricahq/scoop-bucket\n    workflow: update.yml\n"), "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.ReleaseAssets.Workflow != "build-release.yml" || len(c.Downstream) != 3 || c.DownstreamOwner() != "fabricahq" ||
-		strings.Join(c.DownstreamRepositories(), ",") != "homebrew-tap,scoop-bucket" {
+	if c.ReleaseAssets.Workflow != "build-release.yml" || len(c.PostPublish) != 3 || c.DispatchOwner() != "fabricahq" ||
+		c.PostPublish[0].Workflow != "deploy.yml" || !c.PostPublish[0].Prereleases || c.PostPublish[1].Repository != "fabricahq/homebrew-tap" || c.PostPublish[1].Prereleases {
 		t.Fatalf("%+v", c)
+	}
+	if c, err := Parse([]byte("schema-version: 1\nversion: v0.2.0\npost-publish:\n  - workflow: deploy.yml\n"), ""); err != nil || c.DispatchOwner() != "" {
+		t.Fatal(c, err)
 	}
 }
 
@@ -146,16 +149,45 @@ func TestParseRejectsInvalidSettings(t *testing.T) {
 		"assets self":       {"schema-version: 1\nversion: v0.2.0\nrelease-assets:\n  workflow: release-planner.yml\n", "release-assets.workflow: name a workflow file in .github/workflows other than release-planner.yml"},
 		"assets path":       {"schema-version: 1\nversion: v0.2.0\nrelease-assets:\n  workflow: .github/workflows/build.yml\n", "release-assets.workflow"},
 		"assets key":        {"schema-version: 1\nversion: v0.2.0\nrelease-assets:\n  run: make\n", "field run not found"},
-		"downstream repo":   {"schema-version: 1\nversion: v0.2.0\ndownstream:\n  - repository: homebrew-tap\n    workflow: update.yml\n", `downstream[0].repository: name the repository as owner/name, not "homebrew-tap"`},
-		"downstream owner":  {"schema-version: 1\nversion: v0.2.0\ndownstream:\n  - repository: o/tap\n    workflow: a.yml\n  - repository: p/tap\n    workflow: a.yml\n", "downstream[1].repository: every downstream repository must belong to o"},
-		"downstream file":   {"schema-version: 1\nversion: v0.2.0\ndownstream:\n  - repository: o/tap\n    workflow: update\n", "downstream[0].workflow"},
-		"downstream twice":  {"schema-version: 1\nversion: v0.2.0\ndownstream:\n  - repository: o/tap\n    workflow: a.yml\n  - repository: o/tap\n    workflow: a.yml\n", "listed twice"},
-		"downstream key":    {"schema-version: 1\nversion: v0.2.0\ndownstream:\n  - repository: o/tap\n    workflow: a.yml\n    ref: main\n", "field ref not found"},
+		"downstream": {"schema-version: 1\nversion: v0.2.0\ndownstream:\n  - repository: o/tap\n    workflow: a.yml\n",
+			"downstream: Release Planner v0.5.0 runs these as post-publish workflows; move each entry under post-publish: as it is, and since GitHub can't rename an environment, set up a dispatch environment like the downstream one, with DISPATCH_APP_CLIENT_ID and DISPATCH_APP_PRIVATE_KEY in place of DOWNSTREAM_APP_CLIENT_ID and DOWNSTREAM_APP_PRIVATE_KEY: https://release-planner.fabricahq.com/customize/post-publish/#set-up-the-dispatch-environment"},
+		"post-publish repo":       {"schema-version: 1\nversion: v0.2.0\npost-publish:\n  - repository: homebrew-tap\n    workflow: update.yml\n", `post-publish[0].repository: name the repository as owner/name, not "homebrew-tap"`},
+		"post-publish owner":      {"schema-version: 1\nversion: v0.2.0\npost-publish:\n  - repository: o/tap\n    workflow: a.yml\n  - repository: p/tap\n    workflow: a.yml\n", "post-publish[1].repository: every repository a post-publish workflow is in must belong to o"},
+		"post-publish file":       {"schema-version: 1\nversion: v0.2.0\npost-publish:\n  - repository: o/tap\n    workflow: update\n", "post-publish[0].workflow: name a workflow file in o/tap's .github/workflows"},
+		"post-publish twice":      {"schema-version: 1\nversion: v0.2.0\npost-publish:\n  - repository: o/tap\n    workflow: a.yml\n  - repository: o/tap\n    workflow: a.yml\n", "post-publish[1]: o/tap:a.yml is listed twice"},
+		"post-publish here twice": {"schema-version: 1\nversion: v0.2.0\npost-publish:\n  - workflow: deploy.yml\n  - workflow: deploy.yml\n", "post-publish[1]: deploy.yml is listed twice"},
+		"post-publish self":       {"schema-version: 1\nversion: v0.2.0\npost-publish:\n  - workflow: release-planner.yml\n", "post-publish[0].workflow: name a workflow file in .github/workflows other than release-planner.yml"},
+		"post-publish also pre": {"schema-version: 1\nversion: v0.2.0\npre-publish:\n  - workflow: migrate.yml\npost-publish:\n  - workflow: migrate.yml\n",
+			"post-publish[0].workflow: migrate.yml already runs in the release as another kind of workflow; use a workflow of its own"},
+		"post-publish key":        {"schema-version: 1\nversion: v0.2.0\npost-publish:\n  - repository: o/tap\n    workflow: a.yml\n    ref: main\n", "field ref not found"},
+		"pre-publish prereleases": {"schema-version: 1\nversion: v0.2.0\npre-publish:\n  - workflow: migrate.yml\n    prereleases: true\n", "field prereleases not found"},
+		"pre-publish self":        {"schema-version: 1\nversion: v0.2.0\npre-publish:\n  - workflow: release-planner.yml\n", "pre-publish[0].workflow: name a workflow file in .github/workflows other than release-planner.yml"},
+		"pre-publish path":        {"schema-version: 1\nversion: v0.2.0\npre-publish:\n  - workflow: ../migrate-database.yml\n", "pre-publish[0].workflow"},
+		"pre-publish is the build": {"schema-version: 1\nversion: v0.2.0\nrelease-assets:\n  workflow: build.yml\npre-publish:\n  - workflow: build.yml\n",
+			"pre-publish[0].workflow: build.yml is also the release-assets workflow; use a workflow of its own"},
+		"pre-publish is the checks": {"schema-version: 1\nversion: v0.2.0\nrelease-checks:\n  workflow: ci.yml\npre-publish:\n  - workflow: ci.yml\n",
+			"pre-publish[0].workflow: ci.yml is also the release-checks workflow; use a workflow of its own"},
+		"pre-publish twice": {"schema-version: 1\nversion: v0.2.0\npre-publish:\n  - workflow: migrate-database.yml\n  - workflow: migrate-database.yml\n", "pre-publish[1]: migrate-database.yml is listed twice"},
+		"pre-publish elsewhere": {"schema-version: 1\nversion: v0.2.0\npre-publish:\n  - workflow: migrate.yml\n    repository: fabricahq/infra\n",
+			"pre-publish[0].repository: running a workflow in another repository before publishing isn't supported yet; use a workflow in this repository"},
+		"pre-publish environment key": {"schema-version: 1\nversion: v0.2.0\npre-publish:\n  - workflow: migrate-database.yml\n    environment: production\n", "field environment not found"},
+		"pre-publish key":             {"schema-version: 1\nversion: v0.2.0\npre-publish:\n  - workflow: migrate-database.yml\n    secrets: inherit\n", "field secrets not found"},
+		"pre-publish as one workflow": {"schema-version: 1\nversion: v0.2.0\npre-publish:\n  workflow: migrate-database.yml\n", "cannot unmarshal"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := Parse([]byte(tc.yaml), ""); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("got %v, want %q", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestParseReadsPrePublish(t *testing.T) {
+	c, err := Parse([]byte("schema-version: 1\nversion: v0.2.0\npre-publish:\n  - workflow: migrate-database.yml\n  - workflow: warm-caches.yml\n"), "")
+	if err != nil || len(c.PrePublish) != 2 || c.PrePublish[0].Workflow != "migrate-database.yml" || c.PrePublish[1].Workflow != "warm-caches.yml" || c.PrePublish[0].Environment != "" {
+		t.Fatal(c, err)
+	}
+	if c, err := Parse([]byte("schema-version: 1\nversion: v0.2.0\n"), ""); err != nil || len(c.PrePublish) != 0 {
+		t.Fatal(c, err)
 	}
 }

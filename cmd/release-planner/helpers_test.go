@@ -103,6 +103,13 @@ func newAPI(t *testing.T, routes map[string]any) *fakeAPI {
 	return f
 }
 
+// set changes the response to key.
+func (f *fakeAPI) set(key string, response any) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.routes[key] = response
+}
+
 // sent returns the body of the first request to key, or "" if there was none.
 func (f *fakeAPI) sent(key string) string {
 	f.mu.Lock()

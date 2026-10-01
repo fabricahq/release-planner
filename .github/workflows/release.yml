@@ -123,7 +123,14 @@ jobs:
     concurrency:
       group: release-publication
       cancel-in-progress: false
+      queue: max
     steps:
+      # The release branch's history, so publish can check that no later commit withdrew or
+      # replaced the approved notes. Nothing from it runs.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: publisher

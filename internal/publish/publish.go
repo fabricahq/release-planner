@@ -85,7 +85,19 @@ func ReadAssets(dir string) ([]File, error) {
 //
 // Merging the release pull request is the approval, so the plan's merged commit must be
 // that pull request's merge into branch. A direct push of release notes publishes nothing.
-func Publish(ctx context.Context, gh *GitHub, p plan.Plan, branch string, assets []File) (Result, error) {
+//
+// approved, if not nil, checks that the approval still stands, such as that no later commit
+// withdrew the request. It runs immediately before each write that makes something visible:
+// creating the release or its draft, publishing the draft once its assets are staged, and
+// replacing each edited release's notes. That narrows the window to one API call; it doesn't
+// make the check and the write atomic.
+func Publish(ctx context.Context, gh *GitHub, p plan.Plan, branch string, assets []File, approved func(context.Context) error) (Result, error) {
+	check := func() error {
+		if approved == nil {
+			return nil
+		}
+		return approved(ctx)
+	}
 	if p.Empty() {
 		return Result{}, fmt.Errorf("the plan requests no release and edits no notes")
 	}
@@ -104,12 +116,12 @@ func Publish(ctx context.Context, gh *GitHub, p plan.Plan, branch string, assets
 	}
 	var res Result
 	if p.Tag != "" {
-		if res, err = release(ctx, gh, p, assets); err != nil {
+		if res, err = release(ctx, gh, p, assets, check); err != nil {
 			return res, err
 		}
 	}
 	for _, e := range p.Edits {
-		edited, err := editNotes(ctx, gh, e)
+		edited, err := editNotes(ctx, gh, e, check)
 		if err != nil {
 			return res, err
 		}
@@ -118,8 +130,36 @@ func Publish(ctx context.Context, gh *GitHub, p plan.Plan, branch string, assets
 	return res, nil
 }
 
+// Published reports whether tag has a published GitHub release: one that exists and isn't a
+// draft. A draft the token can't see counts as unpublished.
+func Published(ctx context.Context, gh *GitHub, tag string) (bool, error) {
+	release, err := gh.ReleaseByTag(ctx, tag)
+	if err != nil {
+		return false, err
+	}
+	return published(release), nil
+}
+
+// PublishedTags returns the tags that have a published release, as Published defines it, from
+// one listing of the repository's releases.
+func PublishedTags(ctx context.Context, gh *GitHub) (map[string]bool, error) {
+	releases, err := gh.Releases(ctx)
+	if err != nil {
+		return nil, err
+	}
+	tags := map[string]bool{}
+	for i := range releases {
+		if published(&releases[i]) {
+			tags[releases[i].TagName] = true
+		}
+	}
+	return tags, nil
+}
+
+func published(r *Release) bool { return r != nil && !r.Draft }
+
 // editNotes replaces a published release's notes. It never touches the tag or the assets.
-func editNotes(ctx context.Context, gh *GitHub, e plan.Edit) (Edited, error) {
+func editNotes(ctx context.Context, gh *GitHub, e plan.Edit, check func() error) (Edited, error) {
 	release, err := gh.ReleaseByTag(ctx, e.Tag)
 	if err != nil {
 		return Edited{}, err
@@ -130,6 +170,9 @@ func editNotes(ctx context.Context, gh *GitHub, e plan.Edit) (Edited, error) {
 	if normalize(release.Body) == normalize(e.Notes) {
 		return Edited{Tag: e.Tag, URL: release.HTMLURL}, nil
 	}
+	if err := check(); err != nil {
+		return Edited{}, err
+	}
 	if err := gh.UpdateNotes(ctx, release.ID, e.Notes); err != nil {
 		return Edited{}, err
 	}
@@ -138,7 +181,7 @@ func editNotes(ctx context.Context, gh *GitHub, e plan.Edit) (Edited, error) {
 
 // release creates the tag on the release commit and publishes the release, verifying
 // every remote fact first. A retry after a successful publication makes no writes.
-func release(ctx context.Context, gh *GitHub, p plan.Plan, assets []File) (Result, error) {
+func release(ctx context.Context, gh *GitHub, p plan.Plan, assets []File, check func() error) (Result, error) {
 	commit := p.Commit
 	if !commitSHA.MatchString(commit) {
 		return Result{}, fmt.Errorf("the plan's release commit %q is not a full commit SHA", commit)
@@ -166,11 +209,11 @@ func release(ctx context.Context, gh *GitHub, p plan.Plan, assets []File) (Resul
 	}
 
 	if p.Previous != "" {
-		previous, err := gh.ReleaseByTag(ctx, p.Previous)
+		published, err := Published(ctx, gh, p.Previous)
 		if err != nil {
 			return Result{}, err
 		}
-		if previous == nil || previous.Draft {
+		if !published {
 			return Result{}, fmt.Errorf("publish %s first", p.Previous)
 		}
 	}
@@ -189,7 +232,12 @@ func release(ctx context.Context, gh *GitHub, p plan.Plan, assets []File) (Resul
 	}
 	// Notes are editable after publication, so only a draft's must still be the plan's.
 	changed := release != nil && normalize(release.Body) != normalize(p.Notes)
-	if release != nil && (release.Name != p.Tag || changed && release.Draft || release.Prerelease != p.Prerelease) {
+	if release != nil && release.Draft && changed {
+		// Such as a draft an attempt staged before its request was withdrawn, which a new
+		// request for the version finds.
+		return Result{}, fmt.Errorf("an unpublished %s draft release, left by an earlier attempt, has other notes than this request; delete that draft on GitHub, then retry", p.Tag)
+	}
+	if release != nil && (release.Name != p.Tag || release.Prerelease != p.Prerelease) {
 		return Result{}, fmt.Errorf("an existing %s release differs from the approved notes; resolve it by hand", p.Tag)
 	}
 	if release != nil && release.Draft && existing == "" && release.TargetCommitish != commit {
@@ -205,6 +253,11 @@ func release(ctx context.Context, gh *GitHub, p plan.Plan, assets []File) (Resul
 		return Result{URL: release.HTMLURL, AlreadyPublished: true, NotesChanged: changed}, verifyTag(ctx, gh, p.Tag, commit)
 	}
 
+	if release == nil {
+		if err := check(); err != nil {
+			return Result{}, err
+		}
+	}
 	switch {
 	case release == nil && len(assets) == 0:
 		release, err = gh.CreateRelease(ctx, p.Tag, commit, p.Notes, p.Prerelease, false)
@@ -224,6 +277,11 @@ func release(ctx context.Context, gh *GitHub, p plan.Plan, assets []File) (Resul
 		}
 		if err := verifyAssets(ctx, gh, fresh, assets); err != nil {
 			return Result{}, fmt.Errorf("staged %s draft: %v", p.Tag, err)
+		}
+		// Uploads can take a while, so check the approval again right before the release
+		// becomes public.
+		if err := check(); err != nil {
+			return Result{}, err
 		}
 		if release, err = gh.PublishDraft(ctx, release.ID, commit, !p.Prerelease); err != nil {
 			return Result{}, err

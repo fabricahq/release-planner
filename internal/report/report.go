@@ -6,9 +6,12 @@ package report
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
+	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/fabricahq/release-planner/internal/notes"
@@ -35,23 +38,18 @@ type Job struct {
 	Outputs map[string]string `json:"outputs"`
 }
 
+// EditedNotes is one entry of the publish job's notes output, a JSON list: whether publishing
+// changed the notes of a release the plan edits.
+type EditedNotes struct {
+	Tag     string `json:"tag"`
+	Changed bool   `json:"changed"`
+}
+
 // Asset is a built release file.
 type Asset struct {
 	Name string
 	Size int64
 }
-
-// Target is one downstream workflow, which its own downstream job runs.
-type Target struct {
-	Repository, Workflow string
-	// Result is the conclusion of the target's job, or "" when it's unknown.
-	Result string
-}
-
-// Job is the name of the target's job in the Release workflow's downstream matrix.
-func (t Target) Job() string { return "downstream (" + t.Repository + ":" + t.Workflow + ")" }
-
-func (t Target) label() string { return t.Repository + " `" + t.Workflow + "`" }
 
 // Status is everything the description's blocks describe.
 type Status struct {
@@ -78,8 +76,47 @@ type Status struct {
 	// when it's unknown.
 	Archive  string
 	MergedBy string
-	// Downstream lists the downstream workflows, with their jobs' results.
-	Downstream []Target
+	// Hooks are the workflows the Release workflow runs around the release, each in its own job.
+	Hooks []Hook
+}
+
+// Hook is a workflow the Release workflow runs around a release, in a job of its own: one of
+// the repository's own, or a workflow in another repository it starts.
+type Hook struct {
+	// Job is the job's ID, and Name its name, such as "pre-publish (migrate-database.yml)".
+	Job  string `json:"job"`
+	Name string `json:"name"`
+	// When is "pre-publish" or "post-publish".
+	When string `json:"when"`
+	// Workflow is the workflow's file name, in Repository when it's in another repository.
+	Workflow   string `json:"workflow"`
+	Repository string `json:"repository,omitempty"`
+	// Title is the name the workflow declares, or "" when it declares none.
+	Title string `json:"title,omitempty"`
+	// Prereleases is true when a post-publish workflow also runs for prereleases.
+	Prereleases bool `json:"prereleases,omitempty"`
+}
+
+// label names the hook in its row of the jobs table.
+func (h Hook) label() string {
+	switch {
+	case h.Repository != "":
+		return "Run " + h.Repository + " `" + h.Workflow + "`"
+	case h.Title != "":
+		return markdownText(h.Title)
+	}
+	return "Run `" + h.Workflow + "`"
+}
+
+// mention names the hook in a sentence: its name in bold, or its file name.
+func (h Hook) mention() string {
+	switch {
+	case h.Repository != "":
+		return h.Repository + " `" + h.Workflow + "`"
+	case h.Title != "":
+		return "**" + markdownText(h.Title) + "**"
+	}
+	return "`" + h.Workflow + "`"
 }
 
 // Blocks are the contents of the description's summary and status blocks, without their markers.
@@ -93,19 +130,108 @@ var jobs = []struct{ id, label string }{
 	{"attest", "Attest the release assets"},
 	{"publish", "Publish"},
 	{"attest-release", "Attest the published assets"},
-	{"downstream", "Run downstream workflows"},
 }
 
 var icons = map[string]string{"success": "✅", "failure": "❌", "cancelled": "⚪"}
 
 var failedVerb = map[string]string{"failure": "failed", "cancelled": "was cancelled"}
 
+// row is one job of the Release workflow, in the jobs table: a fixed job, or a hook's.
+type row struct {
+	id, label string
+	hook      *Hook
+}
+
+// order lists the Release workflow's jobs in the order they run: the pre-publish hooks run
+// before publish, and the post-publish hooks after the published assets are attested.
+func (s Status) order() []row {
+	var rows []row
+	hooks := func(when string) {
+		for i := range s.Hooks {
+			if h := &s.Hooks[i]; h.When == when {
+				rows = append(rows, row{h.Job, h.label(), h})
+			}
+		}
+	}
+	for _, j := range jobs {
+		if j.id == "publish" {
+			hooks("pre-publish")
+		}
+		rows = append(rows, row{j.id, j.label, nil})
+	}
+	hooks("post-publish")
+	return rows
+}
+
+// hooks lists the hooks that run when, pre-publish or post-publish.
+func (s Status) hooks(when string) []Hook {
+	var list []Hook
+	for _, h := range s.Hooks {
+		if h.When == when {
+			list = append(list, h)
+		}
+	}
+	return list
+}
+
+// hook returns the hook the job runs, or nil.
+func (s Status) hook(job string) *Hook {
+	for i := range s.Hooks {
+		if s.Hooks[i].Job == job {
+			return &s.Hooks[i]
+		}
+	}
+	return nil
+}
+
+// jobName is how the report names a job: a hook's job by its name, such as
+// "pre-publish (migrate-database.yml)", and any other by its ID.
+func (s Status) jobName(job string) string {
+	if h := s.hook(job); h != nil {
+		return h.Name
+	}
+	return job
+}
+
 // Failed returns the first Release workflow job that failed or was cancelled, or "".
 func (s Status) Failed() string {
-	for _, j := range jobs {
+	for _, j := range s.order() {
 		if r := s.Jobs[j.id].Result; r == "failure" || r == "cancelled" {
 			return j.id
 		}
+	}
+	return ""
+}
+
+// markdownText escapes text so Markdown shows it as written, even in a table cell.
+func markdownText(s string) string {
+	return markdownSpecial.ReplaceAllString(s, `\$0`)
+}
+
+var markdownSpecial = regexp.MustCompile("[\\\\`*_~\\[\\]<>|#]")
+
+// PrePublishDocs explains what to do when the pre-publish workflow fails.
+const PrePublishDocs = "https://release-planner.fabricahq.com/customize/pre-publish/#if-it-fails"
+
+// stopped explains a run after the merge that stopped on purpose, or failed in a way with its
+// own remedy, or returns "".
+func (s Status) stopped(p *plan.Plan, failed string) string {
+	validate, publish := s.Jobs["validate"].Outputs, s.Jobs["publish"].Outputs
+	switch {
+	case failed == "validate" && validate["waiting-for"] != "" && validate["waiting-for-file"] != "":
+		tag := validate["waiting-for"]
+		return fmt.Sprintf("⏳ **This release waits for %s,** which merged earlier and isn't published yet. Publish %s, or withdraw it by deleting `%s` in a pull request. Then use **Re-run failed jobs** on [this run](%s).", tag, tag, validate["waiting-for-file"], s.RunURL)
+	case failed == "validate" && validate["waiting-for"] != "":
+		tag := validate["waiting-for"]
+		return fmt.Sprintf("⏳ **This release waits for %s,** which is tagged but has no published release. Publish %s by re-running its release run, then use **Re-run failed jobs** on [this run](%s). If %s's tag isn't on its release commit, delete the tag first.", tag, tag, s.RunURL, tag)
+	case failed == "validate" && validate["withdrawn"] != "", failed == "publish" && publish["release"] == "withdrawn":
+		return fmt.Sprintf("⚪ **A later change to the release notes on %s withdrew or replaced what this pull request approved,** so this run doesn't publish it. Any newer request publishes from its own run.", s.Branch)
+	}
+	if h := s.hook(failed); h != nil && h.When == "pre-publish" {
+		if s.Jobs[failed].Result == "cancelled" {
+			return fmt.Sprintf("⚪ **The %s job was cancelled,** so this attempt stopped before publishing. Use **Re-run failed jobs** on [that run](%s).", h.Name, s.RunURL)
+		}
+		return fmt.Sprintf("❌ **The %s job failed,** so this attempt stopped before publishing. See [the workflow run](%s). If the cause was outside the release commit, fix it, then use **Re-run failed jobs** on that run. If the release commit itself is broken, withdraw %s: delete `%s` in the pull request that fixes it, then release again. [What to do when pre-publish fails](%s)", h.Name, s.RunURL, p.Tag, p.File, PrePublishDocs)
 	}
 	return ""
 }
@@ -155,27 +281,47 @@ func (s Status) summary() string {
 	}
 	published := s.Jobs["publish"].Result == "success"
 
-	if p.Tag != "" && p.File != "" {
-		line("%s\n", s.edit(p.Tag, p.File))
-	}
-	for _, e := range p.Edits {
-		line("%s\n", s.edit(e.Tag, e.File))
+	// A withdrawn or replaced request's file is gone or changed on the release branch, so
+	// there's nothing of this pull request's to edit.
+	if s.Jobs["publish"].Outputs["release"] != "withdrawn" {
+		if p.Tag != "" && p.File != "" {
+			line("%s\n", s.edit(p.Tag, p.File))
+		}
+		for _, e := range p.Edits {
+			line("%s\n", s.edit(e.Tag, e.File))
+		}
 	}
 
 	failure := func(fix string) {
 		if failed != "" {
-			line("❌ **The %s job %s.** See [the workflow run](%s). %s\n", failed, failedVerb[s.Jobs[failed].Result], s.RunURL, fix)
+			line("❌ **The %s job %s.** See [the workflow run](%s). %s\n", s.jobName(failed), failedVerb[s.Jobs[failed].Result], s.RunURL, fix)
 		}
 	}
 	switch {
 	case s.Merged:
 		if published {
-			if p.Tag != "" {
+			outputs := s.Jobs["publish"].Outputs
+			switch {
+			case p.Tag != "" && outputs["release"] == "already-published":
+				line("✅ %s was already published from `%s`.\n", s.release(p.Tag), short(p.Commit))
+			case p.Tag != "":
 				line("✅ Published %s from `%s`.\n", s.release(p.Tag), short(p.Commit))
 			}
+			// Without publish's notes output, as from an older run, an edit that succeeded updated them.
+			var edited []EditedNotes
+			_ = json.Unmarshal([]byte(outputs["notes"]), &edited)
 			for _, e := range p.Edits {
-				line("✅ Updated the notes of %s.\n", s.release(e.Tag))
+				i := slices.IndexFunc(edited, func(x EditedNotes) bool { return x.Tag == e.Tag })
+				if i >= 0 && !edited[i].Changed {
+					line("✅ The notes of %s were already up to date.\n", s.release(e.Tag))
+				} else {
+					line("✅ Updated the notes of %s.\n", s.release(e.Tag))
+				}
 			}
+		}
+		if why := s.stopped(p, failed); why != "" {
+			line("%s\n", why)
+			break
 		}
 		failure("Once the cause is fixed, use **Re-run failed jobs** on that run. It uses the same release commit and files, and changes nothing that already succeeded.")
 	default:
@@ -184,6 +330,15 @@ func (s Status) summary() string {
 			break
 		}
 		line("**When you merge this PR:**")
+		if pre := s.hooks("pre-publish"); p.Tag != "" && len(pre) == 1 {
+			line("- First, %s runs on the release commit. If it fails, the release isn't published.", pre[0].mention())
+		} else if p.Tag != "" && len(pre) > 1 {
+			var names []string
+			for _, h := range pre {
+				names = append(names, h.mention())
+			}
+			line("- First, these run on the release commit, in parallel: %s. If any fails, the release isn't published.", strings.Join(names, ", "))
+		}
 		if p.Tag != "" {
 			line("- The release commit, `%s`, is tagged `%s`.", short(p.Commit), p.Tag)
 			files := ""
@@ -194,16 +349,19 @@ func (s Status) summary() string {
 				files = " and the release assets"
 			}
 			line("- The %s GitHub release is published with these release notes%s.", p.Tag, files)
-			if len(s.Downstream) > 0 && !p.Prerelease {
-				var names []string
-				for _, t := range s.Downstream {
-					names = append(names, t.label())
+			// Post-publish workflows skip prereleases unless they opt in.
+			var names []string
+			for _, h := range s.hooks("post-publish") {
+				if !p.Prerelease || h.Prereleases {
+					names = append(names, h.mention())
 				}
-				if len(names) == 1 {
-					line("- Then %s runs.", names[0])
-				} else {
-					line("- Then these workflows run: %s.", strings.Join(names, ", "))
-				}
+			}
+			switch len(names) {
+			case 0:
+			case 1:
+				line("- Then %s runs.", names[0])
+			default:
+				line("- Then these run, in parallel: %s.", strings.Join(names, ", "))
 			}
 		}
 		for _, e := range p.Edits {
@@ -256,21 +414,11 @@ func (s Status) status() string {
 	row := func(icon, label, cell string) {
 		rows = append(rows, fmt.Sprintf("| %s | %s | %s |", icon, label, cell))
 	}
-	for _, j := range jobs {
+	for _, j := range s.order() {
 		result := s.Jobs[j.id].Result
 		switch {
-		case j.id == "downstream":
-			if icons[result] == "" {
-				continue
-			}
-			for _, t := range s.Downstream {
-				icon := icons[t.Result]
-				if icon == "" {
-					icon = "❔"
-				}
-				row(icon, "Run "+t.label(), s.details(s.RunJobs, t.Job(), s.RunURL))
-			}
-		case j.id == "publish" && !s.Merged && p != nil && !p.Empty():
+		case j.id == "publish" && !s.Merged && p != nil && !p.Empty(),
+			j.hook != nil && j.hook.When == "pre-publish" && !s.Merged && p != nil && p.Tag != "":
 			row("⏸️", j.label, "Runs when you merge")
 		case result == "skipped" && p != nil && p.Reused && (j.id == "release-checks" || j.id == "release-assets" || j.id == "attest"):
 			build := fmt.Sprintf("%s/%s/actions/runs/%d", s.Server, s.Repository, p.BuildRun)
@@ -283,7 +431,11 @@ func (s Status) status() string {
 					icon = "⚠️"
 				}
 			}
-			row(icon, label, s.details(s.RunJobs, j.id, s.RunURL))
+			name := j.id
+			if j.hook != nil {
+				name = j.hook.Name
+			}
+			row(icon, label, s.details(s.RunJobs, name, s.RunURL))
 		}
 	}
 	if len(rows) > 0 {
@@ -467,7 +619,7 @@ func Failure(s Status) string {
 		mention = "@" + s.MergedBy + " "
 	}
 	return fmt.Sprintf("%s\n%sThe release's **%s** job %s in [this workflow run](%s). The pull request description has the details and how to retry.\n",
-		failureMarker(s, failed), mention, failed, map[string]string{"failure": "failed", "cancelled": "was cancelled"}[s.Jobs[failed].Result], s.RunURL)
+		failureMarker(s, failed), mention, s.jobName(failed), map[string]string{"failure": "failed", "cancelled": "was cancelled"}[s.Jobs[failed].Result], s.RunURL)
 }
 
 // failureMarker identifies a failure comment by the run attempt and job it reports.
