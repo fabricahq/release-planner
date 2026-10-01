@@ -38,7 +38,7 @@ export default defineConfig({
         { label: 'Release notes style', slug: 'customize/release-notes-style' },
         { label: 'Release checks', slug: 'customize/release-checks' },
         { label: 'Release assets', slug: 'customize/release-assets' },
-        { label: 'Pre-publish workflow', slug: 'customize/pre-publish' },
+        { label: 'Pre-publish workflows', slug: 'customize/pre-publish' },
         { label: 'Post-publish workflows', slug: 'customize/post-publish' },
         { label: 'Configuration', slug: 'customize/configuration' },
       ] },

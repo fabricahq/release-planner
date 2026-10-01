@@ -1,6 +1,6 @@
 ---
-title: Pre-publish workflow
-description: Run one of your GitHub Actions workflows after you approve a release and before it's tagged, such as one that applies database migrations.
+title: Pre-publish workflows
+description: Run your own GitHub Actions workflows after you approve a release and before it's tagged, such as one that applies database migrations.
 ---
 
 A pre-publish workflow is one of your own GitHub Actions workflows that Release Planner runs after you approve a release by merging its pull request, and before it tags and publishes it; if the workflow fails, the release isn't published.

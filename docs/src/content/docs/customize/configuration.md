@@ -81,7 +81,7 @@ release-notes-rules:
   no-long-heading: off
 ```
 
-For the details of the last six, see [Release notes style](/customize/release-notes-style/), [Release checks](/customize/release-checks/), [Release assets](/customize/release-assets/), [Pre-publish workflow](/customize/pre-publish/), [Post-publish workflows](/customize/post-publish/), and [Release notes rules](/customize/release-notes-style/#release-notes-rules).
+For the details of the last six, see [Release notes style](/customize/release-notes-style/), [Release checks](/customize/release-checks/), [Release assets](/customize/release-assets/), [Pre-publish workflows](/customize/pre-publish/), [Post-publish workflows](/customize/post-publish/), and [Release notes rules](/customize/release-notes-style/#release-notes-rules).
 
 ## Upgrade Release Planner
 
