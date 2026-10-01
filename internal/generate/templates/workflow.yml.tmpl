@@ -195,6 +195,12 @@ jobs:
       group: release-publication
       cancel-in-progress: false
     steps:
+      # The release branch's history, to check that no later commit withdrew or replaced the
+      # notes the merge approved. Nothing from it runs.
+      - uses: {{.Actions.Checkout}}
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 {{- template "install" .}}
       - uses: {{.Actions.DownloadArtifact}}
         with:

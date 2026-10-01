@@ -340,3 +340,23 @@ func TestValidateAfterMergeRefusesAReplacedNotesEdit(t *testing.T) {
 		t.Fatal(errOut)
 	}
 }
+
+// Re-run failed jobs reuses validate's plan, so publish checks the release branch again
+// before it writes: a request withdrawn since the merge never publishes.
+func TestPublishRefusesARequestWithdrawnAfterValidation(t *testing.T) {
+	o := newOrigin(t, "")
+	merged := o.merge("merge")
+	actionsFiles(t)
+	mergedAPI(t, o, merged, nil)
+	file := filepath.Join(t.TempDir(), "plan.json")
+	if code, _, errOut := cli(t, "validate", "--dir", o.checkout(t), "--ci", "--merged", merged, "--out", file); code != 0 {
+		t.Fatal(errOut)
+	}
+	o.git("rm", "-q", "_releases/v1.0.0.md")
+	o.repo.commit("Fix the migration and withdraw v1.0.0 (#4)")
+	api := newAPI(t, map[string]any{})
+	code, _, errOut := cli(t, "publish", "--dir", o.checkout(t), "--plan", file, "--built-plan", file, "--branch", "main")
+	if code != 1 || !strings.Contains(errOut, "so v1.0.0 was withdrawn or requested again") || len(api.requests) != 0 {
+		t.Fatalf("%d %s %v", code, errOut, api.requests)
+	}
+}

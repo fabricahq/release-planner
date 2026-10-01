@@ -587,6 +587,10 @@ func TestWorkflowCombinations(t *testing.T) {
 			if !slices.Equal(publish.Needs.([]any), wantNeeds) {
 				t.Errorf("publish needs %v, want %v", publish.Needs, wantNeeds)
 			}
+			// Publish reads the release branch's history to refuse a withdrawn request.
+			if checkout := publish.Steps[0]; !strings.HasPrefix(checkout.Uses, "actions/checkout@") || checkout.With["fetch-depth"] != "0" || checkout.With["persist-credentials"] != "false" {
+				t.Errorf("publish starts with %+v", checkout)
+			}
 			run := publish.Steps[len(publish.Steps)-1].Run
 			if assets != strings.Contains(run, "--assets \"$RUNNER_TEMP/release-assets\" --signer-workflow .github/workflows/release-planner.yml") || !strings.Contains(run, "--built-plan") {
 				t.Errorf("publish runs %q", run)
