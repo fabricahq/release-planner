@@ -183,7 +183,7 @@ var (
 	environment  = regexp.MustCompile(`^[0-9A-Za-z._-]+$`)
 )
 
-// PostPublishDocs explains post-publish workflows, and how to move from downstream.
+// PostPublishDocs explains post-publish workflows.
 const PostPublishDocs = "https://release-planner.fabricahq.com/customize/post-publish/"
 
 // GeneratedWorkflow is the Release workflow's file name, which can't also be a workflow it calls.
@@ -340,7 +340,7 @@ func (c Config) check() error {
 		}
 	}
 	if c.Downstream.Kind != 0 {
-		add("downstream: Release Planner v0.5.0 runs these as post-publish workflows; move each entry under post-publish: as it is, and since GitHub can't rename an environment, set up a dispatch environment like the downstream one, with DISPATCH_APP_CLIENT_ID and DISPATCH_APP_PRIVATE_KEY in place of DOWNSTREAM_APP_CLIENT_ID and DOWNSTREAM_APP_PRIVATE_KEY: %s#upgrade-from-downstream", PostPublishDocs)
+		add("downstream: Release Planner v0.5.0 runs these as post-publish workflows; move each entry under post-publish: as it is, and since GitHub can't rename an environment, set up a dispatch environment like the downstream one, with DISPATCH_APP_CLIENT_ID and DISPATCH_APP_PRIVATE_KEY in place of DOWNSTREAM_APP_CLIENT_ID and DOWNSTREAM_APP_PRIVATE_KEY: %s#set-up-the-dispatch-environment", PostPublishDocs)
 	}
 	for i, h := range c.PostPublish {
 		key := fmt.Sprintf("post-publish[%d]", i)

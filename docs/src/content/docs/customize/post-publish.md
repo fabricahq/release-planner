@@ -144,15 +144,6 @@ The release stays published. The release status in the release pull request's de
 
 In `fabricahq/homebrew-tap`, a workflow `update-code-rules.yml` takes `tag` and `version`, downloads the release's archives, checks they were attested by the releasing repository's `release-planner.yml` on `refs/heads/main`, updates the formula's URLs and checksums, and commits the change. The releasing repository lists it under `post-publish` with `repository: fabricahq/homebrew-tap`, and the GitHub App is installed on the tap only, so the release workflow can start that workflow but can't change anything else.
 
-## Upgrade from `downstream`
-
-Release Planner v0.5.0 replaces `downstream` with `post-publish`. A config that still has `downstream` fails until you change it:
-
-1. Rename `downstream:` to `post-publish:`, and keep its entries as they are.
-2. GitHub can't rename an environment, so [set up a `dispatch` environment](#set-up-the-dispatch-environment) with the same branch rule as your `downstream` one, with the variable `DISPATCH_APP_CLIENT_ID` and the secret `DISPATCH_APP_PRIVATE_KEY` set to the values of `DOWNSTREAM_APP_CLIENT_ID` and `DOWNSTREAM_APP_PRIVATE_KEY`. The same GitHub App works.
-3. Pin v0.5.0, run `release-planner install`, and commit.
-4. Once a release has run its post-publish workflows, delete the `downstream` environment.
-
 ## Requirements
 
 - A workflow in this repository can't be `release-planner.yml`, or a workflow you use for release checks, release assets, or pre-publish.
