@@ -32,14 +32,14 @@ The script runs on a standard GitHub-hosted Linux runner, without your repositor
 
 ## Run one of your workflows
 
-For checks that need secrets, service containers, other runners, or a matrix, point to one of your own workflows:
+For checks that need secrets, service containers, other runners, or a matrix, point to one of your own GitHub Actions workflows:
 
 ```yaml
 release-checks:
   workflow: release-checks.yml
 ```
 
-The release workflow calls it with the commit to check and your repository's secrets. It never receives the token that can publish releases. It runs on release pull requests from branches in your repository; a pull request from a fork gets no secrets, so its checks run after the merge instead.
+The release workflow that Release Planner generates calls it with the commit to check and your repository's secrets. It never receives the token that can publish releases. It runs on release pull requests from branches in your repository; a pull request from a fork gets no secrets, so its checks run after the merge instead.
 
 Your workflow must accept a `ref` input and check out that ref. The release commit is usually not the latest commit, so checking out the default would test the wrong code:
 

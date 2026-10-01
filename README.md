@@ -20,7 +20,7 @@ Release Planner splits the work. Deterministic code handles the parts that must 
 
 1. You tell your agent "let's release."
 2. The agent runs `release-planner` to list every change since the previous release, applies your release policy to choose the version, and opens a pull request that adds the notes file, such as `_releases/v1.2.0.md`. The release is the commit that pull request starts from.
-3. On the pull request, the generated Release workflow checks the version and the notes, runs any release checks you configured, and builds any files to attach. The pull request's description shows the release's status as it goes.
+3. On the pull request, the generated [GitHub Actions workflow](https://docs.github.com/en/actions/concepts/workflows-and-actions/workflows) checks the version and the notes, runs any release checks you configured, and builds any files to attach. The pull request's description shows the release's status as it goes.
 4. You edit the notes in the pull request. Saving edits publishes nothing.
 5. You merge. The workflow tags the release commit and publishes the notes word for word, with the files the pull request built.
 

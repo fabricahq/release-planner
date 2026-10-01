@@ -39,7 +39,7 @@ release-planner install
 
 This writes:
 
-- `.github/workflows/release-planner.yml`, the workflow that publishes releases.
+- `.github/workflows/release-planner.yml`, the [GitHub Actions workflow](https://docs.github.com/en/actions/concepts/workflows-and-actions/workflows) that publishes releases.
 - A **Releases** section in `AGENTS.md`, which tells any agent how to release.
 - A `release` skill in `.agents/skills/` and `.claude/skills/`, so agents recognize "let's release" automatically.
 

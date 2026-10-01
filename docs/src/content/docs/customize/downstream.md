@@ -1,9 +1,9 @@
 ---
 title: Downstream workflows
-description: Start workflows in other repositories after each new release, such as a Homebrew formula update.
+description: Start GitHub Actions workflows in other repositories after each new release, such as a Homebrew formula update.
 ---
 
-Downstream workflows run in other repositories after each new stable release is published, with the release's tag and version. A common one updates a Homebrew formula in a tap repository.
+Downstream workflows are GitHub Actions workflows that run in other repositories after each new stable release is published, with the release's tag and version. A common one updates a Homebrew formula in a tap repository.
 
 ## Configure the targets
 

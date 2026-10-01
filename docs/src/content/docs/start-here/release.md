@@ -9,7 +9,7 @@ Tell your agent "let's release." It works through the release procedure on its o
 
 The agent never merges its own release pull request.
 
-The release workflow writes the rest of the description around that sentence, and updates it on every push:
+Release Planner's GitHub Actions workflow writes the rest of the description around that sentence, and updates it on every push:
 
 - at the top, a link to edit the notes on GitHub, what merging does, and the version, the release commit, and the previous release
 - at the bottom, each job with a link to it, including your [release checks](/customize/release-checks/), any [release notes rules](/customize/release-notes-style/#release-notes-rules) the notes break, and any [release assets](/customize/release-assets/) with a link to download them
@@ -32,7 +32,7 @@ The release contains the changes up to the commit the pull request branched from
 
 ## Merge to publish
 
-Merging the pull request is the approval. Wait for the release status to show the checks passed first. The release workflow then tags the release commit and publishes the notes as the GitHub release, with the files the pull request built, and updates the description with a link to it. If you configured [downstream workflows](/customize/downstream/), it starts them next.
+Merging the pull request is the approval. Wait for the release status to show the checks passed first. The workflow then tags the release commit and publishes the notes as the GitHub release, with the files the pull request built, and updates the description with a link to it. If you configured [downstream workflows](/customize/downstream/), it starts them next.
 
 If anything fails, the top of the description names the failed job and how to retry, and the workflow comments on the pull request to mention you, since GitHub doesn't notify anyone about an edited description.
 
