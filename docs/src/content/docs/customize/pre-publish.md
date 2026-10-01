@@ -66,11 +66,11 @@ jobs:
 
 ## Make it safe to run again, late, and twice at once
 
-Your workflow may run more than once for the same release: after it fails, on a retry, or after the release is already out. An older release's run can also come after a newer release's. Two runs can overlap. Make each of these harmless:
+Your workflow may run more than once for the same release: after a failure, on a retry, or after the release is already out. An older release's run can come after a newer release's, and two runs can overlap. So make sure your workflow is:
 
-- **Again:** running it twice, including after it stopped partway, gives the same result.
-- **Late:** running an older release's workflow after a newer one's changes nothing that matters. Versioned migration tools, such as goose, skip migrations that are already applied.
-- **Twice at once:** take a lock, such as goose's Postgres session lock, or make overlapping runs harmless.
+- **Idempotent:** running it again, even after it stopped partway, gives the same result as running it once.
+- **Safe to run late:** an older release's run, coming after a newer release's, changes nothing that matters. Versioned migration tools, such as goose, skip migrations that are already applied.
+- **Safe to run concurrently:** two overlapping runs don't interfere. Take a lock, such as goose's Postgres session lock, or make overlapping runs harmless.
 
 ## Keep it compatible with what's running
 
