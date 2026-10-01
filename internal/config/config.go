@@ -340,7 +340,7 @@ func (c Config) check() error {
 		}
 	}
 	if c.Downstream.Kind != 0 {
-		add("downstream: Release Planner v0.5.0 runs these as post-publish workflows; move each entry under post-publish: as it is, rename the downstream environment to dispatch, and its DOWNSTREAM_APP_CLIENT_ID variable and DOWNSTREAM_APP_PRIVATE_KEY secret to DISPATCH_APP_CLIENT_ID and DISPATCH_APP_PRIVATE_KEY: %s", PostPublishDocs)
+		add("downstream: Release Planner v0.5.0 runs these as post-publish workflows; move each entry under post-publish: as it is, and since GitHub can't rename an environment, set up a dispatch environment like the downstream one, with DISPATCH_APP_CLIENT_ID and DISPATCH_APP_PRIVATE_KEY in place of DOWNSTREAM_APP_CLIENT_ID and DOWNSTREAM_APP_PRIVATE_KEY: %s#upgrade-from-downstream", PostPublishDocs)
 	}
 	for i, h := range c.PostPublish {
 		key := fmt.Sprintf("post-publish[%d]", i)
