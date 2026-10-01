@@ -633,6 +633,12 @@ func TestWorkflowCombinations(t *testing.T) {
 			if prePublish != strings.Contains(publish.If, guard) {
 				t.Errorf("publish runs if %q", publish.If)
 			}
+			// validate tells the report why a run stopped on purpose, even when it fails.
+			for _, output := range []string{"withdrawn", "waiting-for", "waiting-for-file"} {
+				if got := jobs["validate"].Outputs[output]; got != "${{ steps.validate.outputs."+output+" }}" {
+					t.Errorf("validate outputs %s as %q", output, got)
+				}
+			}
 			// publish tells the report what it did.
 			if publish.Outputs["release"] != "${{ steps.publish.outputs.release }}" || publish.Outputs["notes"] != "${{ steps.publish.outputs.notes }}" ||
 				publish.named(t, "publish").Name != "Publish the approved release" {

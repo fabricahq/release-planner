@@ -69,6 +69,12 @@ jobs:
       plan-artifact: ${{"{{"}} steps.upload-plan.outputs.artifact-id {{"}}"}}
       built-plan-artifact: ${{"{{"}} steps.validate.outputs.built-plan-artifact {{"}}"}}
       built-assets-artifact: ${{"{{"}} steps.validate.outputs.built-assets-artifact {{"}}"}}
+      # Why a run after the merge stopped on purpose, set even though validate fails, for the
+      # report: a later commit withdrew or replaced the request, or an earlier release must
+      # publish first.
+      withdrawn: ${{"{{"}} steps.validate.outputs.withdrawn {{"}}"}}
+      waiting-for: ${{"{{"}} steps.validate.outputs.waiting-for {{"}}"}}
+      waiting-for-file: ${{"{{"}} steps.validate.outputs.waiting-for-file {{"}}"}}
     steps:
       - uses: {{.Actions.Checkout}}
         with:
