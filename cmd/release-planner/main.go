@@ -355,6 +355,12 @@ func cmdValidate(ctx context.Context, args []string, out io.Writer) error {
 	var p plan.Plan
 	if *merged != "" {
 		p, err = readMerged(ctx, repo, c, opts, *merged)
+		// The report says why the run stopped, so it doesn't read as a failure to fix.
+		if w := (plan.WithdrawnError{}); errors.As(err, &w) {
+			if err := appendEnvFile("GITHUB_OUTPUT", "withdrawn="+w.Commit+"\n"); err != nil {
+				return err
+			}
+		}
 	} else {
 		p, err = plan.Read(ctx, repo, opts, *base, *head)
 	}
@@ -468,6 +474,9 @@ func readMerged(ctx context.Context, repo gitrepo.Repo, c config.Config, opts pl
 		}
 	}
 	p.PullRequest, p.Merged, p.MergedBy = pr.Number, merged, pr.MergedBy
+	if err := plan.StillApproved(ctx, repo, c.Branch, p); err != nil {
+		return empty, err
+	}
 	return p, nil
 }
 

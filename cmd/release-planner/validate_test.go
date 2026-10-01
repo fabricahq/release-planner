@@ -256,3 +256,87 @@ func TestValidateFlagsNotesEditedOnGitHub(t *testing.T) {
 		t.Fatal(p.Warnings, err)
 	}
 }
+
+// A run publishes only what its merge approved: once a later commit on main changes the
+// notes file, by withdrawing the request or requesting the version again, the old run refuses.
+func TestValidateAfterMergeRefusesAWithdrawnRequest(t *testing.T) {
+	for name, tc := range map[string]struct {
+		after func(o *origin)
+		want  string
+	}{
+		"withdrawn": {func(o *origin) {
+			o.git("rm", "-q", "_releases/v1.0.0.md")
+			o.repo.commit("Fix the migration and withdraw v1.0.0 (#4)")
+		}, "so v1.0.0 was withdrawn or requested again"},
+		"requested again": {func(o *origin) {
+			o.write("_releases/v1.0.0.md", "Notes with the fix\n")
+			o.repo.commit("Release v1.0.0 (#5)")
+		}, "so v1.0.0 was withdrawn or requested again"},
+		"deleted and added back on a side branch": {func(o *origin) {
+			o.git("checkout", "-q", "-b", "side")
+			o.git("rm", "-q", "_releases/v1.0.0.md")
+			o.repo.commit("Withdraw v1.0.0")
+			o.write("_releases/v1.0.0.md", "Approved notes\n")
+			o.repo.commit("Request v1.0.0 again")
+			o.git("checkout", "-q", "main")
+			o.git("merge", "-q", "--no-ff", "side", "-m", "Merge pull request #6 from fabricahq/side")
+		}, "so v1.0.0 was withdrawn or requested again"},
+		"unrelated change": {func(o *origin) {
+			o.write("later.go", "package later // changed\n")
+			o.repo.commit("Unrelated change (#7)")
+		}, ""},
+		"already tagged": {func(o *origin) {
+			o.git("tag", "v1.0.0", o.release)
+			o.write("_releases/v1.0.0.md", "Corrected after publication\n")
+			o.repo.commit("Edit the v1.0.0 release notes (#8)")
+		}, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			o := newOrigin(t, "")
+			merged := o.merge("merge")
+			tc.after(o)
+			output := actionsFiles(t)
+			mergedAPI(t, o, merged, nil)
+			p, out, errOut := validateMerged(t, o.checkout(t), merged)
+			if tc.want == "" {
+				if p.Tag != "v1.0.0" {
+					t.Fatalf("%+v\n%s %s", p, out, errOut)
+				}
+				return
+			}
+			later := o.git("rev-parse", "--short", "main")
+			if name == "deleted and added back on a side branch" {
+				later = o.git("rev-parse", "--short", "side")
+			}
+			if p.Tag != "" || !strings.Contains(errOut, "_releases/v1.0.0.md changed on main after pull request #2 merged (in "+later+"), "+tc.want) {
+				t.Fatalf("%+v\n%s %s", p, out, errOut)
+			}
+			if !strings.Contains(output("output"), "withdrawn=") {
+				t.Fatalf("outputs lack withdrawn:\n%s", output("output"))
+			}
+		})
+	}
+}
+
+// An old notes edit's run doesn't restore older notes over a newer approved edit.
+func TestValidateAfterMergeRefusesAReplacedNotesEdit(t *testing.T) {
+	o := newOrigin(t, "")
+	o.merge("merge")
+	o.git("tag", "v1.0.0", o.release)
+	o.git("checkout", "-q", "-b", "edit")
+	o.write("_releases/v1.0.0.md", "First correction\n")
+	head := o.repo.commit("Correct the v1.0.0 notes")
+	o.git("checkout", "-q", "main")
+	o.git("merge", "-q", "--no-ff", "edit", "-m", "Merge pull request #9 from fabricahq/edit")
+	edit := o.git("rev-parse", "HEAD")
+	o.write("_releases/v1.0.0.md", "Second correction\n")
+	o.repo.commit("Correct the v1.0.0 notes again (#10)")
+	actionsFiles(t)
+	mergedAPI(t, o, edit, map[string]any{
+		"GET /commits/" + edit + "/pulls": []any{map[string]any{"number": 9, "merged_at": "2026-09-25T12:00:00Z", "merge_commit_sha": edit, "base": map[string]string{"ref": "main"}}},
+		"GET /pulls/9":                    map[string]any{"head": map[string]any{"sha": head, "repo": map[string]string{"full_name": "fabricahq/example"}}, "merged_by": map[string]string{"login": "mona"}},
+	})
+	if _, _, errOut := validateMerged(t, o.checkout(t), edit); !strings.Contains(errOut, "so this run doesn't replace the v1.0.0 notes; the newer change's run does") {
+		t.Fatal(errOut)
+	}
+}
