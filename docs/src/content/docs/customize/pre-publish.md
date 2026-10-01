@@ -126,5 +126,5 @@ If publishing fails after your workflow succeeded, **Re-run failed jobs** runs o
 ## Requirements
 
 - The workflow can't be `release-planner.yml`, or the workflow you use for release checks or release assets.
-- The environment can't be `release` or `downstream`.
+- The environment can't be `release` or `dispatch`.
 - Don't skip every job in the workflow with `if`. GitHub then reports the call as skipped, and the release isn't published. To do nothing, skip steps instead.

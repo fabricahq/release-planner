@@ -49,7 +49,7 @@ In your repository settings on GitHub:
 
 - **Require pull requests** for your main branch, with your CI as required status checks, and **require branches to be up to date** before merging (or use a merge queue). This is what guarantees that the commit you release was tested.
 - **Block force pushes** to and deletion of the main branch.
-- **Create the `release` environment,** as described below. If you use [downstream workflows](/customize/downstream/), also create the `downstream` environment.
+- **Create the `release` environment,** as described below. If a [post-publish workflow](/customize/post-publish/) is in another repository, also create the `dispatch` environment.
 - **Turn on immutable releases**, so published tags and files can't be changed. Release notes stay editable.
 
 ### Create the `release` environment
@@ -79,7 +79,7 @@ To set it up:
 
 The publish job mints a token for this repository only, with **Contents** and **Workflows** write, and uses it only to write; it reads with the workflow's token. With neither setting, it publishes with the workflow's token as before. With only one, it fails and names the missing one.
 
-Tags and releases the App creates start workflows, which those made with the workflow's token never do: `create` and `push` for the tag, and the `release` events `published`, then `released` or `prereleased`, plus `created` for a release without assets. A release with assets is staged as a draft, and drafts start no workflows. They fire before the release's assets are attested from the release branch, so don't deploy or redistribute from them. Start that work as a [downstream workflow](/customize/downstream/) instead, which runs after the attestation, or have it verify the attestation first. To find workflows these events start, run `grep -lE 'release:|tags:' .github/workflows/*`.
+Tags and releases the App creates start workflows, which those made with the workflow's token never do: `create` and `push` for the tag, and the `release` events `published`, then `released` or `prereleased`, plus `created` for a release without assets. A release with assets is staged as a draft, and drafts start no workflows. They fire before the release's assets are attested from the release branch, so don't deploy or redistribute from them. Start that work as a [post-publish workflow](/customize/post-publish/) instead, which runs after the attestation, or have it verify the attestation first. To find workflows these events start, run `grep -lE 'release:|tags:' .github/workflows/*`.
 
 ## 6. Commit and release
 

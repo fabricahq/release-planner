@@ -39,7 +39,7 @@ export default defineConfig({
         { label: 'Release checks', slug: 'customize/release-checks' },
         { label: 'Release assets', slug: 'customize/release-assets' },
         { label: 'Pre-publish workflow', slug: 'customize/pre-publish' },
-        { label: 'Downstream workflows', slug: 'customize/downstream' },
+        { label: 'Post-publish workflows', slug: 'customize/post-publish' },
         { label: 'Configuration', slug: 'customize/configuration' },
       ] },
       { label: 'For agents', items: [{ label: 'How Release Planner works', slug: 'for-agents' }] },

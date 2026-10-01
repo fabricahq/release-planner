@@ -78,7 +78,7 @@ jobs:
      --source-ref refs/heads/main
    ```
 
-   Downstream workflows start only after this job succeeds.
+   Post-publish workflows start only after this job succeeds.
 
 If the pull request's files are gone, because the pull request's run didn't finish before the merge or its artifacts expired, the release workflow builds and attests them again from the same release commit after the merge. It does the same if the run has more than one `release-binding` artifact, since then it can't tell which files the pull request approved.
 

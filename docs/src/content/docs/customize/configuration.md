@@ -67,9 +67,11 @@ release-assets:
 pre-publish:
   - workflow: migrate-database.yml
 
-# Workflows in other repositories to run after each new stable release.
-# Default: none.
-downstream:
+# Your workflows to run after each new stable release, in this repository or,
+# with repository, in another one. Set prereleases: true to run one for
+# prereleases too. Default: none.
+post-publish:
+  - workflow: deploy.yml
   - repository: fabricahq/homebrew-tap
     workflow: update-code-rules.yml
 
@@ -79,7 +81,7 @@ release-notes-rules:
   no-long-heading: off
 ```
 
-For the details of the last six, see [Release notes style](/customize/release-notes-style/), [Release checks](/customize/release-checks/), [Release assets](/customize/release-assets/), [Pre-publish workflow](/customize/pre-publish/), [Downstream workflows](/customize/downstream/), and [Release notes rules](/customize/release-notes-style/#release-notes-rules).
+For the details of the last six, see [Release notes style](/customize/release-notes-style/), [Release checks](/customize/release-checks/), [Release assets](/customize/release-assets/), [Pre-publish workflow](/customize/pre-publish/), [Post-publish workflows](/customize/post-publish/), and [Release notes rules](/customize/release-notes-style/#release-notes-rules).
 
 ## Upgrade Release Planner
 
