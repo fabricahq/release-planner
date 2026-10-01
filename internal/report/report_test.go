@@ -861,6 +861,17 @@ func TestRendersThePrePublishWorkflowsName(t *testing.T) {
 	contains(t, blocks.Summary, "- First, **Migrate \\~\\~production\\~\\~** runs on the release commit.")
 	contains(t, blocks.Status, "| ⏸️ | Migrate \\~\\~production\\~\\~ | Runs when you merge |\n")
 
+	// A name can't mention anyone or reference an issue, even in the failure comment, which
+	// notifies: a word joiner after @ and # keeps GitHub from linking them.
+	s.Hooks = named("Migrate for @o/team, see #12")
+	blocks = render(t, s)
+	contains(t, blocks.Summary, "- First, **Migrate for @\u2060o/team, see \\#\u206012** runs")
+	contains(t, blocks.Status, "| ⏸️ | Migrate for @\u2060o/team, see \\#\u206012 |")
+	failed := status(release(), true, results("validate", "success", "pre-publish-1", "failure", "publish", "skipped"))
+	failed.Hooks, failed.MergedBy = s.Hooks, "mona"
+	contains(t, Failure(failed), "@mona The release's **Migrate for @\u2060o/team, see \\#\u206012** job failed")
+	lacks(t, Failure(failed)+render(t, failed).Summary, "@o/team", "#12")
+
 	// A name shaped like a file name is still a name.
 	s.Hooks = named("Deploy.yml")
 	blocks = render(t, s)

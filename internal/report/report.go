@@ -264,9 +264,12 @@ func plain(name string) string { return name }
 
 func bold(name string) string { return "**" + name + "**" }
 
-// markdownText escapes text so Markdown shows it as written, even in a table cell.
+// markdownText escapes text so Markdown shows it as written, even in a table cell. GitHub
+// links mentions and issue references even when escaped, so an invisible word joiner follows
+// each @ and #, and the text can't notify anyone from the failure comment.
 func markdownText(s string) string {
-	return markdownSpecial.ReplaceAllString(s, `\$0`)
+	s = markdownSpecial.ReplaceAllString(s, `\$0`)
+	return strings.NewReplacer("@", "@⁠", "#", "#⁠").Replace(s)
 }
 
 var markdownSpecial = regexp.MustCompile("[\\\\`*_~\\[\\]<>|#]")
