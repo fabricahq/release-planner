@@ -32,7 +32,7 @@ When your agent prepares a release, its pull request adds the next file, such as
 
 ## The `release-planner` command
 
-Release Planner itself is a small command-line program for macOS and Linux. Your `config.yml` pins its version, and everyone uses exactly that version: your agent checks it before preparing a release, and your release workflow downloads that release and verifies its build attestation and checksums before running it.
+Release Planner itself is a small command-line program for macOS and Linux. Your `config.yml` pins its version, and everyone uses exactly that version: your agent checks it before preparing a release, and the [GitHub Actions workflow](https://docs.github.com/en/actions/concepts/workflows-and-actions/workflows) that publishes your releases downloads that version and verifies its build attestation and checksums before running it.
 
 The command does three jobs:
 
@@ -52,7 +52,7 @@ A release contains everything up to its **release commit**: the newest commit th
 
 ## Before you merge
 
-While the release pull request is open, the release workflow:
+While the release pull request is open, the GitHub Actions release workflow:
 
 1. validates the request: one notes file, a version newer than every existing release, and no changes other than release notes
 2. runs any [release checks](/customize/release-checks/) you set up on the release commit

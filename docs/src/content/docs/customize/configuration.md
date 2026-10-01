@@ -92,13 +92,13 @@ curl -fsSL https://raw.githubusercontent.com/fabricahq/release-planner/main/inst
 release-planner install
 ```
 
-One version pin covers everything: the workflow and the agent's instructions change together.
+One version pin covers everything: the GitHub Actions workflow and the agent's instructions change together.
 
 v0.5.0 changes what the release-assets workflow must output. If you use release assets, follow [Upgrade to v0.5.0](/customize/release-assets/#upgrade-to-v050) in the same pull request.
 
 ## Generated files
 
-`install` writes the workflow, the agent skill, and the **Releases** section of `AGENTS.md`. Don't edit them. Change the config and run `install` instead.
+`install` writes the GitHub Actions workflow, the agent skill, and the **Releases** section of `AGENTS.md`. Don't edit them. Change the config and run `install` instead.
 
 - `install` is safe to run any number of times. It updates files that are out of date and leaves everything else alone.
 - Your own text in `AGENTS.md` is never touched. Release Planner only changes the text between its `release-planner:begin` and `release-planner:end` markers.
