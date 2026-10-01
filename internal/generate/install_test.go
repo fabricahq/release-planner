@@ -945,18 +945,63 @@ func TestPullRequestsThatChangeCalledWorkflowsRunTheReleaseWorkflow(t *testing.T
 // The report shows the pre-publish workflow's own name, or its file name when it has none, or
 // one that GitHub would evaluate as an expression in the Release workflow.
 func TestReportNamesThePrePublishWorkflow(t *testing.T) {
-	for name, tc := range map[string]struct{ from, to, want string }{
-		"named":         {"", "", "Migrate the database"},
-		"unnamed":       {"name: Migrate the database\n", "", "migrate-database.yml"},
-		"quoted":        {"name: Migrate the database\n", "name: 'Migrate: the database'\n", "Migrate: the database"},
-		"an expression": {"name: Migrate the database\n", "name: Migrate ${{ github.ref }}\n", "migrate-database.yml"},
+	long := strings.Repeat("m", 101)
+	for name, tc := range map[string]struct{ to, want string }{
+		"named":          {"name: Migrate the database\n", "Migrate the database"},
+		"unnamed":        {"", "migrate-database.yml"},
+		"quoted":         {"name: 'Migrate: the database'\n", "Migrate: the database"},
+		"an apostrophe":  {"name: \"Migrate Josh's database\"\n", "Migrate Josh's database"},
+		"an expression":  {"name: Migrate ${{ github.ref }}\n", "migrate-database.yml"},
+		"multi-line":     {"name: |\n  Migrate\n  the database\n", "migrate-database.yml"},
+		"over-long":      {"name: " + long + "\n", "migrate-database.yml"},
+		"100 characters": {"name: " + long[:100] + "\n", long[:100]},
+		"a substitution": {"name: Migrate $(touch pwned)\n", "Migrate $(touch pwned)"},
+		"a backtick":     {"name: Migrate `id`\n", "Migrate `id`"},
+		"Markdown in it": {"name: Migrate ~~production~~ | *now*\n", "Migrate ~~production~~ | *now*"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			root := t.TempDir()
-			put(t, root, ".github/workflows/migrate-database.yml", strings.Replace(migrateWorkflow, tc.from, tc.to, 1))
+			put(t, root, ".github/workflows/migrate-database.yml", strings.Replace(migrateWorkflow, "name: Migrate the database\n", tc.to, 1))
 			jobs := installCombination(t, root, combinations["pre-publish"])
 			if got := jobs["report"].Steps[len(jobs["report"].Steps)-1].Env["PRE_PUBLISH"]; got != tc.want {
 				t.Fatalf("PRE_PUBLISH is %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// The name reaches report as one argument, as written: the generated step passes it through an
+// environment variable, so the shell never runs what it says.
+func TestReportStepPassesThePrePublishNameAsWritten(t *testing.T) {
+	for name, payload := range map[string]string{"substitution": "Migrate $(touch pwned)", "backticks": "Migrate `touch pwned`", "quotes": "Migrate Josh's \"database\"; touch pwned"} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			put(t, root, ".github/workflows/migrate-database.yml", strings.Replace(migrateWorkflow, "name: Migrate the database\n", "name: '"+strings.ReplaceAll(payload, "'", "''")+"'\n", 1))
+			step := installCombination(t, root, combinations["pre-publish"])["report"].Steps
+			report := step[len(step)-1]
+			if report.Env["PRE_PUBLISH"] != payload {
+				t.Fatalf("PRE_PUBLISH is %q", report.Env["PRE_PUBLISH"])
+			}
+			// Run the step with a release-planner that records its arguments.
+			bin, work := t.TempDir(), t.TempDir()
+			args := filepath.Join(bin, "args")
+			put(t, bin, "release-planner", "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done > "+args+"\n")
+			if err := os.Chmod(filepath.Join(bin, "release-planner"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command("bash", "-e", "-c", report.Run)
+			cmd.Dir = work
+			cmd.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "PRE_PUBLISH="+report.Env["PRE_PUBLISH"],
+				"NEEDS={}", "MERGED="+strings.Repeat("d", 40), "RUNNER_TEMP="+work)
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("%v: %s", err, out)
+			}
+			got, _ := os.ReadFile(args)
+			if !strings.Contains(string(got), "\n--pre-publish\n"+payload+"\n") {
+				t.Fatalf("report got:\n%s", got)
+			}
+			if _, err := os.Stat(filepath.Join(work, "pwned")); err == nil {
+				t.Fatal("the shell ran the name")
 			}
 		})
 	}

@@ -726,6 +726,10 @@ func TestRendersThePrePublishWorkflowsName(t *testing.T) {
 	// Markdown in a name stays text, and can't break the table.
 	s.PrePublish = "Migrate | *all* the [databases]"
 	contains(t, render(t, s).Status, "| ⏸️ | Migrate \\| \\*all\\* the \\[databases\\] | Runs when you merge |\n")
+	s.PrePublish = "Migrate ~~production~~"
+	blocks = render(t, s)
+	contains(t, blocks.Summary, "- First, **Migrate \\~\\~production\\~\\~** runs on the release commit.")
+	contains(t, blocks.Status, "| ⏸️ | Migrate \\~\\~production\\~\\~ | Runs when you merge |\n")
 
 	s.PrePublish = "migrate-database.yml"
 	blocks = render(t, s)

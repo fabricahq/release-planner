@@ -151,7 +151,7 @@ func markdownText(s string) string {
 	return markdownSpecial.ReplaceAllString(s, `\$0`)
 }
 
-var markdownSpecial = regexp.MustCompile("[\\\\`*_\\[\\]<>|#]")
+var markdownSpecial = regexp.MustCompile("[\\\\`*_~\\[\\]<>|#]")
 
 // PrePublishDocs explains what to do when the pre-publish workflow fails.
 const PrePublishDocs = "https://release-planner.fabricahq.com/customize/pre-publish/#if-it-fails"
