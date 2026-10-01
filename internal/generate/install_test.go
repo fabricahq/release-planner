@@ -789,3 +789,105 @@ func TestReleaseAppSettingsNeedBothOrNeither(t *testing.T) {
 		t.Fatalf("%v", check.Env)
 	}
 }
+
+// migrateWorkflow is a minimal pre-publish workflow whose jobs run in production.
+const migrateWorkflow = `name: Migrate
+on:
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        required: true
+      tag:
+        type: string
+        required: true
+      version:
+        type: string
+        required: true
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - run: make migrate
+  verify:
+    needs: migrate
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://example.com
+    steps:
+      - run: make verify-schema
+`
+
+// A pre-publish workflow takes the release's inputs, and every job runs in the configured
+// environment, which holds its credentials; it gets no secrets from the Release workflow.
+func TestPrePublishWorkflowRunsInItsEnvironment(t *testing.T) {
+	c, err := config.Parse([]byte("schema-version: 1\nversion: v0.2.0\npre-publish:\n  workflow: migrate.yml\n  environment: production\n"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	_, err = Install(root, c, false)
+	problemFor(t, err, ".github/workflows/migrate.yml", "missing; pre-publish.workflow")
+
+	put(t, root, ".github/workflows/migrate.yml", strings.Replace(migrateWorkflow, "      version:\n        type: string\n        required: true\n", "", 1))
+	_, err = Install(root, c, false)
+	problemFor(t, err, ".github/workflows/migrate.yml", "has no version input")
+
+	for name, tc := range map[string]struct{ from, to, want string }{
+		"no environment":    {"    environment: production\n    steps:\n      - uses", "    steps:\n      - uses", "job migrate doesn't run in the production environment; add environment: production to it"},
+		"other environment": {"      name: production\n", "      name: staging\n", "job verify doesn't run in the production environment"},
+		"expression": {"    environment: production\n    steps:\n      - uses", "    environment: ${{ inputs.environment }}\n    steps:\n      - uses",
+			"job migrate doesn't run in the production environment"},
+		"calls a workflow": {"  verify:\n    needs: migrate\n    runs-on: ubuntu-latest\n    environment:\n      name: production\n      url: https://example.com\n    steps:\n      - run: make verify-schema\n",
+			"  verify:\n    needs: migrate\n    uses: ./.github/workflows/verify.yml\n", "job verify calls another workflow"},
+		"required secret": {"      version:\n        type: string\n        required: true\n", "      version:\n        type: string\n        required: true\n    secrets:\n      DATABASE_URL:\n        required: true\n",
+			"requires secrets the Release workflow doesn't pass (DATABASE_URL); store them in the production environment instead"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if !strings.Contains(migrateWorkflow, tc.from) {
+				t.Fatalf("fixture lacks %q", tc.from)
+			}
+			put(t, root, ".github/workflows/migrate.yml", strings.Replace(migrateWorkflow, tc.from, tc.to, 1))
+			_, err := Install(root, c, false)
+			problemFor(t, err, ".github/workflows/migrate.yml", tc.want)
+		})
+	}
+
+	put(t, root, ".github/workflows/migrate.yml", migrateWorkflow)
+	if _, err := Install(root, c, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := Check(root, c); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A pull request that changes a workflow the Release workflow calls runs check, which finds
+// a called workflow that no longer fits.
+func TestPullRequestsThatChangeCalledWorkflowsRunTheReleaseWorkflow(t *testing.T) {
+	root := t.TempDir()
+	put(t, root, ".github/workflows/migrate.yml", migrateWorkflow)
+	installCombination(t, root, "release-checks:\n  workflow: release-checks.yml\nrelease-assets:\n  workflow: build-release.yml\npre-publish:\n  workflow: migrate.yml\n  environment: production\n")
+	var wf struct {
+		On struct {
+			PullRequest struct{ Paths []string } `yaml:"pull_request"`
+		}
+	}
+	if err := yaml.Unmarshal([]byte(read(t, root, WorkflowPath)), &wf); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"_releases/**", ".release-planner/**", ".github/workflows/release-planner.yml", ".github/workflows/release-checks.yml", ".github/workflows/build-release.yml", ".github/workflows/migrate.yml"}
+	if !slices.Equal(wf.On.PullRequest.Paths, want) {
+		t.Fatalf("%q", wf.On.PullRequest.Paths)
+	}
+}

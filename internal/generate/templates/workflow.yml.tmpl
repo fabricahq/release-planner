@@ -33,7 +33,7 @@ on:
     branches: [{{yamlString .Branch}}]
     paths: [{{yamlString (printf "%s/v*.md" .NotesDir)}}]
   pull_request:
-    paths: [{{yamlString (printf "%s/**" .NotesDir)}}, '.release-planner/**', '.github/workflows/release-planner.yml']
+    paths: [{{yamlString (printf "%s/**" .NotesDir)}}, '.release-planner/**', '.github/workflows/release-planner.yml'{{range .CalledWorkflows}}, {{yamlString (printf ".github/workflows/%s" .)}}{{end}}]
   # Retry a failed publication by naming the commit the release pull request merged as.
   workflow_dispatch:
     inputs:

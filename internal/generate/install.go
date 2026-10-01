@@ -267,13 +267,19 @@ func planInstall(root string, c config.Config, force bool) ([]write, Problems, e
 		{"release-checks.workflow", c.ReleaseChecks.Workflow, []string{"ref"}, nil},
 		// The Release workflow downloads the assets by the ID of the upload the workflow made.
 		{"release-assets.workflow", c.ReleaseAssets.Workflow, []string{"ref", "tag", "version"}, []string{"artifact-id"}},
+		{"pre-publish.workflow", c.PrePublish.Workflow, []string{"ref", "tag", "version"}, nil},
 	} {
 		if called.workflow == "" {
 			continue
 		}
-		if problem, err := callableWorkflow(root, called.key, called.workflow, called.inputs, called.outputs); err != nil {
+		problem, err := callableWorkflow(root, called.key, called.workflow, called.inputs, called.outputs)
+		if err == nil && problem == "" && called.workflow == c.PrePublish.Workflow {
+			problem, err = inEnvironment(root, called.workflow, c.PrePublish.Environment)
+		}
+		if err != nil {
 			return nil, nil, err
-		} else if problem != "" {
+		}
+		if problem != "" {
 			problems = append(problems, Problem{".github/workflows/" + called.workflow, problem})
 		}
 	}
@@ -337,6 +343,64 @@ func callableWorkflow(root, key, name string, want, outputs []string) (string, e
 	for _, output := range outputs {
 		if _, ok := declared[output]; !ok {
 			return fmt.Sprintf("has no %s output, but the Release workflow downloads the release assets by the ID of the upload this workflow makes; declare a workflow_call output named %s, set from the artifact-id output of the upload-artifact step: %s", output, output, ReleaseAssetsDocs), nil
+		}
+	}
+	return "", nil
+}
+
+// inEnvironment checks that every job of the pre-publish workflow runs in environment, named
+// literally, so only the branches the environment allows can use its credentials, and that
+// the workflow needs no secrets, since the Release workflow passes none.
+func inEnvironment(root, name, environment string) (string, error) {
+	data, _, err := readFile(root, ".github/workflows/"+name)
+	if err != nil {
+		return "", err
+	}
+	var wf struct {
+		On struct {
+			Call struct {
+				Secrets map[string]struct {
+					Required bool `yaml:"required"`
+				} `yaml:"secrets"`
+			} `yaml:"workflow_call"`
+		} `yaml:"on"`
+		Jobs yaml.Node `yaml:"jobs"`
+	}
+	if err := yaml.Unmarshal([]byte(data), &wf); err != nil {
+		return "", fmt.Errorf(".github/workflows/%s: %v", name, err)
+	}
+	var required []string
+	for secret, spec := range wf.On.Call.Secrets {
+		if spec.Required {
+			required = append(required, secret)
+		}
+	}
+	if len(required) > 0 {
+		slices.Sort(required)
+		return fmt.Sprintf("requires secrets the Release workflow doesn't pass (%s); store them in the %s environment instead", strings.Join(required, ", "), environment), nil
+	}
+	if wf.Jobs.Kind != yaml.MappingNode || len(wf.Jobs.Content) == 0 {
+		return "has no jobs", nil
+	}
+	// Jobs in the order the file lists them, so the message names the first one to fix.
+	for i := 0; i+1 < len(wf.Jobs.Content); i += 2 {
+		id := wf.Jobs.Content[i].Value
+		var job struct {
+			Uses        string `yaml:"uses"`
+			Environment any    `yaml:"environment"`
+		}
+		if err := wf.Jobs.Content[i+1].Decode(&job); err != nil {
+			return "", fmt.Errorf(".github/workflows/%s: job %s: %v", name, id, err)
+		}
+		if job.Uses != "" {
+			return fmt.Sprintf("job %s calls another workflow; every job of a pre-publish workflow must run in the %s environment itself", id, environment), nil
+		}
+		got := job.Environment
+		if m, ok := got.(map[string]any); ok {
+			got = m["name"]
+		}
+		if got != environment {
+			return fmt.Sprintf("job %s doesn't run in the %s environment; add environment: %s to it, so only your release branch can use the environment's credentials", id, environment, environment), nil
 		}
 	}
 	return "", nil

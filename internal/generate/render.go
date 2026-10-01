@@ -61,6 +61,9 @@ type data struct {
 	DownstreamDocs string
 	// ReleaseAppDocs explains how to set up the optional release GitHub App.
 	ReleaseAppDocs string
+	// CalledWorkflows are the repository's workflows the Release workflow calls, so a pull
+	// request that changes one runs check.
+	CalledWorkflows []string
 }
 
 func render(name string, c config.Config, marker string) string {
@@ -82,7 +85,13 @@ func render(name string, c config.Config, marker string) string {
 	if c.ReleaseAssets.Workflow != "" {
 		needs = append(needs, "release-assets", "attest")
 	}
-	d := data{Config: c, Module: Module, Actions: Actions, Marker: marker, ReleaseChecksRun: run.String(),
+	var called []string
+	for _, w := range []string{c.ReleaseChecks.Workflow, c.ReleaseAssets.Workflow, c.PrePublish.Workflow} {
+		if w != "" {
+			called = append(called, w)
+		}
+	}
+	d := data{Config: c, CalledWorkflows: called, Module: Module, Actions: Actions, Marker: marker, ReleaseChecksRun: run.String(),
 		PolicyPath: config.Policy, StyleText: style(c), IsRelease: IsRelease(c.Version), Install: InstallCommand(c.Version),
 		StartsBeforeOne: semver.MustParse(c.FirstVersion).Major == 0, Needs: strings.Join(needs, ", "),
 		DownstreamDocs: publish.DownstreamEnvironmentDocs, ReleaseAppDocs: publish.ReleaseAppDocs}
