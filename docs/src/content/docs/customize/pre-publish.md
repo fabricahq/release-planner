@@ -29,7 +29,9 @@ pre-publish:
   environment: production
 ```
 
-The release workflow calls it with three string inputs: `ref`, the full SHA of the release commit; `tag`, such as `v1.2.0`; and `version`, such as `1.2.0`. Your workflow must check out `ref`, and every job in it must run in the environment you named:
+`migrate-database.yml` and `production` are examples. Release Planner doesn't provide a migration workflow: the workflow is yours, named and written for your project, and it can do anything that must happen before a release is published. This page uses a database migration as its running example.
+
+The release workflow calls it with three string inputs: `ref`, the full SHA of the release commit; `tag`, such as `v1.2.0`; and `version`, such as `1.2.0`. Your workflow must check out `ref`, and every job in it must run in the environment you named. For example, a workflow that runs a project's own `make migrate` might look like this:
 
 ```yaml
 name: Migrate the database
