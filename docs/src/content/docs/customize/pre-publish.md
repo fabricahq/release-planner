@@ -21,7 +21,7 @@ It's optional, and it never runs on the release pull request: merging is the app
 
 ## Set it up
 
-Name your workflow and the environment its jobs run in, in `.release-planner/config.yml`, then run `release-planner install` and commit the result:
+Name your workflow and the [GitHub environment](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments) its jobs run in, in `.release-planner/config.yml`, then run `release-planner install` and commit the result. A GitHub environment, such as `production`, is a named set of deployment rules, variables, and secrets in your repository's settings. Here it holds whatever your workflow needs to reach the outside world, such as the variables naming a cloud role, and it limits that access to your release branch (see [Set up the environment](#set-up-the-environment)):
 
 ```yaml
 pre-publish:
