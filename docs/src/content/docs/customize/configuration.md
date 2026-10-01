@@ -60,6 +60,13 @@ release-checks:
 release-assets:
   workflow: build-release.yml
 
+# Your workflow to run after you merge and before the release is tagged, such as
+# one that applies database migrations, and the environment its jobs run in.
+# Default: none.
+pre-publish:
+  workflow: migrate.yml
+  environment: production
+
 # Workflows in other repositories to run after each new stable release.
 # Default: none.
 downstream:
@@ -72,7 +79,7 @@ release-notes-rules:
   no-long-heading: off
 ```
 
-For the details of the last five, see [Release notes style](/customize/release-notes-style/), [Release checks](/customize/release-checks/), [Release assets](/customize/release-assets/), [Downstream workflows](/customize/downstream/), and [Release notes rules](/customize/release-notes-style/#release-notes-rules).
+For the details of the last six, see [Release notes style](/customize/release-notes-style/), [Release checks](/customize/release-checks/), [Release assets](/customize/release-assets/), [Pre-publish workflow](/customize/pre-publish/), [Downstream workflows](/customize/downstream/), and [Release notes rules](/customize/release-notes-style/#release-notes-rules).
 
 ## Upgrade Release Planner
 
@@ -84,6 +91,8 @@ release-planner install
 ```
 
 One version pin covers everything: the workflow and the agent's instructions change together.
+
+v0.5.0 changes what the release-assets workflow must output. If you use release assets, follow [Upgrade to v0.5.0](/customize/release-assets/#upgrade-to-v050) in the same pull request.
 
 ## Generated files
 

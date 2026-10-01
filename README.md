@@ -75,6 +75,7 @@ Before you merge your first release, protect your release branch and create the 
 - [Make a release](https://release-planner.fabricahq.com/start-here/release/): review the notes, merge, and retry a failed release
 - [Release policy](https://release-planner.fabricahq.com/customize/policy/), [release notes style](https://release-planner.fabricahq.com/customize/release-notes-style/), and [release checks](https://release-planner.fabricahq.com/customize/release-checks/): customize how releases are prepared and checked
 - [Release assets](https://release-planner.fabricahq.com/customize/release-assets/) and [downstream workflows](https://release-planner.fabricahq.com/customize/downstream/): attach built files to each release, and start workflows in other repositories after it
+- [Pre-publish workflow](https://release-planner.fabricahq.com/customize/pre-publish/): run a workflow of yours, such as database migrations, after you merge and before the release is tagged
 - [Configuration](https://release-planner.fabricahq.com/customize/configuration/): every setting, the generated files, and upgrading
 - [For agents](https://release-planner.fabricahq.com/for-agents/): every command, file format, and check
 

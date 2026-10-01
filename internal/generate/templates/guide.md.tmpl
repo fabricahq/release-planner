@@ -98,6 +98,16 @@ Published notes can be corrected. Open a pull request that edits only `{{.NotesD
 ## Retry a failed release
 
 Read the release pull request's description, whose summary at the start names the failed job and whose status at the end has every job's result, the failed Release run, and any existing tag or release before acting. Prefer **Re-run failed jobs** on that run: it publishes the same release commit and files, and skips what already succeeded. For a manual retry, run the Release workflow on `{{.Branch}}` with **merged-commit** set to the full SHA of the commit the release pull request merged as; never another commit. Published tags and assets never change, so fix problems in a new release. If the run failed before tagging, fix the cause in a normal pull request, then correct the untagged notes in a new release pull request, whose release commit then includes the fix, or withdraw the request by deleting its file.
+{{- if .PrePublish.Workflow}}
+
+If the `pre-publish` job failed, `{{.PrePublish.Workflow}}` stopped the release before it was tagged. Find where the cause is before you retry, and tell the maintainer:
+
+- Outside the repository, such as a database or a credential: once it's fixed, **Re-run failed jobs** runs `{{.PrePublish.Workflow}}` again, then publishes.
+- In `.github/workflows/{{.PrePublish.Workflow}}`: a re-run uses the run's original workflow files, so fix it in a normal pull request, then retry manually with **merged-commit**.
+- In the release commit, such as a failing migration: in the normal pull request that fixes the cause, also delete the release's notes file, which withdraws it. After it merges, prepare the release again from step 2; you can reuse the version, since it was never tagged. Never re-run the withdrawn release's old run.
+
+If a release waits for an earlier one, its description names the earlier release. Once that release is published or withdrawn, **Re-run failed jobs** on the waiting release's run.
+{{- end}}
 
 ## Release notes style
 

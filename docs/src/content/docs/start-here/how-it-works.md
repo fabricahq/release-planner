@@ -63,6 +63,6 @@ If anything fails there, nothing happens until it's fixed, and nothing has been 
 
 ## When you merge
 
-Merging the release pull request is the approval. The workflow then tags the release commit and publishes the notes as the GitHub release, with the files the pull request built, and updates the description with a link to the release. If the pull request's run can't be reused, for example because you merged before it finished, the workflow checks and builds the release commit again first.
+Merging the release pull request is the approval. The workflow then tags the release commit and publishes the notes as the GitHub release, with the files the pull request built, and updates the description with a link to the release. If the pull request's run can't be reused, for example because you merged before it finished, the workflow checks and builds the release commit again first. If you set up a [pre-publish workflow](/customize/pre-publish/), such as one that applies database migrations, it runs right before the tag, and if it fails, nothing is published.
 
 The tag is created only at the last step, so a version never exists without the notes you approved. If anything fails, the release status says what and how to retry, and a comment on the pull request mentions whoever merged it.

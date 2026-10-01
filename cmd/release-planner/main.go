@@ -693,7 +693,7 @@ func readPlan(file string) (plan.Plan, error) {
 }
 
 func cmdPublish(ctx context.Context, args []string, out io.Writer) error {
-	fs, dir := flags("publish", "publish --plan <file> --branch <name> [--built-plan <file>] [--assets <dir> [--signer-workflow <path>]] [--repository owner/name]")
+	fs, dir := flags("publish", "publish --plan <file> --branch <name> [--dir <checkout>] [--built-plan <file>] [--assets <dir> [--signer-workflow <path>]] [--repository owner/name]")
 	planFile := fs.String("plan", "", "release plan written by release-planner validate --ci --merged --out")
 	builtPlan := fs.String("built-plan", "", "release plan of the run that ran the release checks and built the assets, which must plan the same release")
 	branch := fs.String("branch", "", "release branch; the plan's merged commit must be a pull request merged into it")
