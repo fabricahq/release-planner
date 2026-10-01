@@ -21,7 +21,7 @@ It's optional, and it never runs on the release pull request: merging is the app
 
 ## Set it up
 
-List your workflow under `pre-publish` in `.release-planner/config.yml`, then run `release-planner install` and commit the result:
+List your workflows under `pre-publish` in `.release-planner/config.yml`, then run `release-planner install` and commit the result:
 
 ```yaml
 pre-publish:
@@ -30,7 +30,21 @@ pre-publish:
 
 `migrate-database.yml` is an example. Release Planner doesn't provide a migration workflow: the workflow is yours, named and written for your project, and it can do anything that must happen before a release is published. This page uses a database migration as its running example.
 
-The release workflow calls it with three string inputs: `ref`, the full SHA of the release commit; `tag`, such as `v1.2.0`; and `version`, such as `1.2.0`. Your workflow must check out `ref`, and every job in it must run in the same [GitHub environment](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments). A GitHub environment, such as `production`, is a named set of deployment rules, variables, and secrets in your repository's settings. Here it holds whatever your workflow needs to reach the outside world, such as the variables naming a cloud role, and it limits that access to your release branch (see [Set up the environment](#set-up-the-environment)). You name it once, on the workflow's jobs, because GitHub requires it there; Release Planner reads it from the workflow to check its settings. For example, a workflow that runs a project's own `make migrate` in `production` might look like this:
+Each workflow must:
+
+- **Accept three string inputs**, which the release workflow passes in:
+  - `ref`: the full SHA of the release commit
+  - `tag`: the release's tag, such as `v1.2.0`
+  - `version`: the version without the `v`, such as `1.2.0`
+- **Check out `ref`**, so it runs the code being released.
+- **Run every job in the same [GitHub environment](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments)**, named literally on each job.
+- **Not require secrets to be passed in.** The release workflow passes none, so keep them in the environment instead.
+
+A GitHub environment, such as `production`, is a named set of deployment rules, variables, and secrets in your repository's settings. Your workflow's environment holds what it needs to reach the outside world, such as the variables naming a cloud role. It also limits that access to your release branch; see [Set up the environment](#set-up-the-environment).
+
+You name the environment only in the workflow, because GitHub requires it on the jobs. Release Planner reads it from there to check the environment's settings.
+
+For example, this workflow runs a project's own `make migrate` in `production`:
 
 ```yaml
 name: Migrate the database
@@ -62,11 +76,13 @@ jobs:
       - run: make migrate
 ```
 
-`release-planner install` and `check` fail if the workflow doesn't declare the three inputs as strings, if its jobs don't all name the same environment literally, or if it requires secrets. If you move the workflow to another environment, run `install` again. The release status on each release pull request names the workflow by its `name:`, such as **Migrate the database**, so give it one that says what it does. Run `install` again after you rename it.
+`release-planner install` and `release-planner check` fail if a workflow is missing an input, doesn't name the same environment on every job, or requires secrets. Run `release-planner install` again after you move a workflow to another environment or rename it.
+
+The release status on each release pull request names each workflow by its `name:`, such as **Migrate the database**, so give each one a name that says what it does.
 
 ## Make it safe to run again, late, and twice at once
 
-Your workflow may run more than once for the same release: after a failure, on a retry, or after the release is already out. An older release's run can come after a newer release's, and two runs can overlap. So make sure your workflow is:
+Your workflow can end up running more than once for the same release: after a failure, on a retry, or after the release is already out. A run for an older release can also happen after one for a newer release, and two runs can overlap. So make sure your workflow is:
 
 - **Idempotent:** running it again, even after it stopped partway, gives the same result as running it once.
 - **Safe to run late:** an older release's run, coming after a newer release's, changes nothing that matters. Versioned migration tools, such as goose, skip migrations that are already applied.

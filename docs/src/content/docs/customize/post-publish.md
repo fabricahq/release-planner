@@ -20,7 +20,19 @@ An entry without `repository` is a workflow in this repository. An entry with `r
 
 ## A workflow in this repository
 
-The release workflow calls it with the same three string inputs as a [pre-publish workflow](/customize/pre-publish/): `ref`, the full SHA of the release commit; `tag`, such as `v1.2.0`; and `version`, such as `1.2.0`. Your workflow must check out `ref`, and every job in it must run in the same [GitHub environment](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments), which holds whatever it needs to reach the outside world. You name the environment once, on the workflow's jobs, because GitHub requires it there; Release Planner reads it from the workflow to check its settings. For example:
+It follows the same rules as a [pre-publish workflow](/customize/pre-publish/#set-it-up). It must:
+
+- **Accept three string inputs**, which the release workflow passes in:
+  - `ref`: the full SHA of the release commit
+  - `tag`: the release's tag, such as `v1.2.0`
+  - `version`: the version without the `v`, such as `1.2.0`
+- **Check out `ref`**, so it runs the code that was released.
+- **Run every job in the same [GitHub environment](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments)**, named literally on each job. The environment holds whatever the workflow needs to reach the outside world.
+- **Not require secrets to be passed in.** The release workflow passes none, so keep them in the environment instead.
+
+You name the environment only in the workflow, because GitHub requires it on the jobs. Release Planner reads it from there to check the environment's settings.
+
+For example, this workflow runs a project's own `make deploy` in `production`:
 
 ```yaml
 name: Deploy
@@ -54,11 +66,21 @@ jobs:
           VERSION: ${{ inputs.version }}
 ```
 
-The workflow gets read access to the repository and an OIDC token, and never your repository's secrets or a token that publishes releases. `release-planner install` and `check` fail if it doesn't declare the three inputs as strings, if its jobs don't all name the same environment literally, or if it requires secrets. The release status names it by its `name:`, such as **Deploy**.
+The workflow gets read access to the repository and an OIDC token. It never gets your repository's secrets or a token that publishes releases.
+
+`release-planner install` and `release-planner check` fail if a workflow is missing an input, doesn't name the same environment on every job, or requires secrets. The release status names each workflow by its `name:`, such as **Deploy**.
 
 ### Set up the environment
 
-Set up its environment the way the [pre-publish page describes](/customize/pre-publish/#set-up-the-environment): **Selected branches and tags**, with a branch rule for your release branch only, and **Required reviewers** off unless you want to approve each run. The release workflow warns on each release pull request if the environment is missing or lets anything but your release branch use it, and after you merge, it refuses to publish if the environment is missing, unrestricted, or doesn't let your release branch use it, so a release never publishes with a post-publish workflow that can't run.
+Set up its environment the way the [pre-publish page describes](/customize/pre-publish/#set-up-the-environment):
+
+- **Deployment branches and tags:** choose **Selected branches and tags**, with a branch rule for your release branch only.
+- **Required reviewers:** leave off, unless you want to approve each run.
+
+The release workflow checks the environment twice:
+
+- **On each release pull request,** it warns if the environment is missing or lets anything but your release branch use it.
+- **After you merge,** it refuses to publish if the environment is missing, unrestricted, or doesn't let your release branch use it. A release never publishes with a post-publish workflow that can't run.
 
 ## A workflow in another repository
 
