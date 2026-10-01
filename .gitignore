@@ -2,3 +2,4 @@ __pycache__/
 docs/node_modules/
 docs/dist/
 docs/.astro/
+.github/docs-preview/node_modules/

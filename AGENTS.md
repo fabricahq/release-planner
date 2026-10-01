@@ -8,6 +8,8 @@ Keep dependencies to the standard library and `go.yaml.in/yaml/v3`. The publish 
 
 Run `gofmt -l . && go vet ./... && go test ./...` before you push.
 
+The documentation preview workflow's scripts live in `.github/docs-preview/`. They publish untrusted pull request builds with a Cloudflare token, so read docs/README.md before you change them, and run `bun test` in that directory.
+
 The documentation site lives in `docs/`; see its README. When a command, config key, or generated file changes, update the page that describes it in the same pull request, and the README if its quick start or limits change.
 
 ## Releases
