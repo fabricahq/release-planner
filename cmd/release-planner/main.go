@@ -45,7 +45,7 @@ Prepare a release (agents):
 Run in the Release workflow:
   publish     Tag the release commit and publish the approved notes, or edit published notes
   report      Write the release status blocks of the release pull request's description
-  downstream  Run workflows in other repositories for a new release
+  dispatch    Start post-publish workflows in other repositories for a new release
 
 Other:
   version     Print this program's version
@@ -65,7 +65,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	commands := map[string]func(context.Context, []string, io.Writer) error{
 		"init": cmdInit, "install": cmdInstall, "check": cmdCheck, "uninstall": cmdUninstall,
 		"guide": cmdGuide, "inventory": cmdInventory, "validate": cmdValidate,
-		"publish": cmdPublish, "report": cmdReport, "downstream": cmdDownstream, "version": cmdVersion,
+		"publish": cmdPublish, "report": cmdReport, "dispatch": cmdDispatch, "version": cmdVersion,
 	}
 	cmd, ok := commands[args[0]]
 	if !ok {
@@ -549,12 +549,12 @@ func inWorkflow(ctx context.Context, out io.Writer, repo gitrepo.Repo, c config.
 	}
 	if gh != nil && !p.Empty() {
 		environment(ctx, gh, config.ReleaseEnvironment, c.Branch, publish.EnvironmentDocs, warn)
-		if p.Tag != "" && len(c.Downstream) > 0 {
-			environment(ctx, gh, config.DownstreamEnvironment, c.Branch, publish.DownstreamEnvironmentDocs, warn)
+		if p.Tag != "" && slices.ContainsFunc(c.PostPublish, func(h config.PostPublish) bool { return h.Repository != "" && runsFor(h, *p) }) {
+			environment(ctx, gh, config.DispatchEnvironment, c.Branch, publish.DispatchEnvironmentDocs, warn)
 		}
 	}
-	if gh != nil && p.Tag != "" && len(c.PrePublish) > 0 {
-		if err := beforePrePublish(ctx, repo, gh, c, *p, base, warn); err != nil {
+	if gh != nil && p.Tag != "" {
+		if err := beforeHooks(ctx, repo, gh, c, *p, base, warn); err != nil {
 			return err
 		}
 	}
@@ -840,23 +840,38 @@ func escapeProperty(s string) string {
 	return strings.NewReplacer("%", "%25", "\r", "%0D", "\n", "%0A", ":", "%3A", ",", "%2C").Replace(s)
 }
 
-// beforePrePublish checks what must hold before the pre-publish workflows run for a release.
-// Each one's environment must keep its credentials to the release branch, and every earlier
-// release must be published, so no earlier release's workflows can still run after this one's
-// on purpose: the previous release, and any later version below this one whose notes are on the
+// runsFor reports whether a post-publish workflow runs for the plan's release: every one does
+// for a stable release, and only those that opt in for a prerelease.
+func runsFor(h config.PostPublish, p plan.Plan) bool { return !p.Prerelease || h.Prereleases }
+
+// beforeHooks checks what must hold before the hook workflows run for a release. The
+// environment of each of this repository's hook workflows that runs for it must keep its
+// credentials to the release branch. With pre-publish workflows, every earlier release must
+// also be published, so no earlier release's workflows can still run after this one's on
+// purpose: the previous release, and any later version below this one whose notes are on the
 // release branch. On the pull request, at base, these are warnings, since they may change
 // before the merge; after the merge, against the release branch's current tip, they stop the
 // run, and Re-run failed jobs checks again.
-func beforePrePublish(ctx context.Context, repo gitrepo.Repo, gh *publish.GitHub, c config.Config, p plan.Plan, base string, warn func(string, ...any)) error {
+func beforeHooks(ctx context.Context, repo gitrepo.Repo, gh *publish.GitHub, c config.Config, p plan.Plan, base string, warn func(string, ...any)) error {
 	merged := base == ""
 	retry := ""
 	if merged {
 		retry = " Then use Re-run failed jobs on this run."
 	}
 	for _, h := range c.PrePublish {
-		if err := hookEnvironment(ctx, repo, gh, c.Branch, h.Workflow, merged, retry, warn); err != nil {
+		if err := hookEnvironment(ctx, repo, gh, c.Branch, h.Workflow, publish.PrePublishDocs, merged, retry, warn); err != nil {
 			return err
 		}
+	}
+	for _, h := range c.PostPublish {
+		if h.Repository == "" && runsFor(h, p) {
+			if err := hookEnvironment(ctx, repo, gh, c.Branch, h.Workflow, publish.PostPublishDocs, merged, retry, warn); err != nil {
+				return err
+			}
+		}
+	}
+	if len(c.PrePublish) == 0 {
+		return nil
 	}
 
 	tag, file, err := waitingFor(ctx, repo, gh, c, p, base)
@@ -887,7 +902,7 @@ func beforePrePublish(ctx context.Context, repo gitrepo.Repo, gh *publish.GitHub
 // the workflow that runs names, the one in this run's checkout; check, which ran before,
 // refuses one that moved since install. After the merge a problem stops the run; before it, it's
 // a warning.
-func hookEnvironment(ctx context.Context, repo gitrepo.Repo, gh *publish.GitHub, branch, workflow string, merged bool, retry string, warn func(string, ...any)) error {
+func hookEnvironment(ctx context.Context, repo gitrepo.Repo, gh *publish.GitHub, branch, workflow, docs string, merged bool, retry string, warn func(string, ...any)) error {
 	w, problem, err := config.ReadHook(repo.Dir, workflow)
 	switch {
 	case err == nil && problem != "":
@@ -911,7 +926,7 @@ func hookEnvironment(ctx context.Context, repo gitrepo.Repo, gh *publish.GitHub,
 		warn("Couldn't check the %s environment's settings: %v", name, err)
 		return nil
 	}
-	refusal, warnings := publish.PrePublishEnvironment(name, branch, workflow, env)
+	refusal, warnings := publish.HookEnvironment(name, branch, workflow, docs, env)
 	for _, w := range warnings {
 		warn("%s", w)
 	}

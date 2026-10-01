@@ -96,7 +96,7 @@ func ReadHook(root, workflow string) (HookWorkflow, string, error) {
 	switch e := environments[0]; {
 	case !environment.MatchString(e):
 		return w, fmt.Sprintf("%q isn't an environment name; use letters, digits, and . _ -", e), nil
-	case strings.EqualFold(e, ReleaseEnvironment) || strings.EqualFold(e, DownstreamEnvironment):
+	case strings.EqualFold(e, ReleaseEnvironment) || strings.EqualFold(e, DispatchEnvironment):
 		return w, fmt.Sprintf("%s is an environment Release Planner uses for its own credentials; use one of its own, such as production", e), nil
 	}
 	w.Environment = environments[0]

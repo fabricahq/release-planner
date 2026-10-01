@@ -23,6 +23,14 @@ func release() *plan.Plan {
 	return &plan.Plan{Tag: "v1.2.0", Version: "1.2.0", Commit: commit, Previous: "v1.1.0", File: "_releases/v1.2.0.md", BuildRun: 100}
 }
 
+// tap and bucket are post-publish workflows in other repositories, and deploy one in this
+// repository that also runs for prereleases.
+var (
+	tap    = Hook{Job: "post-publish-1", Name: "post-publish (o/tap:update.yml)", When: "post-publish", Workflow: "update.yml", Repository: "o/tap"}
+	bucket = Hook{Job: "post-publish-2", Name: "post-publish (o/bucket:update.yml)", When: "post-publish", Workflow: "update.yml", Repository: "o/bucket"}
+	deploy = Hook{Job: "post-publish-3", Name: "post-publish (deploy.yml)", When: "post-publish", Workflow: "deploy.yml", Title: "Deploy", Prereleases: true}
+)
+
 func results(r ...string) map[string]Job {
 	m := map[string]Job{}
 	for i := 0; i+1 < len(r); i += 2 {
@@ -156,20 +164,24 @@ Why v0.1.0? It's the first release, and the policy starts at v0.1.0.
 
 func TestRendersWhatMergingDoes(t *testing.T) {
 	s := status(release(), false, results("validate", "success", "release-checks", "success", "publish", "skipped"))
-	s.Downstream = []Target{{Repository: "o/tap", Workflow: "update.yml"}}
+	s.Hooks = []Hook{tap}
 	summary := render(t, s).Summary
 	contains(t, summary, "**[✏️ Edit the v1.2.0 release notes](https://github.com/o/r/edit/release-v1.2.0/_releases/v1.2.0.md)**\n\n",
 		"- The v1.2.0 GitHub release is published with these release notes.\n- Then o/tap `update.yml` runs.\n- This description updates",
 		"| `v1.2.0` | [`0123456`](https://github.com/o/r/commit/"+commit+") | [v1.1.0](https://github.com/o/r/releases/tag/v1.1.0) |\n")
 
-	s.Downstream = append(s.Downstream, Target{Repository: "o/bucket", Workflow: "update.yml"})
-	contains(t, render(t, s).Summary, "- Then these workflows run: o/tap `update.yml`, o/bucket `update.yml`.\n")
+	s.Hooks = append(s.Hooks, bucket, deploy)
+	contains(t, render(t, s).Summary, "- Then these run, in parallel: o/tap `update.yml`, o/bucket `update.yml`, **Deploy**.\n")
+	// Post-publish workflows run after the merge, so before it they have no rows.
+	lacks(t, render(t, s).Status, "update.yml", "Deploy")
 
-	// Prereleases start no downstream workflows.
+	// Prereleases run only the post-publish workflows that opt in.
 	s.Plan.Tag, s.Plan.Prerelease = "v1.2.0-rc.1", true
 	summary = render(t, s).Summary
-	contains(t, summary, "| `v1.2.0-rc.1` (prerelease) |")
-	lacks(t, summary, "Then")
+	contains(t, summary, "| `v1.2.0-rc.1` (prerelease) |", "- Then **Deploy** runs.\n")
+	lacks(t, summary, "o/tap")
+	s.Hooks = []Hook{tap}
+	lacks(t, render(t, s).Summary, "Then")
 
 	// A fork's branch is edited in the fork, and its checks wait for the merge.
 	s = status(release(), false, results("validate", "success", "publish", "skipped"))
@@ -188,10 +200,10 @@ func TestRendersWhatMergingDoes(t *testing.T) {
 func TestRendersAPublishedRelease(t *testing.T) {
 	p := release()
 	p.Reused, p.BuildRun, p.Merged, p.PullRequest = true, 77, "dddddddddddddddddddddddddddddddddddddddd", 7
-	s := status(p, true, results("validate", "success", "release-checks", "skipped", "release-assets", "skipped", "attest", "skipped", "publish", "success", "attest-release", "success", "downstream", "success"))
-	s.RunJobs = runJobs("200", "validate", "publish", "attest-release", "downstream (o/tap:update.yml)", "downstream (o/bucket:update.yml)", "report")
+	s := status(p, true, results("validate", "success", "release-checks", "skipped", "release-assets", "skipped", "attest", "skipped", "publish", "success", "attest-release", "success", "post-publish-1", "success", "post-publish-2", "success"))
+	s.RunJobs = runJobs("200", "validate", "publish", "attest-release", "post-publish (o/tap:update.yml)", "post-publish (o/bucket:update.yml)", "report")
 	s.BuildJobs = runJobs("77", "validate", "release-checks / test", "release-checks / lint", "release-assets / build", "attest", "report")
-	s.Downstream = []Target{{"o/tap", "update.yml", "success"}, {"o/bucket", "update.yml", "success"}}
+	s.Hooks = []Hook{tap, bucket}
 	s.BuildsAssets, s.Assets = true, []Asset{{"tool_linux_amd64.tar.gz", 3 << 20}, {"SHA256SUMS", 120}}
 	s.Archive = "https://github.com/o/r/actions/runs/77/artifacts/9"
 	blocks := render(t, s)
@@ -230,8 +242,8 @@ func TestRendersAPublishedRelease(t *testing.T) {
 	s.BuildJobs = nil
 	contains(t, render(t, s).Status, "| ♻️ | Build the release assets | [Reused from the pull request](https://github.com/o/r/actions/runs/77) |")
 
-	// Downstream jobs that never ran, such as for a prerelease, list nothing.
-	s.Jobs["downstream"] = Job{Result: "skipped"}
+	// Post-publish jobs that never ran, such as for a prerelease, list nothing.
+	s.Jobs["post-publish-1"], s.Jobs["post-publish-2"] = Job{Result: "skipped"}, Job{Result: "skipped"}
 	lacks(t, render(t, s).Status, "Run o/")
 }
 
@@ -331,13 +343,19 @@ func TestRendersFailures(t *testing.T) {
 	contains(t, render(t, s).Status, "[Download all (zip)]", "| `SHA256SUMS` | 120 B |")
 	lacks(t, render(t, s).Status, "releases/download")
 
-	// A downstream failure follows the published release.
-	s = status(release(), true, results("validate", "success", "publish", "success", "downstream", "failure"))
-	s.Downstream = []Target{{"o/tap", "update.yml", "success"}, {"o/bucket", "update.yml", "failure"}, {"o/other", "update.yml", ""}}
+	// A post-publish failure leaves the release published, and says how to retry.
+	s = status(release(), true, results("validate", "success", "publish", "success", "post-publish-1", "success", "post-publish-2", "failure", "post-publish-3", "success"))
+	s.Hooks = []Hook{tap, bucket, deploy}
 	blocks = render(t, s)
-	contains(t, blocks.Summary, "✅ Published [v1.2.0](https://github.com/o/r/releases/tag/v1.2.0) from `0123456`.\n\n❌ **The downstream job failed.**")
+	contains(t, blocks.Summary, "✅ Published [v1.2.0](https://github.com/o/r/releases/tag/v1.2.0) from `0123456`.\n\n❌ **The post-publish (o/bucket:update.yml) job failed.** See [the workflow run](https://github.com/o/r/actions/runs/100). Once the cause is fixed, use **Re-run failed jobs** on that run.")
 	contains(t, blocks.Status, "| ✅ | Publish | [Details](https://github.com/o/r/actions/runs/100) |\n| ✅ | Run o/tap `update.yml` |",
-		"| ❌ | Run o/bucket `update.yml` |", "| ❔ | Run o/other `update.yml` |")
+		"| ❌ | Run o/bucket `update.yml` |", "| ✅ | Deploy |")
+	contains(t, Failure(s), "The release's **post-publish (o/bucket:update.yml)** job failed")
+	// Re-run failed jobs runs only that one.
+	s.Jobs["post-publish-2"] = Job{Result: "success"}
+	blocks = render(t, s)
+	lacks(t, blocks.Summary, "❌")
+	contains(t, blocks.Status, "| ✅ | Run o/bucket `update.yml` |")
 
 	// Before the merge, a failure says how to fix it, and merging still waits.
 	blocks = render(t, status(release(), false, results("validate", "success", "release-checks", "failure", "publish", "skipped")))
@@ -565,7 +583,7 @@ func TestUpdateSkipsASupersededRun(t *testing.T) {
 }
 
 func TestFailureCommentMentionsWhoMerged(t *testing.T) {
-	s := status(release(), true, results("validate", "success", "publish", "failure", "downstream", "skipped"))
+	s := status(release(), true, results("validate", "success", "publish", "failure", "post-publish-1", "skipped"))
 	s.MergedBy = "mona"
 	want := "<!-- release-planner:failure run=100 attempt=1 job=publish -->\n@mona The release's **publish** job failed in [this workflow run](https://github.com/o/r/actions/runs/100). The pull request description has the details and how to retry.\n"
 	if got := Failure(s); got != want {
@@ -612,12 +630,13 @@ func TestNotifyCommentsOncePerRunAttemptAndJob(t *testing.T) {
 	if posted, err := Notify(ctx, gh, 7, s); !posted || err != nil || !strings.Contains(f.writes[1], "attempt=2 job=publish") {
 		t.Fatal(posted, err, f.writes)
 	}
-	s.Jobs["publish"], s.Jobs["downstream"] = Job{Result: "success"}, Job{Result: "failure"}
-	if posted, err := Notify(ctx, gh, 7, s); !posted || err != nil || !strings.Contains(f.writes[2], "attempt=2 job=downstream") {
+	s.Hooks = []Hook{tap}
+	s.Jobs["publish"], s.Jobs["post-publish-1"] = Job{Result: "success"}, Job{Result: "failure"}
+	if posted, err := Notify(ctx, gh, 7, s); !posted || err != nil || !strings.Contains(f.writes[2], "attempt=2 job=post-publish-1") {
 		t.Fatal(posted, err, f.writes)
 	}
 	// Only the latest failure comment counts: attempt 2's publish failure was reported before
-	// its downstream one, but the same failure again is news.
+	// its post-publish one, but the same failure again is news.
 	s.Jobs["publish"] = Job{Result: "failure"}
 	if posted, err := Notify(ctx, gh, 7, s); !posted || err != nil {
 		t.Fatal(posted, err)
@@ -625,7 +644,7 @@ func TestNotifyCommentsOncePerRunAttemptAndJob(t *testing.T) {
 
 	// Nothing failed, or the pull request is still open: no comment.
 	f.writes = nil
-	s.Jobs["publish"], s.Jobs["downstream"] = Job{Result: "success"}, Job{Result: "success"}
+	s.Jobs["publish"], s.Jobs["post-publish-1"] = Job{Result: "success"}, Job{Result: "success"}
 	if posted, err := Notify(ctx, gh, 7, s); posted || err != nil {
 		t.Fatal(posted, err)
 	}

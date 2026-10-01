@@ -515,11 +515,11 @@ func branchRule(pattern, branch string) bool {
 	return err == nil && matched
 }
 
-// Pages that explain how to set up the release and downstream environments.
+// Pages that explain how to set up the release and dispatch environments.
 const (
-	EnvironmentDocs           = "https://release-planner.fabricahq.com/start-here/set-up/#create-the-release-environment"
-	DownstreamEnvironmentDocs = "https://release-planner.fabricahq.com/customize/downstream/#set-up-the-downstream-environment"
-	ReleaseAppDocs            = "https://release-planner.fabricahq.com/start-here/set-up/#publish-with-a-release-github-app"
+	EnvironmentDocs         = "https://release-planner.fabricahq.com/start-here/set-up/#create-the-release-environment"
+	DispatchEnvironmentDocs = "https://release-planner.fabricahq.com/customize/post-publish/#set-up-the-dispatch-environment"
+	ReleaseAppDocs          = "https://release-planner.fabricahq.com/start-here/set-up/#publish-with-a-release-github-app"
 )
 
 // EnvironmentWarnings explains how an environment differs from the recommended setup, which
@@ -546,16 +546,18 @@ func EnvironmentWarnings(name, branch, docs string, env *Environment) []string {
 	return warnings
 }
 
-// PrePublishDocs explains how to set up the pre-publish workflow's environment.
-const PrePublishDocs = "https://release-planner.fabricahq.com/customize/pre-publish/#set-up-the-environment"
+// PrePublishDocs and PostPublishDocs explain how to set up a hook workflow's environment.
+const (
+	PrePublishDocs  = "https://release-planner.fabricahq.com/customize/pre-publish/#set-up-the-environment"
+	PostPublishDocs = "https://release-planner.fabricahq.com/customize/post-publish/#set-up-the-environment"
+)
 
-// PrePublishEnvironment checks the environment the pre-publish workflow's jobs run in, which
-// holds its credentials. refusal is why the workflow can't run safely, or can't run at all:
+// HookEnvironment checks the environment a hook workflow's jobs run in, which holds its
+// credentials, and docs explains how to set it up. refusal is why the workflow can't run safely, or can't run at all:
 // the environment is missing, which GitHub would fill in with no branch rule, lets any branch
 // use it, or doesn't let the release branch use it. warnings are the other ways it differs
 // from the recommended setup, a branch rule for the release branch and nothing else.
-func PrePublishEnvironment(name, branch, workflow string, env *Environment) (refusal string, warnings []string) {
-	docs := PrePublishDocs
+func HookEnvironment(name, branch, workflow, docs string, env *Environment) (refusal string, warnings []string) {
 	if env == nil {
 		return fmt.Sprintf("The %s environment doesn't exist, so %s can't run safely: GitHub would create it, with no branch rule, the first time a job names it. Create it with a branch rule for %s only: %s", name, workflow, branch, docs), nil
 	}

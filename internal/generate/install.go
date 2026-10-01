@@ -205,13 +205,23 @@ func planInstall(root string, c config.Config, force bool) ([]write, Problems, e
 	// The generated workflow names each hook workflow as it names itself, and checks the
 	// environment its jobs name.
 	hookProblems := map[string]string{}
-	c.PrePublish = slices.Clone(c.PrePublish)
-	for i, h := range c.PrePublish {
+	read := func(h *config.Hook) error {
 		w, problem, err := config.ReadHook(root, h.Workflow)
-		if err != nil {
+		h.Name, h.Environment, hookProblems[h.Workflow] = w.Name, w.Environment, problem
+		return err
+	}
+	c.PrePublish, c.PostPublish = slices.Clone(c.PrePublish), slices.Clone(c.PostPublish)
+	for i := range c.PrePublish {
+		if err := read(&c.PrePublish[i]); err != nil {
 			return nil, nil, err
 		}
-		c.PrePublish[i].Name, c.PrePublish[i].Environment, hookProblems[h.Workflow] = w.Name, w.Environment, problem
+	}
+	for i := range c.PostPublish {
+		if c.PostPublish[i].Repository == "" {
+			if err := read(&c.PostPublish[i].Hook); err != nil {
+				return nil, nil, err
+			}
+		}
 	}
 	var writes []write
 	var problems Problems
@@ -283,6 +293,11 @@ func planInstall(root string, c config.Config, force bool) ([]write, Problems, e
 	}
 	for i, h := range c.PrePublish {
 		called = append(called, calledWorkflow{fmt.Sprintf("pre-publish[%d].workflow", i), h.Workflow, []string{"ref", "tag", "version"}, nil, true})
+	}
+	for i, h := range c.PostPublish {
+		if h.Repository == "" {
+			called = append(called, calledWorkflow{fmt.Sprintf("post-publish[%d].workflow", i), h.Workflow, []string{"ref", "tag", "version"}, nil, true})
+		}
 	}
 	for _, called := range called {
 		if called.workflow == "" {

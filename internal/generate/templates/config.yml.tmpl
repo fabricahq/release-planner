@@ -44,10 +44,14 @@ first-version: {{.FirstVersion}}
 # pre-publish:
 #   - workflow: migrate-database.yml
 
-# Optional workflows in other repositories to run after each new stable release, with
-# inputs tag and version, such as one that updates a Homebrew formula. They run with a
-# GitHub App token from the downstream environment.
-# downstream:
+# Optional workflows to run after each new release publishes, in parallel, such as one that
+# deploys it or updates a Homebrew formula. A workflow in this repository gets the same inputs
+# as a pre-publish one, and its jobs name the GitHub environment that holds its credentials. A
+# workflow in another repository of the same owner is started with inputs tag and version,
+# with a GitHub App token from the dispatch environment. Prereleases are skipped unless an
+# entry sets prereleases: true. A failure leaves the release published.
+# post-publish:
+#   - workflow: deploy.yml
 #   - repository: your-org/homebrew-tap
 #     workflow: update-formula.yml
 

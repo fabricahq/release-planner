@@ -327,7 +327,7 @@ jobs:
 
   # Attest the published assets again, from the release branch. The attest job ran on the
   # pull request; this attestation exists only for files that were approved, verified, and
-  # published, so downstream consumers can require one signed on {{.Branch}}. This job runs no
+  # published, so post-publish workflows and other consumers can require one signed on {{.Branch}}. This job runs no
   # repository code.
   attest-release:
     needs: [validate, publish]
@@ -349,50 +349,64 @@ jobs:
         with:
           subject-path: '${{"{{"}} runner.temp {{"}}"}}/published/*'
 {{- end}}
-{{- if .Downstream}}
+{{- range .PostJobs}}
+{{- if .Repository}}
 
-  # After a new stable release, run the workflows that depend on it in other repositories,
-  # with a GitHub App token limited to them. Nothing here can change the release. One job
-  # per target, so Re-run failed jobs runs only the targets that failed.
-  downstream:
-    name: downstream (${{"{{"}} matrix.target {{"}}"}})
-    needs: [validate, publish{{if .ReleaseAssets.Workflow}}, attest-release{{end}}]
+  # After a new release publishes, start a post-publish workflow in another repository, with
+  # a GitHub App token limited to that repository. Nothing here can change the release, and a
+  # failure leaves it published.
+{{- else}}
+
+  # After a new release publishes, run a post-publish workflow on the release commit. It gets
+  # read access, an OIDC token, and no secrets, and a failure leaves the release published.
+  # Its jobs run in the GitHub environment {{.Environment}}, which holds its credentials.
+{{- end}}
+  {{.ID}}:
+    name: {{yamlString .Name}}
+    needs: [validate, publish{{if $.ReleaseAssets.Workflow}}, attest-release{{end}}]
     # !cancelled() stops GitHub from adding success(), which would skip this job whenever the
-    # build was reused and its jobs skipped.
-    if: "!cancelled() && needs.publish.result == 'success'{{if .ReleaseAssets.Workflow}} && needs.attest-release.result == 'success'{{end}} && needs.validate.outputs.tag != '' && !contains(needs.validate.outputs.version, '-')"
-    strategy:
-      fail-fast: false
-      matrix:
-        target: [{{range $i, $d := .Downstream}}{{if $i}}, {{end}}{{yamlString (printf "%s:%s" $d.Repository $d.Workflow)}}{{end}}]
+    # build was reused and its jobs skipped.{{if not .Prereleases}} It skips prereleases.{{end}}
+    if: "!cancelled() && needs.publish.result == 'success'{{if $.ReleaseAssets.Workflow}} && needs.attest-release.result == 'success'{{end}} && needs.validate.outputs.tag != ''{{if not .Prereleases}} && !contains(needs.validate.outputs.version, '-'){{end}}"
+{{- if .Repository}}
     runs-on: ubuntu-latest
-    environment: downstream
+    environment: dispatch
     permissions:
       contents: read
     steps:
-      - name: Check the downstream GitHub App settings
+      - name: Check the dispatch GitHub App settings
         env:
-          CLIENT_ID: ${{"{{"}} vars.DOWNSTREAM_APP_CLIENT_ID {{"}}"}}
-          HAS_KEY: ${{"{{"}} secrets.DOWNSTREAM_APP_PRIVATE_KEY != '' {{"}}"}}
+          CLIENT_ID: ${{"{{"}} vars.DISPATCH_APP_CLIENT_ID {{"}}"}}
+          HAS_KEY: ${{"{{"}} secrets.DISPATCH_APP_PRIVATE_KEY != '' {{"}}"}}
         run: |
           if [ -z "$CLIENT_ID" ] || [ "$HAS_KEY" != true ]; then
-            echo "::error title=Downstream::Set the DOWNSTREAM_APP_CLIENT_ID variable and the DOWNSTREAM_APP_PRIVATE_KEY secret in the downstream environment: {{.DownstreamDocs}}"
+            echo "::error title=Dispatch::Set the DISPATCH_APP_CLIENT_ID variable and the DISPATCH_APP_PRIVATE_KEY secret in the dispatch environment: {{$.DispatchDocs}}"
             exit 1
           fi
-      - uses: {{.Actions.CreateGitHubAppToken}}
+      - uses: {{$.Actions.CreateGitHubAppToken}}
         id: token
         with:
-          client-id: ${{"{{"}} vars.DOWNSTREAM_APP_CLIENT_ID {{"}}"}}
-          private-key: ${{"{{"}} secrets.DOWNSTREAM_APP_PRIVATE_KEY {{"}}"}}
-          owner: {{yamlString .DownstreamOwner}}
-          repositories: {{yamlString (join .DownstreamRepositories ",")}}
+          client-id: ${{"{{"}} vars.DISPATCH_APP_CLIENT_ID {{"}}"}}
+          private-key: ${{"{{"}} secrets.DISPATCH_APP_PRIVATE_KEY {{"}}"}}
+          owner: {{yamlString .Owner}}
+          repositories: {{yamlString .RepositoryName}}
           permission-actions: write
-{{- template "install" .}}
-      - name: Run the downstream workflow
+{{- template "install" $}}
+      - name: Start the workflow
         env:
           GITHUB_TOKEN: ${{"{{"}} steps.token.outputs.token {{"}}"}}
           TAG: ${{"{{"}} needs.validate.outputs.tag {{"}}"}}
-          TARGET: ${{"{{"}} matrix.target {{"}}"}}
-        run: release-planner downstream --tag "$TAG" --target "$TARGET"
+          TARGET: {{yamlString (printf "%s:%s" .Repository .Workflow)}}
+        run: release-planner dispatch --tag "$TAG" --target "$TARGET"{{if .Prereleases}} --prereleases{{end}}
+{{- else}}
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/{{.Workflow}}
+    with:
+      ref: ${{"{{"}} needs.validate.outputs.commit {{"}}"}}
+      tag: ${{"{{"}} needs.validate.outputs.tag {{"}}"}}
+      version: ${{"{{"}} needs.validate.outputs.version {{"}}"}}
+{{- end}}
 {{- end}}
 
   # Keep the summary at the start of the release pull request's description and the status at
@@ -400,12 +414,12 @@ jobs:
   # failure also gets a comment that mentions whoever merged, since editing a description
   # notifies no one.
   report:
-    needs: [{{.Needs}}{{range .PreJobs}}, {{.ID}}{{end}}, publish{{if .ReleaseAssets.Workflow}}, attest-release{{end}}{{if .Downstream}}, downstream{{end}}]
+    needs: [{{.Needs}}{{range .PreJobs}}, {{.ID}}{{end}}, publish{{if .ReleaseAssets.Workflow}}, attest-release{{end}}{{range .PostJobs}}, {{.ID}}{{end}}]
     if: always() && needs.validate.result != 'skipped'
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      actions: read # to download and link the build run's assets and link each job{{if .Downstream}} and read each downstream job's result{{end}}
+      actions: read # to download and link the build run's assets and link each job
       pull-requests: write # to edit the description's release status and comment on a failure
     steps:
 {{- template "install" .}}
@@ -440,4 +454,4 @@ jobs:
 {{- end}}
         run: |
           if [ -n "$PULL_REQUEST" ]; then target=(--pull-request "$PULL_REQUEST" --head-sha "$HEAD_SHA" --head-ref "$HEAD_REF" --head-repository "$HEAD_REPOSITORY"); else target=(--merged "$MERGED"); fi
-          release-planner report --needs "$NEEDS" --branch {{.Branch}} --plan "$RUNNER_TEMP/plan/release-plan.json"{{if .ReleaseAssets.Workflow}} --assets "$RUNNER_TEMP/release-assets"{{end}}{{if .HooksJSON}} --hooks "$HOOKS"{{end}}{{range .Downstream}} --downstream {{.Repository}}:{{.Workflow}}{{end}} "${target[@]}"
+          release-planner report --needs "$NEEDS" --branch {{.Branch}} --plan "$RUNNER_TEMP/plan/release-plan.json"{{if .ReleaseAssets.Workflow}} --assets "$RUNNER_TEMP/release-assets"{{end}}{{if .HooksJSON}} --hooks "$HOOKS"{{end}} "${target[@]}"

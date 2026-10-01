@@ -18,7 +18,7 @@ import (
 )
 
 func cmdReport(ctx context.Context, args []string, out io.Writer) error {
-	fs, _ := flags("report", "report --needs <json> --branch <name> (--pull-request <number> [--head-sha <sha>] [--head-ref <branch>] [--head-repository <owner/name>] | --merged <sha>) [--plan <file>] [--assets <dir>] [--hooks <json>] [--downstream <owner/name:workflow.yml>...]")
+	fs, _ := flags("report", "report --needs <json> --branch <name> (--pull-request <number> [--head-sha <sha>] [--head-ref <branch>] [--head-repository <owner/name>] | --merged <sha>) [--plan <file>] [--assets <dir>] [--hooks <json>]")
 	needs := fs.String("needs", "", "the Release workflow's needs context, as JSON")
 	branch := fs.String("branch", "", "release branch")
 	number := fs.String("pull-request", "", "the release pull request, in its own run")
@@ -30,8 +30,6 @@ func cmdReport(ctx context.Context, args []string, out io.Writer) error {
 	assetsDir := fs.String("assets", "", "directory of the built release assets, if any")
 	hooks := fs.String("hooks", "", "the workflows the Release workflow runs around the release, as the JSON list it generates")
 	repository := fs.String("repository", os.Getenv("GITHUB_REPOSITORY"), "GitHub repository, as owner/name")
-	var downstream targets
-	fs.Var(&downstream, "downstream", "a downstream workflow, as owner/name:workflow.yml; repeat for each")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -99,21 +97,6 @@ func cmdReport(ctx context.Context, args []string, out io.Writer) error {
 			}
 		}
 	}
-	s.Downstream = downstream
-	if r := s.Jobs["downstream"].Result; r == "success" || r == "failure" || r == "cancelled" {
-		// The needs context has one result for the whole matrix, so read each target's job.
-		for i, t := range s.Downstream {
-			if r == "success" {
-				s.Downstream[i].Result = r
-				continue
-			}
-			for _, j := range s.RunJobs {
-				if j.Name == t.Job() {
-					s.Downstream[i].Result = j.Conclusion
-				}
-			}
-		}
-	}
 	pr, _ := strconv.Atoi(*number)
 	if s.Merged && s.Plan != nil {
 		pr = s.Plan.PullRequest
@@ -161,8 +144,11 @@ func cmdReport(ctx context.Context, args []string, out io.Writer) error {
 	return nil
 }
 
-// targets collects repeated --target or --downstream flags.
-type targets []report.Target
+// targets collects repeated --target flags.
+type targets []target
+
+// target is a workflow in another repository, as owner/name:workflow.yml.
+type target struct{ Repository, Workflow string }
 
 func (t *targets) String() string { return "" }
 
@@ -171,15 +157,16 @@ func (t *targets) Set(v string) error {
 	if !ok || !gitrepo.ValidRepository(repository) || workflow == "" {
 		return fmt.Errorf("use owner/name:workflow.yml, not %q", v)
 	}
-	*t = append(*t, report.Target{Repository: repository, Workflow: workflow})
+	*t = append(*t, target{Repository: repository, Workflow: workflow})
 	return nil
 }
 
-func cmdDownstream(ctx context.Context, args []string, out io.Writer) error {
-	fs, _ := flags("downstream", "downstream --tag <tag> --target <owner/name:workflow.yml>...")
+func cmdDispatch(ctx context.Context, args []string, out io.Writer) error {
+	fs, _ := flags("dispatch", "dispatch --tag <tag> --target <owner/name:workflow.yml>... [--prereleases]")
 	tag := fs.String("tag", "", "the new release's tag")
 	var list targets
-	fs.Var(&list, "target", "a workflow to run, as owner/name:workflow.yml; repeat for each")
+	fs.Var(&list, "target", "a workflow to start, as owner/name:workflow.yml; repeat for each")
+	prereleases := fs.Bool("prereleases", false, "start the workflows for a prerelease too")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -188,26 +175,26 @@ func cmdDownstream(ctx context.Context, args []string, out io.Writer) error {
 		fs.Usage()
 		return fmt.Errorf("--tag must be a version tag, and at least one --target is required")
 	}
-	if version.IsPrerelease() {
-		fmt.Fprintf(out, "%s is a prerelease, so no downstream workflows run.\n", *tag)
+	if version.IsPrerelease() && !*prereleases {
+		fmt.Fprintf(out, "%s is a prerelease, so no post-publish workflows start.\n", *tag)
 		return nil
 	}
 	token := os.Getenv("GITHUB_TOKEN")
 	if token == "" {
-		return fmt.Errorf("set GITHUB_TOKEN to a token that can run workflows in the downstream repositories")
+		return fmt.Errorf("set GITHUB_TOKEN to a token that can run workflows in the target repositories")
 	}
 	inputs := map[string]string{"tag": *tag, "version": strings.TrimPrefix(*tag, "v")}
 	failed := 0
 	for _, t := range list {
 		if err := api(token, t.Repository).DispatchWorkflow(ctx, t.Workflow, inputs); err != nil {
 			failed++
-			fmt.Fprintf(out, "::error title=Downstream::%s\n", escapeData(err.Error()))
+			fmt.Fprintf(out, "::error title=Post-publish::%s\n", escapeData(err.Error()))
 			continue
 		}
-		fmt.Fprintf(out, "Ran %s in %s for %s.\n", t.Workflow, t.Repository, *tag)
+		fmt.Fprintf(out, "Started %s in %s for %s.\n", t.Workflow, t.Repository, *tag)
 	}
 	if failed > 0 {
-		return fmt.Errorf("%d of %d downstream workflows didn't start; %s is published either way", failed, len(list), *tag)
+		return fmt.Errorf("%d of %d post-publish workflows didn't start; %s is published either way", failed, len(list), *tag)
 	}
 	return nil
 }

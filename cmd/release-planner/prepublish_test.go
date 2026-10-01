@@ -276,3 +276,50 @@ func TestValidateChecksEachPrePublishEnvironment(t *testing.T) {
 		t.Fatalf("%+v %s", p, errOut)
 	}
 }
+
+// A post-publish workflow in this repository has its environment checked like a pre-publish
+// one, after the merge, but only when it runs for the release: prereleases skip it unless it
+// opts in. One in another repository needs the dispatch environment instead.
+func TestValidateChecksThePostPublishEnvironments(t *testing.T) {
+	for name, tc := range map[string]struct {
+		config, request, refuse, warn string
+	}{
+		"here":                  {"post-publish:\n  - workflow: deploy.yml\n", "v1.0.0", "The staging environment doesn't exist, so deploy.yml can't run safely", ""},
+		"here, prerelease":      {"post-publish:\n  - workflow: deploy.yml\n", "v1.0.0-rc.1", "", ""},
+		"here, opted in":        {"post-publish:\n  - workflow: deploy.yml\n    prereleases: true\n", "v1.0.0-rc.1", "The staging environment doesn't exist", ""},
+		"elsewhere":             {"post-publish:\n  - repository: fabricahq/tap\n    workflow: update.yml\n", "v1.0.0", "", "The dispatch environment doesn't exist"},
+		"elsewhere, prerelease": {"post-publish:\n  - repository: fabricahq/tap\n    workflow: update.yml\n", "v1.0.0-rc.1", "", ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			o := newRepoOrigin(t, tc.config, tc.request)
+			merged := o.merge("merge")
+			output := actionsFiles(t)
+			mergedAPI(t, o, merged, production(nil))
+			p, out, errOut := validateMerged(t, o.runCheckout(t, merged), merged)
+			if tc.refuse != "" {
+				if p.Tag != "" || !strings.Contains(errOut, tc.refuse) {
+					t.Fatalf("%+v %s %s", p, out, errOut)
+				}
+				return
+			}
+			if p.Tag != tc.request || strings.Contains(output("summary"), "dispatch environment") != (tc.warn != "") || !strings.Contains(output("summary"), tc.warn) {
+				t.Fatalf("%+v %s %s\n%s", p, out, errOut, output("summary"))
+			}
+		})
+	}
+}
+
+// newRepoOrigin is newOrigin with a deploy.yml in staging, whose pull request requests version.
+func newRepoOrigin(t *testing.T, config, version string) *origin {
+	t.Helper()
+	o := &origin{repo: newRepo(t)}
+	o.git("config", "uploadpack.allowReachableSHA1InWant", "true")
+	o.write(".release-planner/config.yml", "schema-version: 1\nversion: v0.1.0\nfirst-version: "+version+"\n"+config)
+	o.write(".github/workflows/deploy.yml", migrateWorkflow("staging"))
+	o.release = o.repo.commit("Adopt Release Planner (#1)")
+	o.git("checkout", "-q", "-b", "release")
+	o.write("_releases/"+version+".md", "Approved notes\n")
+	o.head = o.repo.commit("Release " + version)
+	o.git("checkout", "-q", "main")
+	return o
+}

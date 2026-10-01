@@ -51,18 +51,6 @@ type Asset struct {
 	Size int64
 }
 
-// Target is one downstream workflow, which its own downstream job runs.
-type Target struct {
-	Repository, Workflow string
-	// Result is the conclusion of the target's job, or "" when it's unknown.
-	Result string
-}
-
-// Job is the name of the target's job in the Release workflow's downstream matrix.
-func (t Target) Job() string { return "downstream (" + t.Repository + ":" + t.Workflow + ")" }
-
-func (t Target) label() string { return t.Repository + " `" + t.Workflow + "`" }
-
 // Status is everything the description's blocks describe.
 type Status struct {
 	// Server is the GitHub URL, such as https://github.com, and Repository the owner/name.
@@ -88,8 +76,6 @@ type Status struct {
 	// when it's unknown.
 	Archive  string
 	MergedBy string
-	// Downstream lists the downstream workflows, with their jobs' results.
-	Downstream []Target
 	// Hooks are the workflows the Release workflow runs around the release, each in its own job.
 	Hooks []Hook
 }
@@ -144,7 +130,6 @@ var jobs = []struct{ id, label string }{
 	{"attest", "Attest the release assets"},
 	{"publish", "Publish"},
 	{"attest-release", "Attest the published assets"},
-	{"downstream", "Run downstream workflows"},
 }
 
 var icons = map[string]string{"success": "✅", "failure": "❌", "cancelled": "⚪"}
@@ -364,16 +349,19 @@ func (s Status) summary() string {
 				files = " and the release assets"
 			}
 			line("- The %s GitHub release is published with these release notes%s.", p.Tag, files)
-			if len(s.Downstream) > 0 && !p.Prerelease {
-				var names []string
-				for _, t := range s.Downstream {
-					names = append(names, t.label())
+			// Post-publish workflows skip prereleases unless they opt in.
+			var names []string
+			for _, h := range s.hooks("post-publish") {
+				if !p.Prerelease || h.Prereleases {
+					names = append(names, h.mention())
 				}
-				if len(names) == 1 {
-					line("- Then %s runs.", names[0])
-				} else {
-					line("- Then these workflows run: %s.", strings.Join(names, ", "))
-				}
+			}
+			switch len(names) {
+			case 0:
+			case 1:
+				line("- Then %s runs.", names[0])
+			default:
+				line("- Then these run, in parallel: %s.", strings.Join(names, ", "))
 			}
 		}
 		for _, e := range p.Edits {
@@ -429,17 +417,6 @@ func (s Status) status() string {
 	for _, j := range s.order() {
 		result := s.Jobs[j.id].Result
 		switch {
-		case j.id == "downstream":
-			if icons[result] == "" {
-				continue
-			}
-			for _, t := range s.Downstream {
-				icon := icons[t.Result]
-				if icon == "" {
-					icon = "❔"
-				}
-				row(icon, "Run "+t.label(), s.details(s.RunJobs, t.Job(), s.RunURL))
-			}
 		case j.id == "publish" && !s.Merged && p != nil && !p.Empty(),
 			j.hook != nil && j.hook.When == "pre-publish" && !s.Merged && p != nil && p.Tag != "":
 			row("⏸️", j.label, "Runs when you merge")

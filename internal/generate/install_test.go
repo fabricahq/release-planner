@@ -502,17 +502,19 @@ jobs:
 
 // combinations are the configurations the generated workflow must handle, by name.
 var combinations = map[string]string{
-	"plain":             "",
-	"checks-script":     "release-checks:\n  go: '1.27.x'\n  run: go test ./...\n",
-	"checks-workflow":   "release-checks:\n  workflow: release-checks.yml\n",
-	"assets":            "release-assets:\n  workflow: build-release.yml\n",
-	"downstream":        "downstream:\n  - repository: fabricahq/homebrew-tap\n    workflow: update-code-rules.yml\n",
-	"all":               "release-checks:\n  workflow: release-checks.yml\nrelease-assets:\n  workflow: build-release.yml\ndownstream:\n  - repository: fabricahq/homebrew-tap\n    workflow: update-code-rules.yml\n  - repository: fabricahq/scoop-bucket\n    workflow: update.yml\n",
+	"plain":                 "",
+	"checks-script":         "release-checks:\n  go: '1.27.x'\n  run: go test ./...\n",
+	"checks-workflow":       "release-checks:\n  workflow: release-checks.yml\n",
+	"assets":                "release-assets:\n  workflow: build-release.yml\n",
+	"post-publish-dispatch": "post-publish:\n  - repository: fabricahq/homebrew-tap\n    workflow: update-code-rules.yml\n",
+	"post-publish-here":     "post-publish:\n  - workflow: deploy.yml\n",
+	"all": "release-checks:\n  workflow: release-checks.yml\nrelease-assets:\n  workflow: build-release.yml\npre-publish:\n  - workflow: migrate-database.yml\n" +
+		"post-publish:\n  - workflow: deploy.yml\n    prereleases: true\n  - repository: fabricahq/homebrew-tap\n    workflow: update-code-rules.yml\n  - repository: fabricahq/scoop-bucket\n    workflow: update.yml\n",
 	"script-and-assets": "release-checks:\n  run: make smoke\nrelease-assets:\n  workflow: build-release.yml\n",
 	"pre-publish":       "pre-publish:\n  - workflow: migrate-database.yml\n",
 	"two-pre-publish":   "pre-publish:\n  - workflow: migrate-database.yml\n  - workflow: warm-caches.yml\n",
 	"pre-publish-and-assets": "release-checks:\n  run: make smoke\nrelease-assets:\n  workflow: build-release.yml\npre-publish:\n  - workflow: migrate-database.yml\n" +
-		"downstream:\n  - repository: fabricahq/homebrew-tap\n    workflow: update-code-rules.yml\n",
+		"post-publish:\n  - repository: fabricahq/homebrew-tap\n    workflow: update-code-rules.yml\n",
 }
 
 type job struct {
@@ -570,6 +572,7 @@ func installCombination(t *testing.T, root, extra string) map[string]job {
 		put(t, root, ".github/workflows/migrate-database.yml", migrateWorkflow)
 	}
 	put(t, root, ".github/workflows/warm-caches.yml", strings.NewReplacer("Migrate the database", "Warm the caches", "production", "staging").Replace(migrateWorkflow))
+	put(t, root, ".github/workflows/deploy.yml", strings.NewReplacer("Migrate the database", "Deploy", "make migrate", "make deploy").Replace(migrateWorkflow))
 	if _, err := Install(root, c, false); err != nil {
 		t.Fatal(err)
 	}
@@ -588,7 +591,10 @@ func TestWorkflowCombinations(t *testing.T) {
 			jobs := installCombination(t, t.TempDir(), extra)
 			checks := strings.Contains(extra, "release-checks")
 			assets := strings.Contains(extra, "release-assets")
-			downstream := strings.Contains(extra, "downstream")
+			c, err := config.Parse([]byte("schema-version: 1\nversion: v0.4.0\n"+extra), "")
+			if err != nil {
+				t.Fatal(err)
+			}
 			prePublish := strings.Contains(extra, "pre-publish")
 			// Each pre-publish workflow runs in a job of its own, numbered in the config's order.
 			var pre []string
@@ -605,8 +611,9 @@ func TestWorkflowCombinations(t *testing.T) {
 			if assets {
 				want = append(want, "release-assets", "attest", "attest-release")
 			}
-			if downstream {
-				want = append(want, "downstream")
+			// Each post-publish workflow runs in a job of its own too.
+			for i := range c.PostPublish {
+				want = append(want, fmt.Sprintf("post-publish-%d", i+1))
 			}
 			var got []string
 			for id := range jobs {
@@ -623,7 +630,7 @@ func TestWorkflowCombinations(t *testing.T) {
 				if j.Permissions["contents"] == "write" && id != "publish" {
 					t.Errorf("%s can write contents", id)
 				}
-				if j.Permissions["id-token"] == "write" && id != "attest" && id != "attest-release" && !strings.HasPrefix(id, "pre-publish-") {
+				if j.Permissions["id-token"] == "write" && id != "attest" && id != "attest-release" && !strings.HasPrefix(id, "pre-publish-") && !(strings.HasPrefix(id, "post-publish-") && j.Uses != "") {
 					t.Errorf("%s can mint OIDC tokens", id)
 				}
 			}
@@ -666,12 +673,12 @@ func TestWorkflowCombinations(t *testing.T) {
 			}
 			// The report learns each hook job, with its workflow's own name.
 			step := jobs["report"].Steps[len(jobs["report"].Steps)-1]
-			if prePublish != strings.Contains(step.Run, ` --hooks "$HOOKS" `) {
+			if (prePublish || len(c.PostPublish) > 0) != strings.Contains(step.Run, ` --hooks "$HOOKS" `) {
 				t.Errorf("report runs %q", step.Run)
 			}
 			var hooks []map[string]any
 			if prePublish {
-				if err := json.Unmarshal([]byte(step.Env["HOOKS"]), &hooks); err != nil || len(hooks) != len(pre) ||
+				if err := json.Unmarshal([]byte(step.Env["HOOKS"]), &hooks); err != nil || len(hooks) != len(pre)+len(c.PostPublish) ||
 					!maps.Equal(hooks[0], map[string]any{"job": "pre-publish-1", "name": "pre-publish (migrate-database.yml)", "when": "pre-publish", "workflow": "migrate-database.yml", "title": "Migrate the database"}) {
 					t.Errorf("HOOKS %v: %v", step.Env["HOOKS"], err)
 				}
@@ -780,33 +787,47 @@ func TestWorkflowCombinations(t *testing.T) {
 					t.Errorf("attest-release: %+v", again)
 				}
 			}
-			if downstream {
-				d := jobs["downstream"]
-				if d.Environment != "downstream" || !strings.Contains(d.If, "!contains(needs.validate.outputs.version, '-')") || d.Permissions["contents"] != "read" ||
-					!strings.HasPrefix(d.Steps[1].Uses, "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1") ||
-					d.Steps[1].With["owner"] != "fabricahq" || d.Steps[1].With["permission-actions"] != "write" {
-					t.Errorf("downstream: %+v", d)
+			// Post-publish workflows run once the release is published, and with assets, once the
+			// published files carry the release branch's attestation. Each runs in its own job, so a
+			// retry runs only the ones that failed, and only those that opt in run for prereleases.
+			_ = json.Unmarshal([]byte(step.Env["HOOKS"]), &hooks)
+			for i, h := range c.PostPublish {
+				id := fmt.Sprintf("post-publish-%d", i+1)
+				d, name := jobs[id], "post-publish ("+h.Workflow+")"
+				if h.Repository != "" {
+					name = "post-publish (" + h.Repository + ":" + h.Workflow + ")"
 				}
-				// Downstream workflows start only once the published files carry the release branch's attestation.
-				if assets != (slices.Contains(d.Needs.([]any), "attest-release") && strings.Contains(d.If, "needs.attest-release.result == 'success'")) {
-					t.Errorf("downstream needs %v if %q", d.Needs, d.If)
+				wantNeeds := []any{"validate", "publish"}
+				if assets {
+					wantNeeds = append(wantNeeds, "attest-release")
 				}
-				// One job per target, named for it, so a retry runs only the targets that failed.
-				targets := []string{"fabricahq/homebrew-tap:update-code-rules.yml"}
-				if name == "all" {
-					targets = append(targets, "fabricahq/scoop-bucket:update.yml")
+				if d.Name != name || !slices.Equal(d.Needs.([]any), wantNeeds) || !strings.HasPrefix(d.If, "!cancelled() && needs.publish.result == 'success'") ||
+					assets != strings.Contains(d.If, "needs.attest-release.result == 'success'") ||
+					h.Prereleases == strings.Contains(d.If, "!contains(needs.validate.outputs.version, '-')") {
+					t.Errorf("%s: %+v", id, d)
 				}
-				if d.Name != "downstream (${{ matrix.target }})" || d.Strategy.FailFast == nil || *d.Strategy.FailFast || !slices.Equal(d.Strategy.Matrix["target"], targets) {
-					t.Errorf("downstream matrix: %q %+v", d.Name, d.Strategy)
+				if hook := hooks[len(pre)+i]; hook["job"] != id || hook["name"] != name || hook["when"] != "post-publish" || (h.Prereleases != (hook["prereleases"] == true)) {
+					t.Errorf("HOOKS has %v for %s", hook, id)
 				}
-				if last := d.Steps[len(d.Steps)-1]; last.Run != `release-planner downstream --tag "$TAG" --target "$TARGET"` {
-					t.Errorf("downstream runs %q", last.Run)
-				}
-				run := jobs["report"].Steps[len(jobs["report"].Steps)-1].Run
-				for _, target := range targets {
-					if !strings.Contains(run, "--downstream "+target) {
-						t.Errorf("report lacks --downstream %s: %q", target, run)
+				if h.Repository == "" {
+					if d.Uses != "./.github/workflows/"+h.Workflow || d.Environment != "" || d.Secrets != nil ||
+						!maps.Equal(d.Permissions, map[string]string{"contents": "read", "id-token": "write"}) ||
+						!maps.Equal(d.With, map[string]string{"ref": "${{ needs.validate.outputs.commit }}", "tag": "${{ needs.validate.outputs.tag }}", "version": "${{ needs.validate.outputs.version }}"}) {
+						t.Errorf("%s calls %+v", id, d)
 					}
+					continue
+				}
+				// A workflow in another repository starts with a GitHub App token limited to it.
+				_, repo, _ := strings.Cut(h.Repository, "/")
+				token := d.named(t, "token")
+				if d.Environment != "dispatch" || !maps.Equal(d.Permissions, map[string]string{"contents": "read"}) ||
+					!strings.HasPrefix(token.Uses, "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1") ||
+					token.With["client-id"] != "${{ vars.DISPATCH_APP_CLIENT_ID }}" || token.With["private-key"] != "${{ secrets.DISPATCH_APP_PRIVATE_KEY }}" ||
+					token.With["owner"] != "fabricahq" || token.With["repositories"] != repo || token.With["permission-actions"] != "write" {
+					t.Errorf("%s: %+v", id, d)
+				}
+				if last := d.Steps[len(d.Steps)-1]; last.Run != `release-planner dispatch --tag "$TAG" --target "$TARGET"` || last.Env["TARGET"] != h.Repository+":"+h.Workflow {
+					t.Errorf("%s runs %q with %v", id, last.Run, last.Env)
 				}
 			}
 			// A manual retry checks out the workflow's own commit, so check matches the Release
@@ -932,8 +953,8 @@ func TestPrePublishEnvironmentComesFromTheWorkflow(t *testing.T) {
 			"\"prod uction\" isn't an environment name; use letters, digits, and . _ -"},
 		"release": {"production", "Release",
 			"Release is an environment Release Planner uses for its own credentials; use one of its own, such as production"},
-		"downstream": {"production", "downstream",
-			"downstream is an environment Release Planner uses for its own credentials"},
+		"dispatch": {"production", "Dispatch",
+			"Dispatch is an environment Release Planner uses for its own credentials"},
 		"calls a workflow": {"  verify:\n    needs: migrate\n    runs-on: ubuntu-latest\n    environment:\n      name: production\n      url: https://example.com\n    steps:\n      - run: make verify-schema\n",
 			"  verify:\n    needs: migrate\n    uses: ./.github/workflows/verify.yml\n", "job verify calls another workflow"},
 		"required secret": {"      version:\n        type: string\n        required: true\n", "      version:\n        type: string\n        required: true\n    secrets:\n      DATABASE_URL:\n        required: true\n",
@@ -1055,5 +1076,34 @@ func TestReportStepPassesThePrePublishNameAsWritten(t *testing.T) {
 				t.Fatal("the shell ran the name")
 			}
 		})
+	}
+}
+
+// A post-publish workflow in this repository is checked like a pre-publish one: its jobs name
+// one environment, which isn't one of Release Planner's own, and it takes the release's inputs.
+// One in another repository isn't read, since it isn't here.
+func TestPostPublishEnvironmentComesFromTheWorkflow(t *testing.T) {
+	c, err := config.Parse([]byte("schema-version: 1\nversion: v0.2.0\npost-publish:\n  - workflow: deploy.yml\n  - repository: fabricahq/homebrew-tap\n    workflow: update.yml\n"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	_, err = Install(root, c, false)
+	problemFor(t, err, ".github/workflows/deploy.yml", "missing; post-publish[0].workflow")
+	for workflow, want := range map[string]string{
+		strings.Replace(migrateWorkflow, "    environment: production\n", "", 1):                              "job migrate runs in no environment",
+		strings.ReplaceAll(migrateWorkflow, "production", "dispatch"):                                         "dispatch is an environment Release Planner uses for its own credentials",
+		strings.Replace(migrateWorkflow, "      tag:\n        type: string\n        required: true\n", "", 1): "has no tag input",
+	} {
+		put(t, root, ".github/workflows/deploy.yml", workflow)
+		_, err = Install(root, c, false)
+		problemFor(t, err, ".github/workflows/deploy.yml", want)
+	}
+	put(t, root, ".github/workflows/deploy.yml", migrateWorkflow)
+	if _, err := Install(root, c, false); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(read(t, root, WorkflowPath), "# Its jobs run in the GitHub environment production, which holds its credentials.") {
+		t.Error("the generated workflow doesn't name the post-publish workflow's environment")
 	}
 }

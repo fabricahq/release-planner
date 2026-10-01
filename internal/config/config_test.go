@@ -101,14 +101,17 @@ func TestLoadReadsOnlyTheNamedStyleFile(t *testing.T) {
 	}
 }
 
-func TestParseReadsAssetsAndDownstream(t *testing.T) {
-	c, err := Parse([]byte("schema-version: 1\nversion: v0.2.0\nrelease-assets:\n  workflow: build-release.yml\ndownstream:\n  - repository: fabricahq/homebrew-tap\n    workflow: update-code-rules.yml\n  - repository: fabricahq/scoop-bucket\n    workflow: update.yml\n  - repository: fabricahq/homebrew-tap\n    workflow: update-other.yml\n"), "")
+func TestParseReadsAssetsAndPostPublish(t *testing.T) {
+	c, err := Parse([]byte("schema-version: 1\nversion: v0.2.0\nrelease-assets:\n  workflow: build-release.yml\npost-publish:\n  - workflow: deploy.yml\n    prereleases: true\n  - repository: fabricahq/homebrew-tap\n    workflow: update-code-rules.yml\n  - repository: fabricahq/scoop-bucket\n    workflow: update.yml\n"), "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.ReleaseAssets.Workflow != "build-release.yml" || len(c.Downstream) != 3 || c.DownstreamOwner() != "fabricahq" ||
-		strings.Join(c.DownstreamRepositories(), ",") != "homebrew-tap,scoop-bucket" {
+	if c.ReleaseAssets.Workflow != "build-release.yml" || len(c.PostPublish) != 3 || c.DispatchOwner() != "fabricahq" ||
+		c.PostPublish[0].Workflow != "deploy.yml" || !c.PostPublish[0].Prereleases || c.PostPublish[1].Repository != "fabricahq/homebrew-tap" || c.PostPublish[1].Prereleases {
 		t.Fatalf("%+v", c)
+	}
+	if c, err := Parse([]byte("schema-version: 1\nversion: v0.2.0\npost-publish:\n  - workflow: deploy.yml\n"), ""); err != nil || c.DispatchOwner() != "" {
+		t.Fatal(c, err)
 	}
 }
 
@@ -146,13 +149,20 @@ func TestParseRejectsInvalidSettings(t *testing.T) {
 		"assets self":       {"schema-version: 1\nversion: v0.2.0\nrelease-assets:\n  workflow: release-planner.yml\n", "release-assets.workflow: name a workflow file in .github/workflows other than release-planner.yml"},
 		"assets path":       {"schema-version: 1\nversion: v0.2.0\nrelease-assets:\n  workflow: .github/workflows/build.yml\n", "release-assets.workflow"},
 		"assets key":        {"schema-version: 1\nversion: v0.2.0\nrelease-assets:\n  run: make\n", "field run not found"},
-		"downstream repo":   {"schema-version: 1\nversion: v0.2.0\ndownstream:\n  - repository: homebrew-tap\n    workflow: update.yml\n", `downstream[0].repository: name the repository as owner/name, not "homebrew-tap"`},
-		"downstream owner":  {"schema-version: 1\nversion: v0.2.0\ndownstream:\n  - repository: o/tap\n    workflow: a.yml\n  - repository: p/tap\n    workflow: a.yml\n", "downstream[1].repository: every downstream repository must belong to o"},
-		"downstream file":   {"schema-version: 1\nversion: v0.2.0\ndownstream:\n  - repository: o/tap\n    workflow: update\n", "downstream[0].workflow"},
-		"downstream twice":  {"schema-version: 1\nversion: v0.2.0\ndownstream:\n  - repository: o/tap\n    workflow: a.yml\n  - repository: o/tap\n    workflow: a.yml\n", "listed twice"},
-		"downstream key":    {"schema-version: 1\nversion: v0.2.0\ndownstream:\n  - repository: o/tap\n    workflow: a.yml\n    ref: main\n", "field ref not found"},
-		"pre-publish self":  {"schema-version: 1\nversion: v0.2.0\npre-publish:\n  - workflow: release-planner.yml\n", "pre-publish[0].workflow: name a workflow file in .github/workflows other than release-planner.yml"},
-		"pre-publish path":  {"schema-version: 1\nversion: v0.2.0\npre-publish:\n  - workflow: ../migrate-database.yml\n", "pre-publish[0].workflow"},
+		"downstream": {"schema-version: 1\nversion: v0.2.0\ndownstream:\n  - repository: o/tap\n    workflow: a.yml\n",
+			"downstream: Release Planner v0.5.0 runs these as post-publish workflows; move each entry under post-publish: as it is, rename the downstream environment to dispatch, and its DOWNSTREAM_APP_CLIENT_ID variable and DOWNSTREAM_APP_PRIVATE_KEY secret to DISPATCH_APP_CLIENT_ID and DISPATCH_APP_PRIVATE_KEY"},
+		"post-publish repo":       {"schema-version: 1\nversion: v0.2.0\npost-publish:\n  - repository: homebrew-tap\n    workflow: update.yml\n", `post-publish[0].repository: name the repository as owner/name, not "homebrew-tap"`},
+		"post-publish owner":      {"schema-version: 1\nversion: v0.2.0\npost-publish:\n  - repository: o/tap\n    workflow: a.yml\n  - repository: p/tap\n    workflow: a.yml\n", "post-publish[1].repository: every repository a post-publish workflow is in must belong to o"},
+		"post-publish file":       {"schema-version: 1\nversion: v0.2.0\npost-publish:\n  - repository: o/tap\n    workflow: update\n", "post-publish[0].workflow: name a workflow file in o/tap's .github/workflows"},
+		"post-publish twice":      {"schema-version: 1\nversion: v0.2.0\npost-publish:\n  - repository: o/tap\n    workflow: a.yml\n  - repository: o/tap\n    workflow: a.yml\n", "post-publish[1]: o/tap:a.yml is listed twice"},
+		"post-publish here twice": {"schema-version: 1\nversion: v0.2.0\npost-publish:\n  - workflow: deploy.yml\n  - workflow: deploy.yml\n", "post-publish[1]: deploy.yml is listed twice"},
+		"post-publish self":       {"schema-version: 1\nversion: v0.2.0\npost-publish:\n  - workflow: release-planner.yml\n", "post-publish[0].workflow: name a workflow file in .github/workflows other than release-planner.yml"},
+		"post-publish also pre": {"schema-version: 1\nversion: v0.2.0\npre-publish:\n  - workflow: migrate.yml\npost-publish:\n  - workflow: migrate.yml\n",
+			"post-publish[0].workflow: migrate.yml already runs in the release as another kind of workflow; use a workflow of its own"},
+		"post-publish key":        {"schema-version: 1\nversion: v0.2.0\npost-publish:\n  - repository: o/tap\n    workflow: a.yml\n    ref: main\n", "field ref not found"},
+		"pre-publish prereleases": {"schema-version: 1\nversion: v0.2.0\npre-publish:\n  - workflow: migrate.yml\n    prereleases: true\n", "field prereleases not found"},
+		"pre-publish self":        {"schema-version: 1\nversion: v0.2.0\npre-publish:\n  - workflow: release-planner.yml\n", "pre-publish[0].workflow: name a workflow file in .github/workflows other than release-planner.yml"},
+		"pre-publish path":        {"schema-version: 1\nversion: v0.2.0\npre-publish:\n  - workflow: ../migrate-database.yml\n", "pre-publish[0].workflow"},
 		"pre-publish is the build": {"schema-version: 1\nversion: v0.2.0\nrelease-assets:\n  workflow: build.yml\npre-publish:\n  - workflow: build.yml\n",
 			"pre-publish[0].workflow: build.yml is also the release-assets workflow; use a workflow of its own"},
 		"pre-publish is the checks": {"schema-version: 1\nversion: v0.2.0\nrelease-checks:\n  workflow: ci.yml\npre-publish:\n  - workflow: ci.yml\n",
