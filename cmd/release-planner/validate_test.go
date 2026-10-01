@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -295,7 +296,9 @@ func TestValidateAfterMergeRefusesAWithdrawnRequest(t *testing.T) {
 			o.write("_releases/v1.0.0.md", "Notes with the fix\n")
 			o.repo.commit("Release v1.0.0 (#5)")
 		}, "so v1.0.0 was withdrawn or requested again"},
-		"deleted and added back on a side branch": {func(o *origin) {
+		// A pull request whose changes to the notes cancel out requests nothing, so the
+		// request stands, at the same release commit, with the same notes.
+		"deleted and added back on one side branch": {func(o *origin) {
 			o.git("checkout", "-q", "-b", "side")
 			o.git("rm", "-q", "_releases/v1.0.0.md")
 			o.repo.commit("Withdraw v1.0.0")
@@ -303,7 +306,46 @@ func TestValidateAfterMergeRefusesAWithdrawnRequest(t *testing.T) {
 			o.repo.commit("Request v1.0.0 again")
 			o.git("checkout", "-q", "main")
 			o.git("merge", "-q", "--no-ff", "side", "-m", "Merge pull request #6 from fabricahq/side")
+		}, ""},
+		// Two pull requests withdraw it, then request it again, at a newer release commit.
+		"deleted, then added back": {func(o *origin) {
+			o.git("rm", "-q", "_releases/v1.0.0.md")
+			o.repo.commit("Withdraw v1.0.0 (#6)")
+			o.write("_releases/v1.0.0.md", "Approved notes\n")
+			o.repo.commit("Release v1.0.0 (#7)")
 		}, "so v1.0.0 was withdrawn or requested again"},
+		"deleted in an octopus merge": {func(o *origin) {
+			for _, b := range []string{"a", "b"} {
+				o.git("checkout", "-q", "-b", b, "main")
+				o.write(b+".go", "package "+b+"\n")
+				o.repo.commit("Change " + b)
+			}
+			o.git("checkout", "-q", "main")
+			o.git("merge", "-q", "--no-ff", "--no-commit", "a", "b")
+			o.git("rm", "-q", "_releases/v1.0.0.md")
+			o.repo.commit("Merge branches a and b")
+		}, "so v1.0.0 was withdrawn or requested again"},
+		// A branch that started before the merge merges main in, dropping the notes, and main
+		// is fast-forwarded to it: main's history no longer runs through the approving merge.
+		"fast-forwarded to a merge that dropped the notes": {func(o *origin) {
+			o.git("checkout", "-q", "-b", "feature", o.release)
+			o.write("feature.go", "package feature\n")
+			o.repo.commit("Feature")
+			o.git("merge", "-q", "--no-ff", "--no-commit", "main")
+			o.git("rm", "-qf", "_releases/v1.0.0.md")
+			o.repo.commit("Merge main into feature")
+			o.git("checkout", "-q", "main")
+			o.git("merge", "-q", "--ff-only", "feature")
+		}, "main's history no longer runs through pull request #2's merge"},
+		// The same branch keeps the notes and merges back with a merge commit: nothing changed.
+		"an older branch merges main in, keeping the notes, then merges back": {func(o *origin) {
+			o.git("checkout", "-q", "-b", "feature", o.release)
+			o.write("feature.go", "package feature\n")
+			o.repo.commit("Feature")
+			o.git("merge", "-q", "--no-ff", "main", "-m", "Merge main into feature")
+			o.git("checkout", "-q", "main")
+			o.git("merge", "-q", "--no-ff", "feature", "-m", "Merge pull request #8 from fabricahq/feature")
+		}, ""},
 		"deleted in a merge commit": {func(o *origin) {
 			o.git("checkout", "-q", "-b", "fix")
 			o.write("fix.go", "package fix\n")
@@ -345,11 +387,11 @@ func TestValidateAfterMergeRefusesAWithdrawnRequest(t *testing.T) {
 				}
 				return
 			}
-			later := o.git("rev-parse", "--short", "main")
-			if name == "deleted and added back on a side branch" {
-				later = o.git("rev-parse", "--short", "side")
+			// The withdrawal names the main commit that made it.
+			if name == "withdrawn" && !strings.Contains(errOut, "_releases/v1.0.0.md changed on main after pull request #2 merged (in "+o.git("rev-parse", "--short", "main")+"), ") {
+				t.Fatal(errOut)
 			}
-			if p.Tag != "" || !strings.Contains(errOut, "_releases/v1.0.0.md changed on main after pull request #2 merged (in "+later+"), "+tc.want) {
+			if p.Tag != "" || !strings.Contains(errOut, tc.want) {
 				t.Fatalf("%+v\n%s %s", p, out, errOut)
 			}
 			if !strings.Contains(output("output"), "withdrawn=") {
@@ -379,6 +421,51 @@ func TestValidateAfterMergeRefusesAReplacedNotesEdit(t *testing.T) {
 	})
 	if _, _, errOut := validateMerged(t, o.runCheckout(t, edit), edit); !strings.Contains(errOut, "so this run doesn't replace the v1.0.0 notes; the newer change's run does") {
 		t.Fatal(errOut)
+	}
+}
+
+// publish applies the same check as validate, so both of Astra's reproductions hold through the
+// publish command: a fast-forward that dropped the notes refuses before any API write, and an
+// older branch merged back with the notes kept goes on to publish.
+func TestPublishChecksTheReleaseBranchWhateverItsMergeShape(t *testing.T) {
+	for name, tc := range map[string]struct {
+		keep bool
+		ff   bool
+	}{
+		"fast-forwarded to a merge that dropped the notes": {false, true},
+		"merged back, keeping the notes":                   {true, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			o := newOrigin(t, "")
+			merged := o.merge("merge")
+			actionsFiles(t)
+			mergedAPI(t, o, merged, nil)
+			file := filepath.Join(t.TempDir(), "plan.json")
+			if code, _, errOut := cli(t, "validate", "--dir", o.checkout(t), "--ci", "--merged", merged, "--out", file); code != 0 {
+				t.Fatal(errOut)
+			}
+			o.git("checkout", "-q", "-b", "feature", o.release)
+			o.write("feature.go", "package feature\n")
+			o.repo.commit("Feature")
+			o.git("merge", "-q", "--no-ff", "--no-commit", "main")
+			if !tc.keep {
+				o.git("rm", "-qf", "_releases/v1.0.0.md")
+			}
+			o.repo.commit("Merge main into feature")
+			o.git("checkout", "-q", "main")
+			if tc.ff {
+				o.git("merge", "-q", "--ff-only", "feature")
+			} else {
+				o.git("merge", "-q", "--no-ff", "feature", "-m", "Merge pull request #8 from fabricahq/feature")
+			}
+			api := newAPI(t, map[string]any{"GET /git/ref/heads/main": map[string]any{"object": map[string]string{"type": "commit", "sha": o.git("rev-parse", "main")}}})
+			code, _, errOut := cli(t, "publish", "--dir", o.runCheckout(t, merged), "--plan", file, "--built-plan", file, "--branch", "main")
+			passed := slices.Contains(api.requests, "GET /commits/"+merged+"/pulls")
+			refused := strings.Contains(errOut, "main's history no longer runs through pull request #2's merge")
+			if code != 1 || passed != tc.keep || refused == tc.keep {
+				t.Fatalf("%d %s %v", code, errOut, api.requests)
+			}
+		})
 	}
 }
 
