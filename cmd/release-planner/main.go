@@ -853,7 +853,24 @@ func beforePrePublish(ctx context.Context, repo gitrepo.Repo, gh *publish.GitHub
 	if merged {
 		retry = " Then use Re-run failed jobs on this run."
 	}
-	name, workflow := c.PrePublish.Environment, c.PrePublish.Workflow
+	// The environment is the one the workflow that runs names: the one in this run's checkout.
+	// check, which ran before, refuses one that moved since install.
+	workflow := c.PrePublish.Workflow
+	w, problem, err := config.ReadPrePublish(repo.Dir, workflow)
+	switch {
+	case err == nil && problem != "":
+		err = fmt.Errorf(".github/workflows/%s: %s", workflow, problem)
+	case err == nil && w.Environment == "":
+		err = fmt.Errorf(".github/workflows/%s is missing", workflow)
+	}
+	if err != nil {
+		if merged {
+			return fmt.Errorf("couldn't read the environment %s runs in: %v", workflow, err)
+		}
+		warn("Couldn't read the environment %s runs in: %v", workflow, err)
+		return nil
+	}
+	name := w.Environment
 	env, err := gh.Environment(ctx, name, c.Branch)
 	if err != nil {
 		if merged {

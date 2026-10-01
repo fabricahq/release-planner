@@ -507,8 +507,8 @@ var combinations = map[string]string{
 	"downstream":        "downstream:\n  - repository: fabricahq/homebrew-tap\n    workflow: update-code-rules.yml\n",
 	"all":               "release-checks:\n  workflow: release-checks.yml\nrelease-assets:\n  workflow: build-release.yml\ndownstream:\n  - repository: fabricahq/homebrew-tap\n    workflow: update-code-rules.yml\n  - repository: fabricahq/scoop-bucket\n    workflow: update.yml\n",
 	"script-and-assets": "release-checks:\n  run: make smoke\nrelease-assets:\n  workflow: build-release.yml\n",
-	"pre-publish":       "pre-publish:\n  workflow: migrate-database.yml\n  environment: production\n",
-	"pre-publish-and-assets": "release-checks:\n  run: make smoke\nrelease-assets:\n  workflow: build-release.yml\npre-publish:\n  workflow: migrate-database.yml\n  environment: production\n" +
+	"pre-publish":       "pre-publish:\n  workflow: migrate-database.yml\n",
+	"pre-publish-and-assets": "release-checks:\n  run: make smoke\nrelease-assets:\n  workflow: build-release.yml\npre-publish:\n  workflow: migrate-database.yml\n" +
 		"downstream:\n  - repository: fabricahq/homebrew-tap\n    workflow: update-code-rules.yml\n",
 }
 
@@ -878,10 +878,11 @@ jobs:
       - run: make verify-schema
 `
 
-// A pre-publish workflow takes the release's inputs, and every job runs in the configured
-// environment, which holds its credentials; it gets no secrets from the Release workflow.
-func TestPrePublishWorkflowRunsInItsEnvironment(t *testing.T) {
-	c, err := config.Parse([]byte("schema-version: 1\nversion: v0.2.0\npre-publish:\n  workflow: migrate-database.yml\n  environment: production\n"), "")
+// A pre-publish workflow takes the release's inputs and gets no secrets from the Release
+// workflow. Every job names the same GitHub environment literally, which holds its credentials;
+// Release Planner reads the environment from there.
+func TestPrePublishEnvironmentComesFromTheWorkflow(t *testing.T) {
+	c, err := config.Parse([]byte("schema-version: 1\nversion: v0.2.0\npre-publish:\n  workflow: migrate-database.yml\n"), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -893,11 +894,21 @@ func TestPrePublishWorkflowRunsInItsEnvironment(t *testing.T) {
 	_, err = Install(root, c, false)
 	problemFor(t, err, ".github/workflows/migrate-database.yml", "has no version input")
 
+	const migrate = "    environment: production\n    steps:\n      - uses"
 	for name, tc := range map[string]struct{ from, to, want string }{
-		"no environment":    {"    environment: production\n    steps:\n      - uses", "    steps:\n      - uses", "job migrate doesn't run in the production environment; add environment: production to it"},
-		"other environment": {"      name: production\n", "      name: staging\n", "job verify doesn't run in the production environment"},
-		"expression": {"    environment: production\n    steps:\n      - uses", "    environment: ${{ inputs.environment }}\n    steps:\n      - uses",
-			"job migrate doesn't run in the production environment"},
+		"a job without one": {migrate, "    steps:\n      - uses",
+			"job migrate runs in no environment; every job of a pre-publish workflow must name the same GitHub environment, such as environment: production"},
+		"two environments": {"      name: production\n", "      name: staging\n",
+			"jobs run in different environments, production and staging; every job of a pre-publish workflow must name the same one"},
+		"an expression": {migrate, "    environment: ${{ inputs.environment }}\n    steps:\n      - uses",
+			"job migrate names its environment with an expression; name it literally, such as environment: production"},
+		// Both jobs name it, so these rename it in both.
+		"not a name": {"production", "prod uction",
+			"\"prod uction\" isn't an environment name; use letters, digits, and . _ -"},
+		"release": {"production", "Release",
+			"Release is an environment Release Planner uses for its own credentials; use one of its own, such as production"},
+		"downstream": {"production", "downstream",
+			"downstream is an environment Release Planner uses for its own credentials"},
 		"calls a workflow": {"  verify:\n    needs: migrate\n    runs-on: ubuntu-latest\n    environment:\n      name: production\n      url: https://example.com\n    steps:\n      - run: make verify-schema\n",
 			"  verify:\n    needs: migrate\n    uses: ./.github/workflows/verify.yml\n", "job verify calls another workflow"},
 		"required secret": {"      version:\n        type: string\n        required: true\n", "      version:\n        type: string\n        required: true\n    secrets:\n      DATABASE_URL:\n        required: true\n",
@@ -907,7 +918,7 @@ func TestPrePublishWorkflowRunsInItsEnvironment(t *testing.T) {
 			if !strings.Contains(migrateWorkflow, tc.from) {
 				t.Fatalf("fixture lacks %q", tc.from)
 			}
-			put(t, root, ".github/workflows/migrate-database.yml", strings.Replace(migrateWorkflow, tc.from, tc.to, 1))
+			put(t, root, ".github/workflows/migrate-database.yml", strings.ReplaceAll(migrateWorkflow, tc.from, tc.to))
 			_, err := Install(root, c, false)
 			problemFor(t, err, ".github/workflows/migrate-database.yml", tc.want)
 		})
@@ -920,6 +931,20 @@ func TestPrePublishWorkflowRunsInItsEnvironment(t *testing.T) {
 	if err := Check(root, c); err != nil {
 		t.Fatal(err)
 	}
+	if wf := read(t, root, WorkflowPath); !strings.Contains(wf, "# Every job of the workflow runs in the production environment") {
+		t.Errorf("the generated workflow doesn't name the environment:\n%s", wf)
+	}
+
+	// Moving the workflow to another environment after install makes check fail until install
+	// runs again, so the generated workflow never describes an environment the jobs don't use.
+	put(t, root, ".github/workflows/migrate-database.yml", strings.ReplaceAll(migrateWorkflow, "production", "staging"))
+	problemFor(t, Check(root, c), WorkflowPath, "differs from what .release-planner/config.yml generates; run release-planner install")
+	if _, err := Install(root, c, false); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(read(t, root, WorkflowPath), "# Every job of the workflow runs in the staging environment") {
+		t.Error("install didn't pick up the new environment")
+	}
 }
 
 // A pull request that changes a workflow the Release workflow calls runs check, which finds
@@ -927,7 +952,7 @@ func TestPrePublishWorkflowRunsInItsEnvironment(t *testing.T) {
 func TestPullRequestsThatChangeCalledWorkflowsRunTheReleaseWorkflow(t *testing.T) {
 	root := t.TempDir()
 	put(t, root, ".github/workflows/migrate-database.yml", migrateWorkflow)
-	installCombination(t, root, "release-checks:\n  workflow: release-checks.yml\nrelease-assets:\n  workflow: build-release.yml\npre-publish:\n  workflow: migrate-database.yml\n  environment: production\n")
+	installCombination(t, root, "release-checks:\n  workflow: release-checks.yml\nrelease-assets:\n  workflow: build-release.yml\npre-publish:\n  workflow: migrate-database.yml\n")
 	var wf struct {
 		On struct {
 			PullRequest struct{ Paths []string } `yaml:"pull_request"`

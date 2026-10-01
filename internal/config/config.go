@@ -130,17 +130,16 @@ type ReleaseAssets struct {
 type PrePublish struct {
 	// Workflow names a workflow in .github/workflows that accepts workflow_call with string
 	// inputs ref, tag, and version, and checks out ref. It gets no secrets, only read access
-	// to the repository and an OIDC token.
+	// to the repository and an OIDC token. Its jobs name the GitHub environment that holds
+	// its credentials, which ReadPrePublish reads.
 	Workflow string `yaml:"workflow"`
-	// Environment is the deployment environment every job of Workflow runs in, which holds
-	// its credentials.
-	Environment string `yaml:"environment"`
-	// Name is the name: Workflow declares, which install reads, or "" when it declares none.
-	Name string `yaml:"-"`
+	// Name and Environment are what install reads from Workflow with ReadPrePublish.
+	Name        string `yaml:"-"`
+	Environment string `yaml:"-"`
 }
 
 // Enabled reports whether the repository has a pre-publish workflow.
-func (p PrePublish) Enabled() bool { return p.Workflow != "" || p.Environment != "" }
+func (p PrePublish) Enabled() bool { return p.Workflow != "" }
 
 // The environments Release Planner's own jobs use, which a pre-publish workflow can't share.
 const (
@@ -334,14 +333,6 @@ func (c Config) check() error {
 			add("pre-publish.workflow: %s is also the release-checks workflow; use a workflow of its own", w)
 		case w == c.ReleaseAssets.Workflow:
 			add("pre-publish.workflow: %s is also the release-assets workflow; use a workflow of its own", w)
-		}
-		switch e := p.Environment; {
-		case e == "":
-			add("pre-publish.environment: name the environment every job of %s runs in, such as production", p.Workflow)
-		case !environment.MatchString(e):
-			add("pre-publish.environment: %q isn't an environment name; use letters, digits, and . _ -", e)
-		case strings.EqualFold(e, ReleaseEnvironment) || strings.EqualFold(e, DownstreamEnvironment):
-			add("pre-publish.environment: %s is an environment Release Planner uses for its own credentials; name one of its own, such as production", e)
 		}
 	}
 	for i, d := range c.Downstream {

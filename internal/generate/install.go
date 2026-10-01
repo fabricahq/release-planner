@@ -9,7 +9,6 @@ import (
 	"regexp"
 	"slices"
 	"strings"
-	"unicode"
 
 	"github.com/fabricahq/release-planner/internal/config"
 	"go.yaml.in/yaml/v3"
@@ -203,8 +202,16 @@ func readFile(root, name string) (string, bool, error) {
 
 // planInstall decides every write without touching the disk.
 func planInstall(root string, c config.Config, force bool) ([]write, Problems, error) {
-	// The release status names the pre-publish workflow as the workflow names itself.
-	c.PrePublish.Name = workflowName(root, c.PrePublish.Workflow)
+	// The generated workflow names the pre-publish workflow as it names itself, and checks
+	// the environment its jobs name.
+	var prePublish string
+	if c.PrePublish.Enabled() {
+		w, problem, err := config.ReadPrePublish(root, c.PrePublish.Workflow)
+		if err != nil {
+			return nil, nil, err
+		}
+		c.PrePublish.Name, c.PrePublish.Environment, prePublish = w.Name, w.Environment, problem
+	}
 	var writes []write
 	var problems Problems
 	for _, w := range wholeFiles {
@@ -277,7 +284,7 @@ func planInstall(root string, c config.Config, force bool) ([]write, Problems, e
 		}
 		problem, err := callableWorkflow(root, called.key, called.workflow, called.inputs, called.outputs)
 		if err == nil && problem == "" && called.workflow == c.PrePublish.Workflow {
-			problem, err = inEnvironment(root, called.workflow, c.PrePublish.Environment)
+			problem = prePublish
 		}
 		if err != nil {
 			return nil, nil, err
@@ -346,88 +353,6 @@ func callableWorkflow(root, key, name string, want, outputs []string) (string, e
 	for _, output := range outputs {
 		if _, ok := declared[output]; !ok {
 			return fmt.Sprintf("has no %s output, but the Release workflow downloads the release assets by the ID of the upload this workflow makes; declare a workflow_call output named %s, set from the artifact-id output of the upload-artifact step: %s", output, output, ReleaseAssetsDocs), nil
-		}
-	}
-	return "", nil
-}
-
-// workflowName returns the name: a workflow in .github/workflows declares, or "" when it
-// declares none, can't be read, or has one GitHub would evaluate as an expression where the
-// Release workflow passes it to the report.
-func workflowName(root, name string) string {
-	if name == "" {
-		return ""
-	}
-	data, _, err := readFile(root, ".github/workflows/"+name)
-	if err != nil {
-		return ""
-	}
-	var wf struct {
-		Name string `yaml:"name"`
-	}
-	if yaml.Unmarshal([]byte(data), &wf) != nil {
-		return ""
-	}
-	n := strings.TrimSpace(wf.Name)
-	if strings.Contains(n, "${{") || strings.ContainsFunc(n, unicode.IsControl) || len(n) > 100 {
-		return ""
-	}
-	return n
-}
-
-// inEnvironment checks that every job of the pre-publish workflow runs in environment, named
-// literally, so only the branches the environment allows can use its credentials, and that
-// the workflow needs no secrets, since the Release workflow passes none.
-func inEnvironment(root, name, environment string) (string, error) {
-	data, _, err := readFile(root, ".github/workflows/"+name)
-	if err != nil {
-		return "", err
-	}
-	var wf struct {
-		On struct {
-			Call struct {
-				Secrets map[string]struct {
-					Required bool `yaml:"required"`
-				} `yaml:"secrets"`
-			} `yaml:"workflow_call"`
-		} `yaml:"on"`
-		Jobs yaml.Node `yaml:"jobs"`
-	}
-	if err := yaml.Unmarshal([]byte(data), &wf); err != nil {
-		return "", fmt.Errorf(".github/workflows/%s: %v", name, err)
-	}
-	var required []string
-	for secret, spec := range wf.On.Call.Secrets {
-		if spec.Required {
-			required = append(required, secret)
-		}
-	}
-	if len(required) > 0 {
-		slices.Sort(required)
-		return fmt.Sprintf("requires secrets the Release workflow doesn't pass (%s); store them in the %s environment instead", strings.Join(required, ", "), environment), nil
-	}
-	if wf.Jobs.Kind != yaml.MappingNode || len(wf.Jobs.Content) == 0 {
-		return "has no jobs", nil
-	}
-	// Jobs in the order the file lists them, so the message names the first one to fix.
-	for i := 0; i+1 < len(wf.Jobs.Content); i += 2 {
-		id := wf.Jobs.Content[i].Value
-		var job struct {
-			Uses        string `yaml:"uses"`
-			Environment any    `yaml:"environment"`
-		}
-		if err := wf.Jobs.Content[i+1].Decode(&job); err != nil {
-			return "", fmt.Errorf(".github/workflows/%s: job %s: %v", name, id, err)
-		}
-		if job.Uses != "" {
-			return fmt.Sprintf("job %s calls another workflow; every job of a pre-publish workflow must run in the %s environment itself", id, environment), nil
-		}
-		got := job.Environment
-		if m, ok := got.(map[string]any); ok {
-			got = m["name"]
-		}
-		if got != environment {
-			return fmt.Sprintf("job %s doesn't run in the %s environment; add environment: %s to it, so only your release branch can use the environment's credentials", id, environment, environment), nil
 		}
 	}
 	return "", nil

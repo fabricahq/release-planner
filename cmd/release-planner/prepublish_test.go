@@ -6,7 +6,48 @@ import (
 	"testing"
 )
 
-const prePublishConfig = "pre-publish:\n  workflow: migrate-database.yml\n  environment: production\n"
+const prePublishConfig = "pre-publish:\n  workflow: migrate-database.yml\n"
+
+// migrateWorkflow is a pre-publish workflow whose job runs in environment.
+func migrateWorkflow(environment string) string {
+	return `name: Migrate the database
+on:
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        required: true
+      tag:
+        type: string
+        required: true
+      version:
+        type: string
+        required: true
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    environment: ` + environment + `
+    steps:
+      - run: make migrate
+`
+}
+
+// validate reads the environment from the workflow in the run's checkout, the one that runs,
+// so a workflow moved to another environment after install is checked where it now runs.
+func TestValidateReadsTheEnvironmentFromTheWorkflowThatRuns(t *testing.T) {
+	o, merged := laterOrigin(t, prePublishConfig, nil, func(o *origin) {})
+	o.git("checkout", "-q", "-b", "move", merged)
+	o.write(".github/workflows/migrate-database.yml", migrateWorkflow("staging"))
+	moved := o.repo.commit("Move the migration to staging")
+	actionsFiles(t)
+	mergedAPI(t, o, merged, production(nil))
+	// A manual retry runs from a checkout of a later commit, here the one that moved it.
+	dir := o.checkout(t)
+	(&repo{t: t, dir: dir}).git("checkout", "-q", moved)
+	if p, _, errOut := validateMerged(t, dir, merged); p.Tag != "" || !strings.Contains(errOut, "The staging environment doesn't exist") {
+		t.Fatalf("%+v %s", p, errOut)
+	}
+}
 
 // production is the recommended pre-publish environment: only main can use it.
 func production(routes map[string]any) map[string]any {

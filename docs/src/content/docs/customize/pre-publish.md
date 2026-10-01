@@ -21,17 +21,16 @@ It's optional, and it never runs on the release pull request: merging is the app
 
 ## Set it up
 
-Name your workflow and the [GitHub environment](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments) its jobs run in, in `.release-planner/config.yml`, then run `release-planner install` and commit the result. A GitHub environment, such as `production`, is a named set of deployment rules, variables, and secrets in your repository's settings. Here it holds whatever your workflow needs to reach the outside world, such as the variables naming a cloud role, and it limits that access to your release branch (see [Set up the environment](#set-up-the-environment)):
+Name your workflow in `.release-planner/config.yml`, then run `release-planner install` and commit the result:
 
 ```yaml
 pre-publish:
   workflow: migrate-database.yml
-  environment: production
 ```
 
-`migrate-database.yml` and `production` are examples. Release Planner doesn't provide a migration workflow: the workflow is yours, named and written for your project, and it can do anything that must happen before a release is published. This page uses a database migration as its running example.
+`migrate-database.yml` is an example. Release Planner doesn't provide a migration workflow: the workflow is yours, named and written for your project, and it can do anything that must happen before a release is published. This page uses a database migration as its running example.
 
-The release workflow calls it with three string inputs: `ref`, the full SHA of the release commit; `tag`, such as `v1.2.0`; and `version`, such as `1.2.0`. Your workflow must check out `ref`, and every job in it must run in the environment you named. For example, a workflow that runs a project's own `make migrate` might look like this:
+The release workflow calls it with three string inputs: `ref`, the full SHA of the release commit; `tag`, such as `v1.2.0`; and `version`, such as `1.2.0`. Your workflow must check out `ref`, and every job in it must run in the same [GitHub environment](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments). A GitHub environment, such as `production`, is a named set of deployment rules, variables, and secrets in your repository's settings. Here it holds whatever your workflow needs to reach the outside world, such as the variables naming a cloud role, and it limits that access to your release branch (see [Set up the environment](#set-up-the-environment)). You name it once, on the workflow's jobs, because GitHub requires it there; Release Planner reads it from the workflow to check its settings. For example, a workflow that runs a project's own `make migrate` in `production` might look like this:
 
 ```yaml
 name: Migrate the database
@@ -63,7 +62,7 @@ jobs:
       - run: make migrate
 ```
 
-`release-planner install` and `check` fail if the workflow doesn't declare the three inputs as strings, if a job doesn't run in the environment, or if it requires secrets. The release status on each release pull request names the workflow by its `name:`, such as **Migrate the database**, so give it one that says what it does. Run `install` again after you rename it.
+`release-planner install` and `check` fail if the workflow doesn't declare the three inputs as strings, if its jobs don't all name the same environment literally, or if it requires secrets. If you move the workflow to another environment, run `install` again. The release status on each release pull request names the workflow by its `name:`, such as **Migrate the database**, so give it one that says what it does. Run `install` again after you rename it.
 
 ## Make it safe to run again, late, and twice at once
 

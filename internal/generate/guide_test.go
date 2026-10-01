@@ -67,7 +67,7 @@ func TestGuideExplainsAFailedPrePublishWorkflow(t *testing.T) {
 	if strings.Contains(guideFor(t, "", ""), "pre-publish") {
 		t.Error("the guide mentions pre-publish without one")
 	}
-	c, err := config.Parse([]byte("schema-version: 1\nversion: v0.2.0\npre-publish:\n  workflow: migrate-database.yml\n  environment: production\n"), "")
+	c, err := config.Parse([]byte("schema-version: 1\nversion: v0.2.0\npre-publish:\n  workflow: migrate-database.yml\n"), "")
 	if err != nil {
 		t.Fatal(err)
 	}

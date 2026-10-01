@@ -24,6 +24,9 @@ func newOrigin(t *testing.T, config string) *origin {
 	// GitHub serves any commit a ref reaches, including refs/pull/<n>/head.
 	o.git("config", "uploadpack.allowReachableSHA1InWant", "true")
 	o.write(".release-planner/config.yml", "schema-version: 1\nversion: v0.1.0\nfirst-version: v1.0.0\n"+config)
+	if strings.Contains(config, "pre-publish:") {
+		o.write(".github/workflows/migrate-database.yml", migrateWorkflow("production"))
+	}
 	o.release = o.repo.commit("Adopt Release Planner (#1)")
 	o.git("checkout", "-q", "-b", "release")
 	o.write("_releases/v1.0.0.md", "Draft notes\n")

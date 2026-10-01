@@ -61,11 +61,11 @@ release-assets:
   workflow: build-release.yml
 
 # Your workflow to run after you merge and before the release is tagged, such as
-# one that applies database migrations, and the environment its jobs run in.
+# one that applies database migrations. Its jobs name the GitHub environment
+# that holds its credentials, and Release Planner reads it from there.
 # Default: none.
 pre-publish:
   workflow: migrate-database.yml
-  environment: production
 
 # Workflows in other repositories to run after each new stable release.
 # Default: none.
