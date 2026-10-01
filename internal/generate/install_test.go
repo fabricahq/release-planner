@@ -507,6 +507,9 @@ var combinations = map[string]string{
 	"downstream":        "downstream:\n  - repository: fabricahq/homebrew-tap\n    workflow: update-code-rules.yml\n",
 	"all":               "release-checks:\n  workflow: release-checks.yml\nrelease-assets:\n  workflow: build-release.yml\ndownstream:\n  - repository: fabricahq/homebrew-tap\n    workflow: update-code-rules.yml\n  - repository: fabricahq/scoop-bucket\n    workflow: update.yml\n",
 	"script-and-assets": "release-checks:\n  run: make smoke\nrelease-assets:\n  workflow: build-release.yml\n",
+	"pre-publish":       "pre-publish:\n  workflow: migrate.yml\n  environment: production\n",
+	"pre-publish-and-assets": "release-checks:\n  run: make smoke\nrelease-assets:\n  workflow: build-release.yml\npre-publish:\n  workflow: migrate.yml\n  environment: production\n" +
+		"downstream:\n  - repository: fabricahq/homebrew-tap\n    workflow: update-code-rules.yml\n",
 }
 
 type job struct {
@@ -523,6 +526,7 @@ type job struct {
 	Permissions map[string]string `yaml:"permissions"`
 	Concurrency map[string]any    `yaml:"concurrency"`
 	Steps       []step            `yaml:"steps"`
+	With        map[string]string `yaml:"with"`
 }
 
 type step struct {
@@ -556,6 +560,7 @@ func installCombination(t *testing.T, root, extra string) map[string]job {
 	}
 	put(t, root, ".github/workflows/build-release.yml", buildWorkflow)
 	put(t, root, ".github/workflows/release-checks.yml", checksWorkflow)
+	put(t, root, ".github/workflows/migrate.yml", migrateWorkflow)
 	if _, err := Install(root, c, false); err != nil {
 		t.Fatal(err)
 	}
@@ -575,7 +580,11 @@ func TestWorkflowCombinations(t *testing.T) {
 			checks := strings.Contains(extra, "release-checks")
 			assets := strings.Contains(extra, "release-assets")
 			downstream := strings.Contains(extra, "downstream")
+			prePublish := strings.Contains(extra, "pre-publish")
 			want := []string{"validate", "publish", "report"}
+			if prePublish {
+				want = append(want, "pre-publish")
+			}
 			if checks {
 				want = append(want, "release-checks")
 			}
@@ -600,7 +609,7 @@ func TestWorkflowCombinations(t *testing.T) {
 				if j.Permissions["contents"] == "write" && id != "publish" {
 					t.Errorf("%s can write contents", id)
 				}
-				if j.Permissions["id-token"] == "write" && id != "attest" && id != "attest-release" {
+				if j.Permissions["id-token"] == "write" && id != "attest" && id != "attest-release" && id != "pre-publish" {
 					t.Errorf("%s can mint OIDC tokens", id)
 				}
 			}
@@ -609,13 +618,34 @@ func TestWorkflowCombinations(t *testing.T) {
 				t.Errorf("publish: %+v", publish)
 			}
 			wantNeeds := []any{"validate"}
-			for _, id := range []string{"release-checks", "release-assets", "attest"} {
+			for _, id := range []string{"release-checks", "release-assets", "attest", "pre-publish"} {
 				if _, ok := jobs[id]; ok {
 					wantNeeds = append(wantNeeds, id)
 				}
 			}
 			if !slices.Equal(publish.Needs.([]any), wantNeeds) {
 				t.Errorf("publish needs %v, want %v", publish.Needs, wantNeeds)
+			}
+			// A release publishes only after the pre-publish workflow succeeded, in this attempt
+			// or one that Re-run failed jobs reuses; a skipped or cancelled run blocks it.
+			guard := "(needs.validate.outputs.tag == '' || needs.pre-publish.result == 'success')"
+			if prePublish != strings.Contains(publish.If, guard) {
+				t.Errorf("publish runs if %q", publish.If)
+			}
+			if prePublish {
+				hook := jobs["pre-publish"]
+				if hook.Uses != "./.github/workflows/migrate.yml" || hook.Secrets != nil || hook.Environment != "" ||
+					!maps.Equal(hook.Permissions, map[string]string{"contents": "read", "id-token": "write"}) ||
+					!slices.Equal(hook.Needs.([]any), wantNeeds[:len(wantNeeds)-1]) ||
+					!maps.Equal(hook.With, map[string]string{"ref": "${{ needs.validate.outputs.commit }}", "tag": "${{ needs.validate.outputs.tag }}", "version": "${{ needs.validate.outputs.version }}"}) ||
+					!maps.Equal(hook.Concurrency, map[string]any{"group": "release-pre-publish", "cancel-in-progress": false, "queue": "max"}) {
+					t.Errorf("pre-publish: %+v", hook)
+				}
+				for _, want := range []string{"!cancelled()", "github.event_name != 'pull_request'", "needs.validate.outputs.publish == 'true'", "needs.validate.outputs.tag != ''", "!contains(needs.*.result, 'failure')", "!contains(needs.*.result, 'cancelled')"} {
+					if !strings.Contains(hook.If, want) {
+						t.Errorf("pre-publish runs if %q, without %q", hook.If, want)
+					}
+				}
 			}
 			// Publications wait their turn in order; without a queue, a third waiting run would
 			// cancel the second.

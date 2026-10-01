@@ -192,6 +192,34 @@ jobs:
           overwrite: false
           if-no-files-found: error
 {{end}}
+{{- if .PrePublish.Workflow}}
+  # After the merge, once the release is checked and built, and before it's tagged, run this
+  # repository's pre-publish workflow on the release commit. If it fails, nothing is published.
+  # Every job of the workflow runs in the {{.PrePublish.Environment}} environment, which holds its
+  # credentials; it gets read access, an OIDC token, and no secrets from this workflow. It
+  # must be safe to run again, after a newer release's, and alongside itself.
+  pre-publish:
+    needs: [{{.Needs}}]
+    # !cancelled() stops GitHub from adding success(), which would skip this job whenever the
+    # build was reused and its jobs skipped.
+    if: >-
+      !cancelled() && github.event_name != 'pull_request' && needs.validate.outputs.publish == 'true'
+      && needs.validate.outputs.tag != ''
+      && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
+    permissions:
+      contents: read
+      id-token: write
+    # Runs one at a time, in arrival order.
+    concurrency:
+      group: release-pre-publish
+      cancel-in-progress: false
+      queue: max
+    uses: ./.github/workflows/{{.PrePublish.Workflow}}
+    with:
+      ref: ${{"{{"}} needs.validate.outputs.commit {{"}}"}}
+      tag: ${{"{{"}} needs.validate.outputs.tag {{"}}"}}
+      version: ${{"{{"}} needs.validate.outputs.version {{"}}"}}
+{{end}}
   # The only job that can write, and only after the merge. It runs the pinned Release Planner
   # version and no repository code. It tags the release commit and publishes the approved
   # notes, or replaces the notes of published releases.
@@ -199,10 +227,13 @@ jobs:
   # It verifies each asset's attestation, stages the assets on a draft, and publishes last.
 {{- end}}
   publish:
-    needs: [{{.Needs}}]
+    needs: [{{.Needs}}{{if .PrePublish.Workflow}}, pre-publish{{end}}]
     if: >-
       !cancelled() && github.event_name != 'pull_request' && needs.validate.outputs.publish == 'true'
       && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
+{{- if .PrePublish.Workflow}}
+      && (needs.validate.outputs.tag == '' || needs.pre-publish.result == 'success')
+{{- end}}
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -357,7 +388,7 @@ jobs:
   # failure also gets a comment that mentions whoever merged, since editing a description
   # notifies no one.
   report:
-    needs: [{{.Needs}}, publish{{if .ReleaseAssets.Workflow}}, attest-release{{end}}{{if .Downstream}}, downstream{{end}}]
+    needs: [{{.Needs}}{{if .PrePublish.Workflow}}, pre-publish{{end}}, publish{{if .ReleaseAssets.Workflow}}, attest-release{{end}}{{if .Downstream}}, downstream{{end}}]
     if: always() && needs.validate.result != 'skipped'
     runs-on: ubuntu-latest
     permissions:
