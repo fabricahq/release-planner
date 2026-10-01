@@ -123,6 +123,7 @@ jobs:
     concurrency:
       group: release-publication
       cancel-in-progress: false
+      queue: max
     steps:
       # The release branch's history, so publish can check that no later commit withdrew or
       # replaced the approved notes. Nothing from it runs.

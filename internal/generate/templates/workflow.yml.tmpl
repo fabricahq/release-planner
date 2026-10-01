@@ -212,10 +212,12 @@ jobs:
 {{- if .ReleaseAssets.Workflow}}
       attestations: read # to verify the assets' build attestations
 {{- end}}
-    # Serialize publication so competing releases cannot race.
+    # Serialize publication so competing releases cannot race. Waiting runs queue in order;
+    # without a queue, a newer waiting run would cancel an older one.
     concurrency:
       group: release-publication
       cancel-in-progress: false
+      queue: max
     steps:
       # The release branch's history, to check that no later commit withdrew or replaced the
       # notes the merge approved. Nothing from it runs.

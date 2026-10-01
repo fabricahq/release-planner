@@ -520,6 +520,7 @@ type job struct {
 	Secrets     any               `yaml:"secrets"`
 	Environment string            `yaml:"environment"`
 	Permissions map[string]string `yaml:"permissions"`
+	Concurrency map[string]any    `yaml:"concurrency"`
 	Steps       []struct {
 		Uses string            `yaml:"uses"`
 		If   string            `yaml:"if"`
@@ -597,6 +598,11 @@ func TestWorkflowCombinations(t *testing.T) {
 			}
 			if !slices.Equal(publish.Needs.([]any), wantNeeds) {
 				t.Errorf("publish needs %v, want %v", publish.Needs, wantNeeds)
+			}
+			// Publications wait their turn in order; without a queue, a third waiting run would
+			// cancel the second.
+			if !maps.Equal(publish.Concurrency, map[string]any{"group": "release-publication", "cancel-in-progress": false, "queue": "max"}) {
+				t.Errorf("publish concurrency %v", publish.Concurrency)
 			}
 			// Publish reads the release branch's history to refuse a withdrawn request.
 			if checkout := publish.Steps[0]; !strings.HasPrefix(checkout.Uses, "actions/checkout@") || checkout.With["fetch-depth"] != "0" || checkout.With["persist-credentials"] != "false" {
