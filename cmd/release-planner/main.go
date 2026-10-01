@@ -760,25 +760,30 @@ func cmdPublish(ctx context.Context, args []string, out io.Writer) error {
 			}
 		}
 	}
-	// Re-run failed jobs reuses validate's plan, so check again that a later commit on the
-	// release branch hasn't withdrawn or replaced what the merge approved.
 	gh := api(token, *repository)
 	// A release GitHub App's token, when the release environment configures one, makes the writes.
 	gh.WriteToken = os.Getenv("RELEASE_TOKEN")
+	// Re-run failed jobs reuses validate's plan, so check that no later commit on the release
+	// branch has withdrawn or replaced what the merge approved: now, and again immediately
+	// before each write, since staging assets takes a while.
 	repo := gitrepo.Repo{Dir: *dir}
-	tip, err := branchTip(ctx, repo, gh, *branch, token)
-	if err != nil {
-		return err
-	}
-	if err := plan.StillApproved(ctx, repo, *branch, tip, p); err != nil {
-		if errors.As(err, new(plan.WithdrawnError)) {
-			if err := appendEnvFile("GITHUB_OUTPUT", "release=withdrawn\n"); err != nil {
-				return err
-			}
+	approved := func(ctx context.Context) error {
+		tip, err := branchTip(ctx, repo, gh, *branch, token)
+		if err != nil {
+			return err
 		}
-		return err
+		return plan.StillApproved(ctx, repo, *branch, tip, p)
 	}
-	res, err := publish.Publish(ctx, gh, p, *branch, assets)
+	err = approved(ctx)
+	var res publish.Result
+	if err == nil {
+		res, err = publish.Publish(ctx, gh, p, *branch, assets, approved)
+	}
+	if errors.As(err, new(plan.WithdrawnError)) {
+		if err := appendEnvFile("GITHUB_OUTPUT", "release=withdrawn\n"); err != nil {
+			return err
+		}
+	}
 	if err != nil {
 		return err
 	}

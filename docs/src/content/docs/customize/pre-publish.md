@@ -104,7 +104,7 @@ The release isn't tagged or published. The pull request description shows the fa
 - **In your workflow file**, such as `migrate.yml`: fix it in a pull request, then run the **Release** workflow manually on your release branch, with **merged-commit** set to the commit the release pull request merged as. **Re-run failed jobs** would use the workflow file from the original run.
 - **In the release commit**, such as a migration that fails: withdraw the release and release again. In the pull request that fixes the cause, also delete the release's notes file, such as `_releases/v1.2.0.md`. After it merges, ask your agent for a release. It can reuse the same version, since that version was never tagged, and the new release commit includes the fix.
 
-Once you've withdrawn a release, don't re-run its old run. It refuses to publish, but your workflow runs once more from the old commit first.
+Once you've withdrawn a release, don't re-run its old run. Publishing checks for the withdrawal immediately before each write, so it publishes nothing, but your workflow runs once more from the old commit first. If you merge the withdrawal while that run is publishing, it stops at its next write; anything it already made public stays.
 
 If publishing fails after your workflow succeeded, **Re-run failed jobs** runs only the publishing.
 

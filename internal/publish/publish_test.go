@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -214,7 +215,7 @@ func runWith(t *testing.T, f *fakeGitHub, p plan.Plan, assets []File) (Result, e
 		t.Cleanup(f.server.Close)
 	}
 	gh := &GitHub{BaseURL: f.server.URL, Token: "token", Repository: "fabricahq/example", HTTP: f.server.Client()}
-	return Publish(context.Background(), gh, p, "main", assets)
+	return Publish(context.Background(), gh, p, "main", assets, nil)
 }
 
 func minor() plan.Plan {
@@ -668,7 +669,7 @@ func TestWritesUseTheWriteToken(t *testing.T) {
 	f.server = httptest.NewServer(f)
 	t.Cleanup(f.server.Close)
 	gh := &GitHub{BaseURL: f.server.URL, Token: "token", WriteToken: "write", Repository: "fabricahq/example", HTTP: f.server.Client()}
-	if _, err := Publish(context.Background(), gh, minor(), "main", files(t, map[string]string{"a.tar.gz": "a"})); err != nil {
+	if _, err := Publish(context.Background(), gh, minor(), "main", files(t, map[string]string{"a.tar.gz": "a"}), nil); err != nil {
 		t.Fatal(err)
 	}
 	writes := 0
@@ -684,4 +685,54 @@ func TestWritesUseTheWriteToken(t *testing.T) {
 	if writes != 3 {
 		t.Fatalf("%d writes with the App token: %v", writes, f.auth)
 	}
+}
+
+// The approval is checked again immediately before each write that publishes or edits notes,
+// so a release withdrawn while its assets upload isn't published.
+func TestChecksTheApprovalBeforeEachWrite(t *testing.T) {
+	withdrawn := errors.New("withdrawn")
+	for name, tc := range map[string]struct {
+		plan    plan.Plan
+		assets  map[string]string
+		failAt  int
+		want    string
+		wantErr bool
+	}{
+		"assets":                    {minor(), map[string]string{"a.tar.gz": "a"}, 0, "check,draft v1.1.0,upload a.tar.gz,check,publish draft", false},
+		"withdrawn while uploading": {minor(), map[string]string{"a.tar.gz": "a"}, 2, "check,draft v1.1.0,upload a.tar.gz,check", true},
+		"withdrawn before writing":  {minor(), nil, 1, "check", true},
+		"release and edit":          {withEdit(minor()), nil, 0, "check,create v1.1.0,check,edit v1.0.0", false},
+		"edit replaced":             {withEdit(minor()), nil, 2, "check,create v1.1.0,check", true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := withPrevious()
+			f.server = httptest.NewServer(f)
+			t.Cleanup(f.server.Close)
+			gh := &GitHub{BaseURL: f.server.URL, Token: "token", Repository: "fabricahq/example", HTTP: f.server.Client()}
+			var assets []File
+			if tc.assets != nil {
+				assets = files(t, tc.assets)
+			}
+			checks := 0
+			approved := func(context.Context) error {
+				checks++
+				f.mu.Lock()
+				f.writes = append(f.writes, "check")
+				f.mu.Unlock()
+				if checks == tc.failAt {
+					return withdrawn
+				}
+				return nil
+			}
+			_, err := Publish(context.Background(), gh, tc.plan, "main", assets, approved)
+			if (err != nil) != tc.wantErr || (tc.wantErr && !errors.Is(err, withdrawn)) || strings.Join(f.writes, ",") != tc.want {
+				t.Fatalf("%v: %v", err, f.writes)
+			}
+		})
+	}
+}
+
+func withEdit(p plan.Plan) plan.Plan {
+	p.Edits = []plan.Edit{{Tag: "v1.0.0", File: "_releases/v1.0.0.md", Notes: "Corrected"}}
+	return p
 }
