@@ -96,20 +96,7 @@ Release Planner publishes releases in order, but it doesn't know what's deployed
 
 ## What it can reach
 
-The release workflow gives your workflow at most two permissions:
-
-- **`contents: read`:** read access to the repository.
-- **`id-token: write`:** lets it request an OIDC token, which your cloud provider can exchange for credentials.
-
-Your workflow's own `permissions:` can narrow these but not widen them. A workflow that doesn't reach a cloud provider can leave out `id-token: write`, and then gets no OIDC token. It never gets your repository's secrets or a token that can publish releases. Anything else it needs, such as secrets and variables, comes from its environment.
-
-Trust exactly the environment's OIDC subject in your cloud provider. Look up its format:
-
-```sh
-gh api repos/<owner>/<name>/actions/oidc/customization/sub
-```
-
-If `use_immutable_subject` is `true`, the subject is `<sub_claim_prefix>:environment:<environment>`, such as `repo:octo-org@123/app@456:environment:production`. Otherwise it's `repo:<owner>/<name>:environment:<environment>`, unless you customized it.
+Release Planner calls your workflow with only `contents: read` and `id-token: write`, and passes it no secrets. Your workflow can read the repository and request an OIDC token, but it can't write to the repository or publish releases. Everything else it needs comes from its environment. Keep secrets and variables there, and have your cloud provider trust only that environment's [OIDC subject](https://docs.github.com/en/actions/reference/security/oidc#example-subject-claims).
 
 ## Set up the environment
 

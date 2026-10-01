@@ -66,12 +66,7 @@ jobs:
           VERSION: ${{ inputs.version }}
 ```
 
-The release workflow gives your workflow at most two permissions:
-
-- **`contents: read`:** read access to the repository.
-- **`id-token: write`:** lets it request an OIDC token, which your cloud provider can exchange for credentials.
-
-Your workflow's own `permissions:` can narrow these but not widen them. A workflow that doesn't reach a cloud provider can leave out `id-token: write`, and then gets no OIDC token. It never gets your repository's secrets or a token that can publish releases. Anything else it needs, such as secrets and variables, comes from its environment.
+Release Planner calls your workflow with only `contents: read` and `id-token: write`, and passes it no secrets. Your workflow can read the repository and request an OIDC token, but it can't write to the repository or publish releases. Everything else it needs comes from its environment. Keep secrets and variables there, and have your cloud provider trust only that environment's [OIDC subject](https://docs.github.com/en/actions/reference/security/oidc#example-subject-claims).
 
 `release-planner install` and `release-planner check` fail if a workflow is missing an input, doesn't name the same environment on every job, or requires secrets. The release status names each workflow by its `name:`, such as **Deploy**.
 
