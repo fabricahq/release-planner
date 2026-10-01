@@ -641,27 +641,32 @@ func TestNotifyCommentsOncePerRunAttemptAndJob(t *testing.T) {
 	}
 }
 
+// migrate is a pre-publish hook, with the name its workflow declares.
+var migrate = Hook{Job: "pre-publish-1", Name: "pre-publish (migrate-database.yml)", When: "pre-publish", Workflow: "migrate-database.yml", Title: "Migrate the database"}
+
 // A pre-publish workflow runs after the merge, before publication, and says so before it.
 func TestRendersThePrePublishWorkflow(t *testing.T) {
-	s := status(release(), false, results("validate", "success", "pre-publish", "skipped", "publish", "skipped"))
-	s.PrePublish = "migrate-database.yml"
+	unnamed := migrate
+	unnamed.Title = ""
+	s := status(release(), false, results("validate", "success", "pre-publish-1", "skipped", "publish", "skipped"))
+	s.Hooks = []Hook{unnamed}
 	blocks := render(t, s)
 	contains(t, blocks.Summary, "**When you merge this PR:**\n- First, `migrate-database.yml` runs on the release commit. If it fails, the release isn't published.\n- The release commit, `0123456`, is tagged `v1.2.0`.\n")
 	contains(t, blocks.Status, "| ⏸️ | Run `migrate-database.yml` | Runs when you merge |\n| ⏸️ | Publish | Runs when you merge |\n")
 
 	// A notes edit doesn't run it.
-	edit := status(&plan.Plan{Edits: []plan.Edit{{Tag: "v1.0.0", File: "_releases/v1.0.0.md"}}}, false, results("validate", "success", "pre-publish", "skipped", "publish", "skipped"))
-	edit.PrePublish = "migrate-database.yml"
+	edit := status(&plan.Plan{Edits: []plan.Edit{{Tag: "v1.0.0", File: "_releases/v1.0.0.md"}}}, false, results("validate", "success", "pre-publish-1", "skipped", "publish", "skipped"))
+	edit.Hooks = []Hook{unnamed}
 	lacks(t, render(t, edit).Summary, "migrate-database.yml")
 	lacks(t, render(t, edit).Status, "migrate-database.yml")
 
 	// After the merge, it's named first when it failed, before the publish job it blocked.
-	s = status(release(), true, results("validate", "success", "pre-publish", "failure", "publish", "skipped"))
-	s.PrePublish, s.RunJobs = "migrate-database.yml", runJobs("100", "validate", "pre-publish / migrate", "report")
+	s = status(release(), true, results("validate", "success", "pre-publish-1", "failure", "publish", "skipped"))
+	s.Hooks, s.RunJobs = []Hook{unnamed}, runJobs("100", "validate", "pre-publish (migrate-database.yml) / migrate", "report")
 	blocks = render(t, s)
 	equal(t, blocks.Summary, `**[✏️ Edit the v1.2.0 release notes](https://github.com/o/r/edit/main/_releases/v1.2.0.md)**
 
-❌ **The pre-publish job failed,** so this attempt stopped before publishing. See [the workflow run](https://github.com/o/r/actions/runs/100). If the cause was outside the release commit, fix it, then use **Re-run failed jobs** on that run. If the release commit itself is broken, withdraw v1.2.0: delete `+"`_releases/v1.2.0.md`"+` in the pull request that fixes it, then release again. [What to do when pre-publish fails](https://release-planner.fabricahq.com/customize/pre-publish/#if-it-fails)
+❌ **The pre-publish (migrate-database.yml) job failed,** so this attempt stopped before publishing. See [the workflow run](https://github.com/o/r/actions/runs/100). If the cause was outside the release commit, fix it, then use **Re-run failed jobs** on that run. If the release commit itself is broken, withdraw v1.2.0: delete `+"`_releases/v1.2.0.md`"+` in the pull request that fixes it, then release again. [What to do when pre-publish fails](https://release-planner.fabricahq.com/customize/pre-publish/#if-it-fails)
 
 ### Release status
 
@@ -671,21 +676,45 @@ func TestRendersThePrePublishWorkflow(t *testing.T) {
 `)
 	contains(t, blocks.Status, "| ✅ | Check the version and release notes | [Details](https://github.com/o/r/actions/runs/100/job/1) |\n| ❌ | Run `migrate-database.yml` | [Details](https://github.com/o/r/actions/runs/100/job/2) |\n")
 	lacks(t, blocks.Status, "Publish")
-	if s.Failed() != "pre-publish" || !strings.Contains(Failure(s), "The release's **pre-publish** job failed") {
+	if s.Failed() != "pre-publish-1" || !strings.Contains(Failure(s), "The release's **pre-publish (migrate-database.yml)** job failed") {
 		t.Fatal(Failure(s))
 	}
 
-	s.Jobs["pre-publish"] = Job{Result: "cancelled"}
-	contains(t, render(t, s).Summary, "⚪ **The pre-publish job was cancelled,** so this attempt stopped before publishing. Use **Re-run failed jobs** on [that run](https://github.com/o/r/actions/runs/100).\n")
+	s.Jobs["pre-publish-1"] = Job{Result: "cancelled"}
+	contains(t, render(t, s).Summary, "⚪ **The pre-publish (migrate-database.yml) job was cancelled,** so this attempt stopped before publishing. Use **Re-run failed jobs** on [that run](https://github.com/o/r/actions/runs/100).\n")
 
-	s.Jobs["pre-publish"], s.Jobs["publish"] = Job{Result: "success"}, Job{Result: "success"}
+	s.Jobs["pre-publish-1"], s.Jobs["publish"] = Job{Result: "success"}, Job{Result: "success"}
 	contains(t, render(t, s).Status, "| ✅ | Run `migrate-database.yml` |", "| ✅ | Publish |")
+}
+
+// Several pre-publish workflows run in parallel, each in its own job and row; the release waits
+// for all of them, and Re-run failed jobs runs only the ones that failed.
+func TestRendersSeveralPrePublishWorkflows(t *testing.T) {
+	caches := Hook{Job: "pre-publish-2", Name: "pre-publish (warm-caches.yml)", When: "pre-publish", Workflow: "warm-caches.yml"}
+	s := status(release(), false, results("validate", "success", "pre-publish-1", "skipped", "pre-publish-2", "skipped", "publish", "skipped"))
+	s.Hooks = []Hook{migrate, caches}
+	blocks := render(t, s)
+	contains(t, blocks.Summary, "- First, these run on the release commit, in parallel: **Migrate the database**, `warm-caches.yml`. If any fails, the release isn't published.\n")
+	contains(t, blocks.Status, "| ⏸️ | Migrate the database | Runs when you merge |\n| ⏸️ | Run `warm-caches.yml` | Runs when you merge |\n| ⏸️ | Publish | Runs when you merge |\n")
+
+	// One failed: the report names it, and the other's success shows.
+	s = status(release(), true, results("validate", "success", "pre-publish-1", "success", "pre-publish-2", "failure", "publish", "skipped"))
+	s.Hooks, s.RunJobs = []Hook{migrate, caches}, runJobs("100", "validate", "pre-publish (migrate-database.yml) / migrate", "pre-publish (warm-caches.yml) / warm", "report")
+	blocks = render(t, s)
+	contains(t, blocks.Summary, "❌ **The pre-publish (warm-caches.yml) job failed,**")
+	contains(t, blocks.Status, "| ✅ | Migrate the database | [Details](https://github.com/o/r/actions/runs/100/job/2) |\n| ❌ | Run `warm-caches.yml` | [Details](https://github.com/o/r/actions/runs/100/job/3) |\n")
+
+	// Re-run failed jobs ran only that one, then published.
+	s.Jobs["pre-publish-2"], s.Jobs["publish"] = Job{Result: "success"}, Job{Result: "success"}
+	blocks = render(t, s)
+	contains(t, blocks.Summary, "✅ Published [v1.2.0]")
+	contains(t, blocks.Status, "| ✅ | Migrate the database |", "| ✅ | Run `warm-caches.yml` |", "| ✅ | Publish |")
 }
 
 // A release that waits for an earlier one, or whose request was withdrawn, stopped on purpose,
 // so the report says why instead of asking for a fix.
 func TestRendersARunThatStoppedOnPurpose(t *testing.T) {
-	waiting := status(nil, true, results("validate", "failure", "pre-publish", "skipped", "publish", "skipped"))
+	waiting := status(nil, true, results("validate", "failure", "pre-publish-1", "skipped", "publish", "skipped"))
 	waiting.Jobs["validate"] = Job{Result: "failure", Outputs: map[string]string{"waiting-for": "v1.1.0", "waiting-for-file": "_releases/v1.1.0.md"}}
 	equal(t, render(t, waiting).Summary, "⏳ **This release waits for v1.1.0,** which merged earlier and isn't published yet. Publish v1.1.0, or withdraw it by deleting `_releases/v1.1.0.md` in a pull request. Then use **Re-run failed jobs** on [this run](https://github.com/o/r/actions/runs/100).\n")
 	waiting.Jobs["validate"] = Job{Result: "failure", Outputs: map[string]string{"waiting-for": "v1.1.0"}}
@@ -697,7 +726,7 @@ func TestRendersARunThatStoppedOnPurpose(t *testing.T) {
 	equal(t, render(t, stale).Summary, withdrawn)
 
 	// Re-run failed jobs reuses validate, so publish finds the withdrawal.
-	stale = status(release(), true, results("validate", "success", "pre-publish", "success", "publish", "failure"))
+	stale = status(release(), true, results("validate", "success", "pre-publish-1", "success", "publish", "failure"))
 	stale.Jobs["publish"] = Job{Result: "failure", Outputs: map[string]string{"release": "withdrawn"}}
 	// The notes file is gone from main, so there's no link to edit it.
 	equal(t, render(t, stale).Summary[:len(withdrawn)], withdrawn)
@@ -717,27 +746,32 @@ func TestRendersWhatPublishDid(t *testing.T) {
 
 // The pre-publish workflow appears by the name it declares, or by its file name without one.
 func TestRendersThePrePublishWorkflowsName(t *testing.T) {
-	s := status(release(), false, results("validate", "success", "pre-publish", "skipped", "publish", "skipped"))
-	s.PrePublish, s.PrePublishName = "migrate-database.yml", "Migrate the database"
+	s := status(release(), false, results("validate", "success", "pre-publish-1", "skipped", "publish", "skipped"))
+	named := func(title string) []Hook {
+		h := migrate
+		h.Title = title
+		return []Hook{h}
+	}
+	s.Hooks = named("Migrate the database")
 	blocks := render(t, s)
 	contains(t, blocks.Summary, "- First, **Migrate the database** runs on the release commit. If it fails, the release isn't published.\n")
 	contains(t, blocks.Status, "| ⏸️ | Migrate the database | Runs when you merge |\n")
 
 	// Markdown in a name stays text, and can't break the table.
-	s.PrePublishName = "Migrate | *all* the [databases]"
+	s.Hooks = named("Migrate | *all* the [databases]")
 	contains(t, render(t, s).Status, "| ⏸️ | Migrate \\| \\*all\\* the \\[databases\\] | Runs when you merge |\n")
-	s.PrePublishName = "Migrate ~~production~~"
+	s.Hooks = named("Migrate ~~production~~")
 	blocks = render(t, s)
 	contains(t, blocks.Summary, "- First, **Migrate \\~\\~production\\~\\~** runs on the release commit.")
 	contains(t, blocks.Status, "| ⏸️ | Migrate \\~\\~production\\~\\~ | Runs when you merge |\n")
 
 	// A name shaped like a file name is still a name.
-	s.PrePublishName = "Deploy.yml"
+	s.Hooks = named("Deploy.yml")
 	blocks = render(t, s)
 	contains(t, blocks.Summary, "- First, **Deploy.yml** runs on the release commit.")
 	contains(t, blocks.Status, "| ⏸️ | Deploy.yml | Runs when you merge |\n")
 
-	s.PrePublishName = ""
+	s.Hooks = named("")
 	blocks = render(t, s)
 	contains(t, blocks.Summary, "- First, `migrate-database.yml` runs on the release commit.")
 	contains(t, blocks.Status, "| ⏸️ | Run `migrate-database.yml` | Runs when you merge |\n")

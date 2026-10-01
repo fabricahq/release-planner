@@ -42,7 +42,7 @@ first-version: {{.FirstVersion}}
 # must name the same GitHub environment, which holds its credentials; it gets no secrets. It
 # may run again, late, and alongside itself, so make that safe.
 # pre-publish:
-#   workflow: migrate-database.yml
+#   - workflow: migrate-database.yml
 
 # Optional workflows in other repositories to run after each new stable release, with
 # inputs tag and version, such as one that updates a Homebrew formula. They run with a

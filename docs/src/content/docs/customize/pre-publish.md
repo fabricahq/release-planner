@@ -21,11 +21,11 @@ It's optional, and it never runs on the release pull request: merging is the app
 
 ## Set it up
 
-Name your workflow in `.release-planner/config.yml`, then run `release-planner install` and commit the result:
+List your workflow under `pre-publish` in `.release-planner/config.yml`, then run `release-planner install` and commit the result:
 
 ```yaml
 pre-publish:
-  workflow: migrate-database.yml
+  - workflow: migrate-database.yml
 ```
 
 `migrate-database.yml` is an example. Release Planner doesn't provide a migration workflow: the workflow is yours, named and written for your project, and it can do anything that must happen before a release is published. This page uses a database migration as its running example.
@@ -105,7 +105,9 @@ The release workflow warns on each release pull request if the environment is mi
 
 ## When it runs
 
-After you merge, once the release checks and assets have passed, and right before the release is tagged. It runs for prereleases too. It doesn't run on the release pull request, or for notes edits to a published release.
+After you merge, once the release checks and assets have passed, and right before the release is tagged. It runs for every release, prereleases included. It doesn't run on the release pull request, or for notes edits to a published release.
+
+You can list several workflows. Each runs in its own job, named `pre-publish (<workflow>)`, and they run in parallel; the release is published only once all of them succeed. Each one may use its own environment. Steps that must run in order, such as a migration and then a check of its result, belong in one workflow.
 
 Releases publish in order. If an earlier release you merged isn't published yet, a newer one waits: its run stops before your workflow, and its pull request says which release it's waiting for. Once that release is published or withdrawn, use **Re-run failed jobs** on the newer release's run. It checks the latest published release and every version between it and this one, tagged or not. Versions below the latest published release don't hold anything up: it was published after them, so their workflows already had their turn.
 
@@ -113,7 +115,7 @@ Releases publish in order. If an earlier release you merged isn't published yet,
 
 The release isn't tagged or published. The pull request description shows the failed job, and a comment mentions whoever merged. What to do depends on where the cause is:
 
-- **Outside your repository**, such as an unreachable database or an expired credential: fix it, then use **Re-run failed jobs** on the release run. Your workflow runs again, then the release is published.
+- **Outside your repository**, such as an unreachable database or an expired credential: fix it, then use **Re-run failed jobs** on the release run. Only the workflows that failed run again, then the release is published.
 - **In your workflow file**, such as `migrate-database.yml`: fix it in a pull request, then run the **Release** workflow manually on your release branch, with **merged-commit** set to the commit the release pull request merged as. **Re-run failed jobs** would use the workflow file from the original run.
 - **In the release commit**, such as a migration that fails: withdraw the release and release again. In the pull request that fixes the cause, also delete the release's notes file, such as `_releases/v1.2.0.md`. After it merges, ask your agent for a release. It can reuse the same version, since that version was never tagged, and the new release commit includes the fix. If the old run had started attaching [release assets](/customize/release-assets/), it left an unpublished draft release for that version: delete the draft on GitHub before you merge the new release pull request, or its run stops and asks you to.
 

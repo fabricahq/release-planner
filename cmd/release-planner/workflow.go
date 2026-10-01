@@ -18,7 +18,7 @@ import (
 )
 
 func cmdReport(ctx context.Context, args []string, out io.Writer) error {
-	fs, _ := flags("report", "report --needs <json> --branch <name> (--pull-request <number> [--head-sha <sha>] [--head-ref <branch>] [--head-repository <owner/name>] | --merged <sha>) [--plan <file>] [--assets <dir>] [--pre-publish <workflow.yml> [--pre-publish-name <name>]] [--downstream <owner/name:workflow.yml>...]")
+	fs, _ := flags("report", "report --needs <json> --branch <name> (--pull-request <number> [--head-sha <sha>] [--head-ref <branch>] [--head-repository <owner/name>] | --merged <sha>) [--plan <file>] [--assets <dir>] [--hooks <json>] [--downstream <owner/name:workflow.yml>...]")
 	needs := fs.String("needs", "", "the Release workflow's needs context, as JSON")
 	branch := fs.String("branch", "", "release branch")
 	number := fs.String("pull-request", "", "the release pull request, in its own run")
@@ -28,8 +28,7 @@ func cmdReport(ctx context.Context, args []string, out io.Writer) error {
 	merged := fs.String("merged", "", "after the merge: the commit the release pull request merged as")
 	planFile := fs.String("plan", "", "release plan written by release-planner validate, if validate wrote one")
 	assetsDir := fs.String("assets", "", "directory of the built release assets, if any")
-	prePublish := fs.String("pre-publish", "", "the pre-publish workflow's file name, if the repository has one")
-	prePublishName := fs.String("pre-publish-name", "", "the name the pre-publish workflow declares, if it declares one, to show instead of its file name")
+	hooks := fs.String("hooks", "", "the workflows the Release workflow runs around the release, as the JSON list it generates")
 	repository := fs.String("repository", os.Getenv("GITHUB_REPOSITORY"), "GitHub repository, as owner/name")
 	var downstream targets
 	fs.Var(&downstream, "downstream", "a downstream workflow, as owner/name:workflow.yml; repeat for each")
@@ -47,9 +46,14 @@ func cmdReport(ctx context.Context, args []string, out io.Writer) error {
 	s := report.Status{Server: server, Repository: *repository, Merged: *merged != "",
 		RunURL: fmt.Sprintf("%s/%s/actions/runs/%s", server, *repository, os.Getenv("GITHUB_RUN_ID")),
 		RunID:  os.Getenv("GITHUB_RUN_ID"), RunAttempt: os.Getenv("GITHUB_RUN_ATTEMPT"),
-		Branch: *branch, HeadRef: *headRef, HeadRepository: *headRepository, BuildsAssets: *assetsDir != "", PrePublish: *prePublish, PrePublishName: *prePublishName}
+		Branch: *branch, HeadRef: *headRef, HeadRepository: *headRepository, BuildsAssets: *assetsDir != ""}
 	if err := json.Unmarshal([]byte(*needs), &s.Jobs); err != nil {
 		return fmt.Errorf("--needs: %v", err)
+	}
+	if *hooks != "" {
+		if err := json.Unmarshal([]byte(*hooks), &s.Hooks); err != nil {
+			return fmt.Errorf("--hooks: %v", err)
+		}
 	}
 	if *planFile != "" {
 		p, err := readPlan(*planFile)

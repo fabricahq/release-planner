@@ -202,15 +202,16 @@ func readFile(root, name string) (string, bool, error) {
 
 // planInstall decides every write without touching the disk.
 func planInstall(root string, c config.Config, force bool) ([]write, Problems, error) {
-	// The generated workflow names the pre-publish workflow as it names itself, and checks
-	// the environment its jobs name.
-	var prePublish string
-	if c.PrePublish.Enabled() {
-		w, problem, err := config.ReadPrePublish(root, c.PrePublish.Workflow)
+	// The generated workflow names each hook workflow as it names itself, and checks the
+	// environment its jobs name.
+	hookProblems := map[string]string{}
+	c.PrePublish = slices.Clone(c.PrePublish)
+	for i, h := range c.PrePublish {
+		w, problem, err := config.ReadHook(root, h.Workflow)
 		if err != nil {
 			return nil, nil, err
 		}
-		c.PrePublish.Name, c.PrePublish.Environment, prePublish = w.Name, w.Environment, problem
+		c.PrePublish[i].Name, c.PrePublish[i].Environment, hookProblems[h.Workflow] = w.Name, w.Environment, problem
 	}
 	var writes []write
 	var problems Problems
@@ -269,22 +270,27 @@ func planInstall(root string, c config.Config, force bool) ([]write, Problems, e
 		writes = append(writes, write{change: change, content: content})
 	}
 
-	for _, called := range []struct {
+	type calledWorkflow struct {
 		key, workflow string
 		inputs        []string
 		outputs       []string
-	}{
-		{"release-checks.workflow", c.ReleaseChecks.Workflow, []string{"ref"}, nil},
+		hook          bool
+	}
+	called := []calledWorkflow{
+		{"release-checks.workflow", c.ReleaseChecks.Workflow, []string{"ref"}, nil, false},
 		// The Release workflow downloads the assets by the ID of the upload the workflow made.
-		{"release-assets.workflow", c.ReleaseAssets.Workflow, []string{"ref", "tag", "version"}, []string{"artifact-id"}},
-		{"pre-publish.workflow", c.PrePublish.Workflow, []string{"ref", "tag", "version"}, nil},
-	} {
+		{"release-assets.workflow", c.ReleaseAssets.Workflow, []string{"ref", "tag", "version"}, []string{"artifact-id"}, false},
+	}
+	for i, h := range c.PrePublish {
+		called = append(called, calledWorkflow{fmt.Sprintf("pre-publish[%d].workflow", i), h.Workflow, []string{"ref", "tag", "version"}, nil, true})
+	}
+	for _, called := range called {
 		if called.workflow == "" {
 			continue
 		}
 		problem, err := callableWorkflow(root, called.key, called.workflow, called.inputs, called.outputs)
-		if err == nil && problem == "" && called.workflow == c.PrePublish.Workflow {
-			problem = prePublish
+		if err == nil && problem == "" && called.hook {
+			problem = hookProblems[called.workflow]
 		}
 		if err != nil {
 			return nil, nil, err

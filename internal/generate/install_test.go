@@ -1,7 +1,9 @@
 package generate
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"os"
 	"os/exec"
@@ -507,8 +509,9 @@ var combinations = map[string]string{
 	"downstream":        "downstream:\n  - repository: fabricahq/homebrew-tap\n    workflow: update-code-rules.yml\n",
 	"all":               "release-checks:\n  workflow: release-checks.yml\nrelease-assets:\n  workflow: build-release.yml\ndownstream:\n  - repository: fabricahq/homebrew-tap\n    workflow: update-code-rules.yml\n  - repository: fabricahq/scoop-bucket\n    workflow: update.yml\n",
 	"script-and-assets": "release-checks:\n  run: make smoke\nrelease-assets:\n  workflow: build-release.yml\n",
-	"pre-publish":       "pre-publish:\n  workflow: migrate-database.yml\n",
-	"pre-publish-and-assets": "release-checks:\n  run: make smoke\nrelease-assets:\n  workflow: build-release.yml\npre-publish:\n  workflow: migrate-database.yml\n" +
+	"pre-publish":       "pre-publish:\n  - workflow: migrate-database.yml\n",
+	"two-pre-publish":   "pre-publish:\n  - workflow: migrate-database.yml\n  - workflow: warm-caches.yml\n",
+	"pre-publish-and-assets": "release-checks:\n  run: make smoke\nrelease-assets:\n  workflow: build-release.yml\npre-publish:\n  - workflow: migrate-database.yml\n" +
 		"downstream:\n  - repository: fabricahq/homebrew-tap\n    workflow: update-code-rules.yml\n",
 }
 
@@ -561,10 +564,12 @@ func installCombination(t *testing.T, root, extra string) map[string]job {
 	}
 	put(t, root, ".github/workflows/build-release.yml", buildWorkflow)
 	put(t, root, ".github/workflows/release-checks.yml", checksWorkflow)
-	// A test may have written its own pre-publish workflow.
+	// A test may have written its own pre-publish workflow. The second one runs in another
+	// environment, which a pre-publish workflow may.
 	if _, err := os.Stat(filepath.Join(root, ".github/workflows/migrate-database.yml")); err != nil {
 		put(t, root, ".github/workflows/migrate-database.yml", migrateWorkflow)
 	}
+	put(t, root, ".github/workflows/warm-caches.yml", strings.NewReplacer("Migrate the database", "Warm the caches", "production", "staging").Replace(migrateWorkflow))
 	if _, err := Install(root, c, false); err != nil {
 		t.Fatal(err)
 	}
@@ -585,10 +590,15 @@ func TestWorkflowCombinations(t *testing.T) {
 			assets := strings.Contains(extra, "release-assets")
 			downstream := strings.Contains(extra, "downstream")
 			prePublish := strings.Contains(extra, "pre-publish")
-			want := []string{"validate", "publish", "report"}
-			if prePublish {
-				want = append(want, "pre-publish")
+			// Each pre-publish workflow runs in a job of its own, numbered in the config's order.
+			var pre []string
+			for i, w := range []string{"migrate-database.yml", "warm-caches.yml"} {
+				if strings.Contains(extra, "workflow: "+w) {
+					pre = append(pre, fmt.Sprintf("pre-publish-%d", i+1))
+				}
 			}
+			want := []string{"validate", "publish", "report"}
+			want = append(want, pre...)
 			if checks {
 				want = append(want, "release-checks")
 			}
@@ -613,7 +623,7 @@ func TestWorkflowCombinations(t *testing.T) {
 				if j.Permissions["contents"] == "write" && id != "publish" {
 					t.Errorf("%s can write contents", id)
 				}
-				if j.Permissions["id-token"] == "write" && id != "attest" && id != "attest-release" && id != "pre-publish" {
+				if j.Permissions["id-token"] == "write" && id != "attest" && id != "attest-release" && !strings.HasPrefix(id, "pre-publish-") {
 					t.Errorf("%s can mint OIDC tokens", id)
 				}
 			}
@@ -621,19 +631,26 @@ func TestWorkflowCombinations(t *testing.T) {
 			if publish.Environment != "release" || !strings.Contains(publish.If, "github.event_name != 'pull_request'") || !strings.Contains(publish.If, "!contains(needs.*.result, 'failure')") {
 				t.Errorf("publish: %+v", publish)
 			}
-			wantNeeds := []any{"validate"}
-			for _, id := range []string{"release-checks", "release-assets", "attest", "pre-publish"} {
+			build := []any{"validate"}
+			for _, id := range []string{"release-checks", "release-assets", "attest"} {
 				if _, ok := jobs[id]; ok {
-					wantNeeds = append(wantNeeds, id)
+					build = append(build, id)
 				}
+			}
+			wantNeeds := slices.Clone(build)
+			for _, id := range pre {
+				wantNeeds = append(wantNeeds, id)
 			}
 			if !slices.Equal(publish.Needs.([]any), wantNeeds) {
 				t.Errorf("publish needs %v, want %v", publish.Needs, wantNeeds)
 			}
-			// A release publishes only after the pre-publish workflow succeeded, in this attempt
-			// or one that Re-run failed jobs reuses; a skipped or cancelled run blocks it.
-			guard := "(needs.validate.outputs.tag == '' || needs.pre-publish.result == 'success')"
-			if prePublish != strings.Contains(publish.If, guard) {
+			// A release publishes only after every pre-publish workflow succeeded, in this attempt
+			// or one that Re-run failed jobs reuses; a skipped or cancelled one blocks it.
+			guard := map[int]string{
+				1: "(needs.validate.outputs.tag == '' || needs.pre-publish-1.result == 'success')",
+				2: "(needs.validate.outputs.tag == '' || (needs.pre-publish-1.result == 'success' && needs.pre-publish-2.result == 'success'))",
+			}[len(pre)]
+			if prePublish != (guard != "" && strings.Contains(publish.If, guard)) {
 				t.Errorf("publish runs if %q", publish.If)
 			}
 			// validate tells the report why a run stopped on purpose, even when it fails.
@@ -647,19 +664,27 @@ func TestWorkflowCombinations(t *testing.T) {
 				publish.named(t, "publish").Name != "Publish the approved release" {
 				t.Errorf("publish outputs %v", publish.Outputs)
 			}
-			// The report names the pre-publish workflow by its file and its own name.
-			if step := jobs["report"].Steps[len(jobs["report"].Steps)-1]; prePublish != strings.Contains(step.Run, ` --pre-publish migrate-database.yml --pre-publish-name "$PRE_PUBLISH_NAME" `) ||
-				prePublish != (step.Env["PRE_PUBLISH_NAME"] == "Migrate the database") {
-				t.Errorf("report runs %q with %v", step.Run, step.Env)
+			// The report learns each hook job, with its workflow's own name.
+			step := jobs["report"].Steps[len(jobs["report"].Steps)-1]
+			if prePublish != strings.Contains(step.Run, ` --hooks "$HOOKS" `) {
+				t.Errorf("report runs %q", step.Run)
 			}
+			var hooks []map[string]any
 			if prePublish {
-				hook := jobs["pre-publish"]
-				if hook.Uses != "./.github/workflows/migrate-database.yml" || hook.Secrets != nil || hook.Environment != "" ||
+				if err := json.Unmarshal([]byte(step.Env["HOOKS"]), &hooks); err != nil || len(hooks) != len(pre) ||
+					!maps.Equal(hooks[0], map[string]any{"job": "pre-publish-1", "name": "pre-publish (migrate-database.yml)", "when": "pre-publish", "workflow": "migrate-database.yml", "title": "Migrate the database"}) {
+					t.Errorf("HOOKS %v: %v", step.Env["HOOKS"], err)
+				}
+			}
+			// The pre-publish workflows run in parallel, after the build.
+			for i, id := range pre {
+				hook, workflow := jobs[id], []string{"migrate-database.yml", "warm-caches.yml"}[i]
+				if hook.Name != "pre-publish ("+workflow+")" || hook.Uses != "./.github/workflows/"+workflow || hook.Secrets != nil || hook.Environment != "" ||
 					!maps.Equal(hook.Permissions, map[string]string{"contents": "read", "id-token": "write"}) ||
-					!slices.Equal(hook.Needs.([]any), wantNeeds[:len(wantNeeds)-1]) ||
+					!slices.Equal(hook.Needs.([]any), build) ||
 					!maps.Equal(hook.With, map[string]string{"ref": "${{ needs.validate.outputs.commit }}", "tag": "${{ needs.validate.outputs.tag }}", "version": "${{ needs.validate.outputs.version }}"}) ||
-					!maps.Equal(hook.Concurrency, map[string]any{"group": "release-pre-publish", "cancel-in-progress": false, "queue": "max"}) {
-					t.Errorf("pre-publish: %+v", hook)
+					!maps.Equal(hook.Concurrency, map[string]any{"group": "release-pre-publish (" + workflow + ")", "cancel-in-progress": false, "queue": "max"}) {
+					t.Errorf("%s: %+v", id, hook)
 				}
 				for _, want := range []string{"!cancelled()", "github.event_name != 'pull_request'", "needs.validate.outputs.publish == 'true'", "needs.validate.outputs.tag != ''", "!contains(needs.*.result, 'failure')", "!contains(needs.*.result, 'cancelled')"} {
 					if !strings.Contains(hook.If, want) {
@@ -882,13 +907,13 @@ jobs:
 // workflow. Every job names the same GitHub environment literally, which holds its credentials;
 // Release Planner reads the environment from there.
 func TestPrePublishEnvironmentComesFromTheWorkflow(t *testing.T) {
-	c, err := config.Parse([]byte("schema-version: 1\nversion: v0.2.0\npre-publish:\n  workflow: migrate-database.yml\n"), "")
+	c, err := config.Parse([]byte("schema-version: 1\nversion: v0.2.0\npre-publish:\n  - workflow: migrate-database.yml\n"), "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	root := t.TempDir()
 	_, err = Install(root, c, false)
-	problemFor(t, err, ".github/workflows/migrate-database.yml", "missing; pre-publish.workflow")
+	problemFor(t, err, ".github/workflows/migrate-database.yml", "missing; pre-publish[0].workflow")
 
 	put(t, root, ".github/workflows/migrate-database.yml", strings.Replace(migrateWorkflow, "      version:\n        type: string\n        required: true\n", "", 1))
 	_, err = Install(root, c, false)
@@ -897,9 +922,9 @@ func TestPrePublishEnvironmentComesFromTheWorkflow(t *testing.T) {
 	const migrate = "    environment: production\n    steps:\n      - uses"
 	for name, tc := range map[string]struct{ from, to, want string }{
 		"a job without one": {migrate, "    steps:\n      - uses",
-			"job migrate runs in no environment; every job of a pre-publish workflow must name the same GitHub environment, such as environment: production"},
+			"job migrate runs in no environment; every job must name the same GitHub environment, such as environment: production"},
 		"two environments": {"      name: production\n", "      name: staging\n",
-			"jobs run in different environments, production and staging; every job of a pre-publish workflow must name the same one"},
+			"jobs run in different environments, production and staging; every job must name the same one"},
 		"an expression": {migrate, "    environment: ${{ inputs.environment }}\n    steps:\n      - uses",
 			"job migrate names its environment with an expression; name it literally, such as environment: production"},
 		// Both jobs name it, so these rename it in both.
@@ -931,7 +956,7 @@ func TestPrePublishEnvironmentComesFromTheWorkflow(t *testing.T) {
 	if err := Check(root, c); err != nil {
 		t.Fatal(err)
 	}
-	if wf := read(t, root, WorkflowPath); !strings.Contains(wf, "# Every job of the workflow runs in the production environment") {
+	if wf := read(t, root, WorkflowPath); !strings.Contains(wf, "# Its jobs run in the GitHub environment production, which holds its credentials.") {
 		t.Errorf("the generated workflow doesn't name the environment:\n%s", wf)
 	}
 
@@ -942,7 +967,7 @@ func TestPrePublishEnvironmentComesFromTheWorkflow(t *testing.T) {
 	if _, err := Install(root, c, false); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(read(t, root, WorkflowPath), "# Every job of the workflow runs in the staging environment") {
+	if !strings.Contains(read(t, root, WorkflowPath), "# Its jobs run in the GitHub environment staging, which holds its credentials.") {
 		t.Error("install didn't pick up the new environment")
 	}
 }
@@ -952,7 +977,7 @@ func TestPrePublishEnvironmentComesFromTheWorkflow(t *testing.T) {
 func TestPullRequestsThatChangeCalledWorkflowsRunTheReleaseWorkflow(t *testing.T) {
 	root := t.TempDir()
 	put(t, root, ".github/workflows/migrate-database.yml", migrateWorkflow)
-	installCombination(t, root, "release-checks:\n  workflow: release-checks.yml\nrelease-assets:\n  workflow: build-release.yml\npre-publish:\n  workflow: migrate-database.yml\n")
+	installCombination(t, root, "release-checks:\n  workflow: release-checks.yml\nrelease-assets:\n  workflow: build-release.yml\npre-publish:\n  - workflow: migrate-database.yml\n")
 	var wf struct {
 		On struct {
 			PullRequest struct{ Paths []string } `yaml:"pull_request"`
@@ -988,9 +1013,9 @@ func TestReportNamesThePrePublishWorkflow(t *testing.T) {
 			root := t.TempDir()
 			put(t, root, ".github/workflows/migrate-database.yml", strings.Replace(migrateWorkflow, "name: Migrate the database\n", tc.to, 1))
 			jobs := installCombination(t, root, combinations["pre-publish"])
-			step := jobs["report"].Steps[len(jobs["report"].Steps)-1]
-			if got := step.Env["PRE_PUBLISH_NAME"]; got != tc.want || strings.Contains(step.Run, "--pre-publish-name") != (tc.want != "") {
-				t.Fatalf("PRE_PUBLISH_NAME is %q, want %q; report runs %q", got, tc.want, step.Run)
+			var hooks []struct{ Title string }
+			if err := json.Unmarshal([]byte(jobs["report"].Steps[len(jobs["report"].Steps)-1].Env["HOOKS"]), &hooks); err != nil || len(hooks) != 1 || hooks[0].Title != tc.want {
+				t.Fatalf("HOOKS has %+v, want the title %q: %v", hooks, tc.want, err)
 			}
 		})
 	}
@@ -1005,8 +1030,8 @@ func TestReportStepPassesThePrePublishNameAsWritten(t *testing.T) {
 			put(t, root, ".github/workflows/migrate-database.yml", strings.Replace(migrateWorkflow, "name: Migrate the database\n", "name: '"+strings.ReplaceAll(payload, "'", "''")+"'\n", 1))
 			step := installCombination(t, root, combinations["pre-publish"])["report"].Steps
 			report := step[len(step)-1]
-			if report.Env["PRE_PUBLISH_NAME"] != payload {
-				t.Fatalf("PRE_PUBLISH_NAME is %q", report.Env["PRE_PUBLISH_NAME"])
+			if !strings.Contains(report.Env["HOOKS"], payload) && !strings.Contains(report.Env["HOOKS"], `\"database\"`) {
+				t.Fatalf("HOOKS is %q", report.Env["HOOKS"])
 			}
 			// Run the step with a release-planner that records its arguments.
 			bin, work := t.TempDir(), t.TempDir()
@@ -1017,13 +1042,13 @@ func TestReportStepPassesThePrePublishNameAsWritten(t *testing.T) {
 			}
 			cmd := exec.Command("bash", "-e", "-c", report.Run)
 			cmd.Dir = work
-			cmd.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "PRE_PUBLISH_NAME="+report.Env["PRE_PUBLISH_NAME"],
+			cmd.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "HOOKS="+report.Env["HOOKS"],
 				"NEEDS={}", "MERGED="+strings.Repeat("d", 40), "RUNNER_TEMP="+work)
 			if out, err := cmd.CombinedOutput(); err != nil {
 				t.Fatalf("%v: %s", err, out)
 			}
 			got, _ := os.ReadFile(args)
-			if !strings.Contains(string(got), "\n--pre-publish\nmigrate-database.yml\n--pre-publish-name\n"+payload+"\n") {
+			if !strings.Contains(string(got), "\n--hooks\n"+report.Env["HOOKS"]+"\n") {
 				t.Fatalf("report got:\n%s", got)
 			}
 			if _, err := os.Stat(filepath.Join(work, "pwned")); err == nil {

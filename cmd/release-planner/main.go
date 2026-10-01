@@ -553,7 +553,7 @@ func inWorkflow(ctx context.Context, out io.Writer, repo gitrepo.Repo, c config.
 			environment(ctx, gh, config.DownstreamEnvironment, c.Branch, publish.DownstreamEnvironmentDocs, warn)
 		}
 	}
-	if gh != nil && p.Tag != "" && c.PrePublish.Enabled() {
+	if gh != nil && p.Tag != "" && len(c.PrePublish) > 0 {
 		if err := beforePrePublish(ctx, repo, gh, c, *p, base, warn); err != nil {
 			return err
 		}
@@ -840,54 +840,22 @@ func escapeProperty(s string) string {
 	return strings.NewReplacer("%", "%25", "\r", "%0D", "\n", "%0A", ":", "%3A", ",", "%2C").Replace(s)
 }
 
-// beforePrePublish checks what must hold before the pre-publish workflow runs for a release.
-// Its environment must keep its credentials to the release branch, and every earlier release
-// must be published, so no earlier release's workflow can still run after this one's on
-// purpose: the previous release, and any untagged lower version whose notes are on the release
-// branch. On the pull request, at base, these are warnings, since they may change before the
-// merge; after the merge, against the release branch's current tip, they stop the run, and
-// Re-run failed jobs checks again.
+// beforePrePublish checks what must hold before the pre-publish workflows run for a release.
+// Each one's environment must keep its credentials to the release branch, and every earlier
+// release must be published, so no earlier release's workflows can still run after this one's
+// on purpose: the previous release, and any later version below this one whose notes are on the
+// release branch. On the pull request, at base, these are warnings, since they may change
+// before the merge; after the merge, against the release branch's current tip, they stop the
+// run, and Re-run failed jobs checks again.
 func beforePrePublish(ctx context.Context, repo gitrepo.Repo, gh *publish.GitHub, c config.Config, p plan.Plan, base string, warn func(string, ...any)) error {
 	merged := base == ""
 	retry := ""
 	if merged {
 		retry = " Then use Re-run failed jobs on this run."
 	}
-	// The environment is the one the workflow that runs names: the one in this run's checkout.
-	// check, which ran before, refuses one that moved since install.
-	workflow := c.PrePublish.Workflow
-	w, problem, err := config.ReadPrePublish(repo.Dir, workflow)
-	switch {
-	case err == nil && problem != "":
-		err = fmt.Errorf(".github/workflows/%s: %s", workflow, problem)
-	case err == nil && w.Environment == "":
-		err = fmt.Errorf(".github/workflows/%s is missing", workflow)
-	}
-	if err != nil {
-		if merged {
-			return fmt.Errorf("couldn't read the environment %s runs in: %v", workflow, err)
-		}
-		warn("Couldn't read the environment %s runs in: %v", workflow, err)
-		return nil
-	}
-	name := w.Environment
-	env, err := gh.Environment(ctx, name, c.Branch)
-	if err != nil {
-		if merged {
-			return fmt.Errorf("couldn't check the %s environment before running %s: %v", name, workflow, err)
-		}
-		warn("Couldn't check the %s environment's settings: %v", name, err)
-	}
-	if err == nil {
-		refusal, warnings := publish.PrePublishEnvironment(name, c.Branch, workflow, env)
-		for _, w := range warnings {
-			warn("%s", w)
-		}
-		switch {
-		case refusal != "" && merged:
-			return fmt.Errorf("%s%s", refusal, retry)
-		case refusal != "":
-			warn("%s", refusal)
+	for _, h := range c.PrePublish {
+		if err := hookEnvironment(ctx, repo, gh, c.Branch, h.Workflow, merged, retry, warn); err != nil {
+			return err
 		}
 	}
 
@@ -910,6 +878,48 @@ func beforePrePublish(ctx context.Context, repo gitrepo.Repo, gh *publish.GitHub
 			return fmt.Errorf("%s is tagged but has no published release, so %s waits for it. Publish %s by re-running its release run; if its tag isn't on its release commit, delete the tag first. Then use Re-run failed jobs on this run", tag, p.Tag, tag)
 		}
 		return fmt.Errorf("%s is on %s, but %s isn't published, so %s waits for it. Publish %s, or withdraw it by deleting %s in a pull request.%s", file, c.Branch, tag, p.Tag, tag, file, retry)
+	}
+	return nil
+}
+
+// hookEnvironment checks the GitHub environment a hook workflow's jobs name, which holds its
+// credentials: it must exist and keep them to the release branch. The environment is the one
+// the workflow that runs names, the one in this run's checkout; check, which ran before,
+// refuses one that moved since install. After the merge a problem stops the run; before it, it's
+// a warning.
+func hookEnvironment(ctx context.Context, repo gitrepo.Repo, gh *publish.GitHub, branch, workflow string, merged bool, retry string, warn func(string, ...any)) error {
+	w, problem, err := config.ReadHook(repo.Dir, workflow)
+	switch {
+	case err == nil && problem != "":
+		err = fmt.Errorf(".github/workflows/%s: %s", workflow, problem)
+	case err == nil && w.Environment == "":
+		err = fmt.Errorf(".github/workflows/%s is missing", workflow)
+	}
+	if err != nil {
+		if merged {
+			return fmt.Errorf("couldn't read the environment %s runs in: %v", workflow, err)
+		}
+		warn("Couldn't read the environment %s runs in: %v", workflow, err)
+		return nil
+	}
+	name := w.Environment
+	env, err := gh.Environment(ctx, name, branch)
+	if err != nil {
+		if merged {
+			return fmt.Errorf("couldn't check the %s environment before running %s: %v", name, workflow, err)
+		}
+		warn("Couldn't check the %s environment's settings: %v", name, err)
+		return nil
+	}
+	refusal, warnings := publish.PrePublishEnvironment(name, branch, workflow, env)
+	for _, w := range warnings {
+		warn("%s", w)
+	}
+	switch {
+	case refusal != "" && merged:
+		return fmt.Errorf("%s%s", refusal, retry)
+	case refusal != "":
+		warn("%s", refusal)
 	}
 	return nil
 }

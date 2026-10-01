@@ -67,15 +67,15 @@ func TestGuideExplainsAFailedPrePublishWorkflow(t *testing.T) {
 	if strings.Contains(guideFor(t, "", ""), "pre-publish") {
 		t.Error("the guide mentions pre-publish without one")
 	}
-	c, err := config.Parse([]byte("schema-version: 1\nversion: v0.2.0\npre-publish:\n  workflow: migrate-database.yml\n"), "")
+	c, err := config.Parse([]byte("schema-version: 1\nversion: v0.2.0\npre-publish:\n  - workflow: migrate-database.yml\n"), "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	guide := Guide(c)
 	for _, want := range []string{
-		"If the `pre-publish` job failed, `migrate-database.yml` stopped the release before it was tagged.",
-		"**Re-run failed jobs** runs `migrate-database.yml` again, then publishes.",
-		"In `.github/workflows/migrate-database.yml`: a re-run uses the run's original workflow files",
+		"If a `pre-publish (<workflow>)` job failed, such as `pre-publish (migrate-database.yml)`, that workflow stopped the release before it was tagged.",
+		"**Re-run failed jobs** runs the failed pre-publish workflows again, then publishes.",
+		"In the workflow's file in `.github/workflows`: a re-run uses the run's original workflow files",
 		"also delete the release's notes file, which withdraws it.",
 		"Never re-run the withdrawn release's old run.",
 		"Once that release is published or withdrawn, **Re-run failed jobs** on the waiting release's run.\n\n## Release notes style",

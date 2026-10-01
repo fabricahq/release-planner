@@ -54,8 +54,8 @@ type Config struct {
 	Branch        string        `yaml:"release-branch"`
 	ReleaseChecks ReleaseChecks `yaml:"release-checks"`
 	ReleaseAssets ReleaseAssets `yaml:"release-assets"`
-	// PrePublish names a workflow to run after the merge and before publication.
-	PrePublish PrePublish `yaml:"pre-publish"`
+	// PrePublish lists workflows to run after the merge and before publication.
+	PrePublish []Hook `yaml:"pre-publish"`
 	// Downstream lists workflows in other repositories to run after each new stable release.
 	Downstream        []Downstream      `yaml:"downstream"`
 	ReleaseNotesStyle ReleaseNotesStyle `yaml:"release-notes-style"`
@@ -123,25 +123,25 @@ type ReleaseAssets struct {
 	Workflow string `yaml:"workflow"`
 }
 
-// PrePublish names a workflow of the repository's own that runs after the release pull
-// request merges and before the release is tagged, such as one that applies database
-// migrations. If it fails, the release isn't published. It may run again, late, and alongside
-// itself, so it must be safe to.
-type PrePublish struct {
+// Hook is a GitHub Actions workflow Release Planner runs around a release. A pre-publish hook
+// runs after the release pull request merges and before the release is tagged, such as one
+// that applies database migrations; if it fails, the release isn't published. It may run
+// again, late, and alongside itself, so it must be safe to.
+type Hook struct {
 	// Workflow names a workflow in .github/workflows that accepts workflow_call with string
 	// inputs ref, tag, and version, and checks out ref. It gets no secrets, only read access
 	// to the repository and an OIDC token. Its jobs name the GitHub environment that holds
-	// its credentials, which ReadPrePublish reads.
+	// its credentials, which ReadHook reads.
 	Workflow string `yaml:"workflow"`
-	// Name and Environment are what install reads from Workflow with ReadPrePublish.
+	// Repository is reserved for a workflow in another repository, which pre-publish doesn't
+	// support yet.
+	Repository string `yaml:"repository"`
+	// Name and Environment are what install reads from Workflow with ReadHook.
 	Name        string `yaml:"-"`
 	Environment string `yaml:"-"`
 }
 
-// Enabled reports whether the repository has a pre-publish workflow.
-func (p PrePublish) Enabled() bool { return p.Workflow != "" }
-
-// The environments Release Planner's own jobs use, which a pre-publish workflow can't share.
+// The environments Release Planner's own jobs use, which a hook workflow can't share.
 const (
 	ReleaseEnvironment    = "release"
 	DownstreamEnvironment = "downstream"
@@ -325,14 +325,20 @@ func (c Config) check() error {
 	if w := c.ReleaseAssets.Workflow; w != "" && (!workflowFile.MatchString(w) || w == GeneratedWorkflow) {
 		add("release-assets.workflow: name a workflow file in .github/workflows other than %s, such as build-release.yml", GeneratedWorkflow)
 	}
-	if p := c.PrePublish; p.Enabled() {
-		switch w := p.Workflow; {
-		case w == "" || !workflowFile.MatchString(w) || w == GeneratedWorkflow:
-			add("pre-publish.workflow: name a workflow file in .github/workflows other than %s, such as migrate-database.yml", GeneratedWorkflow)
+	for i, h := range c.PrePublish {
+		key := fmt.Sprintf("pre-publish[%d]", i)
+		switch w := h.Workflow; {
+		case !workflowFile.MatchString(w) || w == GeneratedWorkflow:
+			add("%s.workflow: name a workflow file in .github/workflows other than %s, such as migrate-database.yml", key, GeneratedWorkflow)
 		case w == c.ReleaseChecks.Workflow:
-			add("pre-publish.workflow: %s is also the release-checks workflow; use a workflow of its own", w)
+			add("%s.workflow: %s is also the release-checks workflow; use a workflow of its own", key, w)
 		case w == c.ReleaseAssets.Workflow:
-			add("pre-publish.workflow: %s is also the release-assets workflow; use a workflow of its own", w)
+			add("%s.workflow: %s is also the release-assets workflow; use a workflow of its own", key, w)
+		case slices.ContainsFunc(c.PrePublish[:i], func(o Hook) bool { return o.Workflow == w }):
+			add("%s: %s is listed twice", key, w)
+		}
+		if h.Repository != "" {
+			add("%s.repository: running a workflow in another repository before publishing isn't supported yet; use a workflow in this repository", key)
 		}
 	}
 	for i, d := range c.Downstream {

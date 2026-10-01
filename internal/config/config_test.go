@@ -151,14 +151,18 @@ func TestParseRejectsInvalidSettings(t *testing.T) {
 		"downstream file":   {"schema-version: 1\nversion: v0.2.0\ndownstream:\n  - repository: o/tap\n    workflow: update\n", "downstream[0].workflow"},
 		"downstream twice":  {"schema-version: 1\nversion: v0.2.0\ndownstream:\n  - repository: o/tap\n    workflow: a.yml\n  - repository: o/tap\n    workflow: a.yml\n", "listed twice"},
 		"downstream key":    {"schema-version: 1\nversion: v0.2.0\ndownstream:\n  - repository: o/tap\n    workflow: a.yml\n    ref: main\n", "field ref not found"},
-		"pre-publish self":  {"schema-version: 1\nversion: v0.2.0\npre-publish:\n  workflow: release-planner.yml\n", "pre-publish.workflow: name a workflow file in .github/workflows other than release-planner.yml"},
-		"pre-publish path":  {"schema-version: 1\nversion: v0.2.0\npre-publish:\n  workflow: ../migrate-database.yml\n", "pre-publish.workflow"},
-		"pre-publish is the build": {"schema-version: 1\nversion: v0.2.0\nrelease-assets:\n  workflow: build.yml\npre-publish:\n  workflow: build.yml\n",
-			"pre-publish.workflow: build.yml is also the release-assets workflow; use a workflow of its own"},
-		"pre-publish is the checks": {"schema-version: 1\nversion: v0.2.0\nrelease-checks:\n  workflow: ci.yml\npre-publish:\n  workflow: ci.yml\n",
-			"pre-publish.workflow: ci.yml is also the release-checks workflow; use a workflow of its own"},
-		"pre-publish environment key": {"schema-version: 1\nversion: v0.2.0\npre-publish:\n  workflow: migrate-database.yml\n  environment: production\n", "field environment not found"},
-		"pre-publish key":             {"schema-version: 1\nversion: v0.2.0\npre-publish:\n  workflow: migrate-database.yml\n  secrets: inherit\n", "field secrets not found"},
+		"pre-publish self":  {"schema-version: 1\nversion: v0.2.0\npre-publish:\n  - workflow: release-planner.yml\n", "pre-publish[0].workflow: name a workflow file in .github/workflows other than release-planner.yml"},
+		"pre-publish path":  {"schema-version: 1\nversion: v0.2.0\npre-publish:\n  - workflow: ../migrate-database.yml\n", "pre-publish[0].workflow"},
+		"pre-publish is the build": {"schema-version: 1\nversion: v0.2.0\nrelease-assets:\n  workflow: build.yml\npre-publish:\n  - workflow: build.yml\n",
+			"pre-publish[0].workflow: build.yml is also the release-assets workflow; use a workflow of its own"},
+		"pre-publish is the checks": {"schema-version: 1\nversion: v0.2.0\nrelease-checks:\n  workflow: ci.yml\npre-publish:\n  - workflow: ci.yml\n",
+			"pre-publish[0].workflow: ci.yml is also the release-checks workflow; use a workflow of its own"},
+		"pre-publish twice": {"schema-version: 1\nversion: v0.2.0\npre-publish:\n  - workflow: migrate-database.yml\n  - workflow: migrate-database.yml\n", "pre-publish[1]: migrate-database.yml is listed twice"},
+		"pre-publish elsewhere": {"schema-version: 1\nversion: v0.2.0\npre-publish:\n  - workflow: migrate.yml\n    repository: fabricahq/infra\n",
+			"pre-publish[0].repository: running a workflow in another repository before publishing isn't supported yet; use a workflow in this repository"},
+		"pre-publish environment key": {"schema-version: 1\nversion: v0.2.0\npre-publish:\n  - workflow: migrate-database.yml\n    environment: production\n", "field environment not found"},
+		"pre-publish key":             {"schema-version: 1\nversion: v0.2.0\npre-publish:\n  - workflow: migrate-database.yml\n    secrets: inherit\n", "field secrets not found"},
+		"pre-publish as one workflow": {"schema-version: 1\nversion: v0.2.0\npre-publish:\n  workflow: migrate-database.yml\n", "cannot unmarshal"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := Parse([]byte(tc.yaml), ""); err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -169,11 +173,11 @@ func TestParseRejectsInvalidSettings(t *testing.T) {
 }
 
 func TestParseReadsPrePublish(t *testing.T) {
-	c, err := Parse([]byte("schema-version: 1\nversion: v0.2.0\npre-publish:\n  workflow: migrate-database.yml\n"), "")
-	if err != nil || !c.PrePublish.Enabled() || c.PrePublish.Workflow != "migrate-database.yml" || c.PrePublish.Environment != "" {
+	c, err := Parse([]byte("schema-version: 1\nversion: v0.2.0\npre-publish:\n  - workflow: migrate-database.yml\n  - workflow: warm-caches.yml\n"), "")
+	if err != nil || len(c.PrePublish) != 2 || c.PrePublish[0].Workflow != "migrate-database.yml" || c.PrePublish[1].Workflow != "warm-caches.yml" || c.PrePublish[0].Environment != "" {
 		t.Fatal(c, err)
 	}
-	if c, err := Parse([]byte("schema-version: 1\nversion: v0.2.0\n"), ""); err != nil || c.PrePublish.Enabled() {
+	if c, err := Parse([]byte("schema-version: 1\nversion: v0.2.0\n"), ""); err != nil || len(c.PrePublish) != 0 {
 		t.Fatal(c, err)
 	}
 }

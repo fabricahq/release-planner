@@ -13,8 +13,8 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// PrePublishWorkflow is what Release Planner reads from the pre-publish workflow's file.
-type PrePublishWorkflow struct {
+// HookWorkflow is what Release Planner reads from a hook workflow's file.
+type HookWorkflow struct {
 	// Name is the name: the workflow declares, or "" when it declares none, or one GitHub
 	// would evaluate as an expression where the Release workflow passes it to the report.
 	Name string
@@ -23,14 +23,15 @@ type PrePublishWorkflow struct {
 	Environment string
 }
 
-// ReadPrePublish reads the pre-publish workflow file in .github/workflows under root, and
+// ReadHook reads a hook workflow's file in .github/workflows under root, such as a pre-publish
+// workflow's, and
 // checks the parts of it Release Planner relies on: every job names the same GitHub environment
 // literally, which isn't one of Release Planner's own; no job calls another workflow, which
 // couldn't name one; and it requires no secrets, since the Release workflow passes none.
 // problem says what to fix, or is "" when the workflow fits. A missing file is no problem
 // here; callers report it.
-func ReadPrePublish(root, workflow string) (PrePublishWorkflow, string, error) {
-	var w PrePublishWorkflow
+func ReadHook(root, workflow string) (HookWorkflow, string, error) {
+	var w HookWorkflow
 	data, err := os.ReadFile(filepath.Join(root, ".github", "workflows", workflow))
 	if errors.Is(err, fs.ErrNotExist) {
 		return w, "", nil
@@ -71,7 +72,7 @@ func ReadPrePublish(root, workflow string) (PrePublishWorkflow, string, error) {
 			return w, "", fmt.Errorf(".github/workflows/%s: job %s: %v", workflow, id, err)
 		}
 		if job.Uses != "" {
-			return w, fmt.Sprintf("job %s calls another workflow; every job of a pre-publish workflow must run in a GitHub environment itself", id), nil
+			return w, fmt.Sprintf("job %s calls another workflow; every job must run in a GitHub environment itself", id), nil
 		}
 		env := job.Environment
 		if m, ok := env.(map[string]any); ok {
@@ -80,7 +81,7 @@ func ReadPrePublish(root, workflow string) (PrePublishWorkflow, string, error) {
 		name, _ := env.(string)
 		switch {
 		case name == "":
-			return w, fmt.Sprintf("job %s runs in no environment; every job of a pre-publish workflow must name the same GitHub environment, such as environment: production", id), nil
+			return w, fmt.Sprintf("job %s runs in no environment; every job must name the same GitHub environment, such as environment: production", id), nil
 		case strings.Contains(name, "${{"):
 			return w, fmt.Sprintf("job %s names its environment with an expression; name it literally, such as environment: production", id), nil
 		case !slices.Contains(environments, name):
@@ -89,7 +90,7 @@ func ReadPrePublish(root, workflow string) (PrePublishWorkflow, string, error) {
 	}
 	if len(environments) > 1 {
 		slices.Sort(environments)
-		return w, fmt.Sprintf("jobs run in different environments, %s and %s; every job of a pre-publish workflow must name the same one",
+		return w, fmt.Sprintf("jobs run in different environments, %s and %s; every job must name the same one",
 			strings.Join(environments[:len(environments)-1], ", "), environments[len(environments)-1]), nil
 	}
 	switch e := environments[0]; {

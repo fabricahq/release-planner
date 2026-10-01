@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-const prePublishConfig = "pre-publish:\n  workflow: migrate-database.yml\n"
+const prePublishConfig = "pre-publish:\n  - workflow: migrate-database.yml\n"
 
 // migrateWorkflow is a pre-publish workflow whose job runs in environment.
 func migrateWorkflow(environment string) string {
@@ -256,5 +256,23 @@ func TestAWaitingReleaseContinuesOnceTheEarlierOneIsPublishedOrWithdrawn(t *test
 				t.Fatalf("%+v %s", p, errOut)
 			}
 		})
+	}
+}
+
+// Each pre-publish workflow's environment is checked, and they may differ: here the second's
+// doesn't exist, so the run stops before either runs.
+func TestValidateChecksEachPrePublishEnvironment(t *testing.T) {
+	o := newOrigin(t, prePublishConfig+"  - workflow: warm-caches.yml\n")
+	o.git("tag", "v0.9.0", o.release)
+	o.git("checkout", "-q", "main")
+	merged := o.merge("merge")
+	o.write(".github/workflows/warm-caches.yml", migrateWorkflow("staging"))
+	o.repo.commit("Add the cache workflow")
+	actionsFiles(t)
+	mergedAPI(t, o, merged, production(nil))
+	dir := o.checkout(t)
+	(&repo{t: t, dir: dir}).git("checkout", "-q", "main")
+	if p, _, errOut := validateMerged(t, dir, merged); p.Tag != "" || !strings.Contains(errOut, "The staging environment doesn't exist, so warm-caches.yml can't run safely") {
+		t.Fatalf("%+v %s", p, errOut)
 	}
 }

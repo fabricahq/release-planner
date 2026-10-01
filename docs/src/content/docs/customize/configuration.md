@@ -65,7 +65,7 @@ release-assets:
 # that holds its credentials, and Release Planner reads it from there.
 # Default: none.
 pre-publish:
-  workflow: migrate-database.yml
+  - workflow: migrate-database.yml
 
 # Workflows in other repositories to run after each new stable release.
 # Default: none.
