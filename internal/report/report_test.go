@@ -689,7 +689,7 @@ func TestRendersARunThatStoppedOnPurpose(t *testing.T) {
 	waiting.Jobs["validate"] = Job{Result: "failure", Outputs: map[string]string{"waiting-for": "v1.1.0", "waiting-for-file": "_releases/v1.1.0.md"}}
 	equal(t, render(t, waiting).Summary, "⏳ **This release waits for v1.1.0,** which merged earlier and isn't published yet. Publish v1.1.0, or withdraw it by deleting `_releases/v1.1.0.md` in a pull request. Then use **Re-run failed jobs** on [this run](https://github.com/o/r/actions/runs/100).\n")
 	waiting.Jobs["validate"] = Job{Result: "failure", Outputs: map[string]string{"waiting-for": "v1.1.0"}}
-	equal(t, render(t, waiting).Summary, "⏳ **This release waits for v1.1.0,** which is tagged but has no published release. Publish v1.1.0 by retrying its release, then use **Re-run failed jobs** on [this run](https://github.com/o/r/actions/runs/100).\n")
+	equal(t, render(t, waiting).Summary, "⏳ **This release waits for v1.1.0,** which is tagged but has no published release. Publish v1.1.0 by re-running its release run, then use **Re-run failed jobs** on [this run](https://github.com/o/r/actions/runs/100). If v1.1.0's tag isn't on its release commit, delete the tag first.\n")
 
 	const withdrawn = "⚪ **A later change to the release notes on main withdrew or replaced what this pull request approved,** so this run doesn't publish it. Any newer request publishes from its own run.\n"
 	stale := status(nil, true, results("validate", "failure", "publish", "skipped"))

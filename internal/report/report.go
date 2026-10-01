@@ -166,7 +166,7 @@ func (s Status) stopped(p *plan.Plan, failed string) string {
 		return fmt.Sprintf("⏳ **This release waits for %s,** which merged earlier and isn't published yet. Publish %s, or withdraw it by deleting `%s` in a pull request. Then use **Re-run failed jobs** on [this run](%s).", tag, tag, validate["waiting-for-file"], s.RunURL)
 	case failed == "validate" && validate["waiting-for"] != "":
 		tag := validate["waiting-for"]
-		return fmt.Sprintf("⏳ **This release waits for %s,** which is tagged but has no published release. Publish %s by retrying its release, then use **Re-run failed jobs** on [this run](%s).", tag, tag, s.RunURL)
+		return fmt.Sprintf("⏳ **This release waits for %s,** which is tagged but has no published release. Publish %s by re-running its release run, then use **Re-run failed jobs** on [this run](%s). If %s's tag isn't on its release commit, delete the tag first.", tag, tag, s.RunURL, tag)
 	case failed == "validate" && validate["withdrawn"] != "", failed == "publish" && publish["release"] == "withdrawn":
 		return fmt.Sprintf("⚪ **A later change to the release notes on %s withdrew or replaced what this pull request approved,** so this run doesn't publish it. Any newer request publishes from its own run.", s.Branch)
 	case failed == "pre-publish" && s.Jobs[failed].Result == "cancelled":

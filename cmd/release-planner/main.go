@@ -888,7 +888,9 @@ func beforePrePublish(ctx context.Context, repo gitrepo.Repo, gh *publish.GitHub
 			return err
 		}
 		if file == "" {
-			return fmt.Errorf("%s is tagged but has no published release, so %s waits for it. Publish %s by retrying its release, then use Re-run failed jobs on this run", tag, p.Tag, tag)
+			// Re-running the earlier release's own run publishes it on its tag, if the tag is on its
+			// release commit; a tag made by hand elsewhere must go first.
+			return fmt.Errorf("%s is tagged but has no published release, so %s waits for it. Publish %s by re-running its release run; if its tag isn't on its release commit, delete the tag first. Then use Re-run failed jobs on this run", tag, p.Tag, tag)
 		}
 		return fmt.Errorf("%s is on %s, but %s isn't published, so %s waits for it. Publish %s, or withdraw it by deleting %s in a pull request.%s", file, c.Branch, tag, p.Tag, tag, file, retry)
 	}

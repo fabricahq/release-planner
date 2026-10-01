@@ -85,7 +85,7 @@ func TestValidateAfterMergeWaitsForEarlierReleases(t *testing.T) {
 		"earlier request withdrawn": {prePublishConfig, pending, withdraw, nil, "", "", ""},
 		"later request pending":     {prePublishConfig, func(o *origin) { o.write("_releases/v1.1.0.md", "Later\n"); o.repo.commit("Release v1.1.0 (#4)") }, nil, nil, "", "", ""},
 		"previous release missing": {prePublishConfig, nil, nil, map[string]any{"GET /releases": []any{}},
-			"v0.9.0 is tagged but has no published release, so v1.0.0 waits for it. Publish v0.9.0 by retrying its release, then use Re-run failed jobs on this run", "v0.9.0", ""},
+			"v0.9.0 is tagged but has no published release, so v1.0.0 waits for it. Publish v0.9.0 by re-running its release run; if its tag isn't on its release commit, delete the tag first. Then use Re-run failed jobs on this run", "v0.9.0", ""},
 		"previous release a draft": {prePublishConfig, nil, nil, map[string]any{"GET /releases": []any{map[string]any{"tag_name": "v0.9.0", "draft": true}}},
 			"v0.9.0 is tagged but has no published release", "v0.9.0", ""},
 		"without pre-publish": {"", pending, nil, map[string]any{"GET /releases": []any{}}, "", "", ""},
@@ -171,6 +171,48 @@ func TestValidateChecksThePrePublishEnvironment(t *testing.T) {
 			warned := strings.Contains(output("summary"), "The production environment")
 			if p.Tag != "v1.0.0" || warned != (tc.warn != "") || !strings.Contains(output("summary"), tc.warn) {
 				t.Fatalf("%+v\n%s %s\n%s", p, out, errOut, output("summary"))
+			}
+		})
+	}
+}
+
+// Each way the message offers out of waiting works: publishing the earlier release, tagged or
+// not, or withdrawing an untagged one, and then validating again, as Re-run failed jobs does.
+func TestAWaitingReleaseContinuesOnceTheEarlierOneIsPublishedOrWithdrawn(t *testing.T) {
+	tagged := strings.Repeat("a", 40)
+	for name, tc := range map[string]struct {
+		tagged  bool
+		unblock func(o *origin, api *fakeAPI)
+	}{
+		"tagged, then published": {true, func(o *origin, api *fakeAPI) {
+			api.set("GET /releases", []any{map[string]any{"tag_name": "v0.9.0"}, map[string]any{"tag_name": "v0.9.5"}})
+		}},
+		"untagged, then published": {false, func(o *origin, api *fakeAPI) {
+			api.set("GET /releases", []any{map[string]any{"tag_name": "v0.9.0"}, map[string]any{"tag_name": "v0.9.5"}})
+		}},
+		"untagged, then withdrawn": {false, func(o *origin, api *fakeAPI) {
+			o.git("rm", "-q", "_releases/v0.9.5.md")
+			api.set("GET /git/ref/heads/main", map[string]any{"object": map[string]string{"type": "commit", "sha": o.repo.commit("Withdraw v0.9.5 (#5)")}})
+		}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			o, merged := laterOrigin(t, prePublishConfig, func(o *origin) {
+				o.write("_releases/v0.9.5.md", "Pending\n")
+				o.repo.commit("Release v0.9.5 (#4)")
+			}, nil)
+			routes := map[string]any{}
+			if tc.tagged {
+				routes["GET /git/ref/tags/v0.9.5"] = map[string]any{"object": map[string]string{"type": "commit", "sha": tagged}}
+			}
+			actionsFiles(t)
+			api := mergedAPI(t, o, merged, production(routes))
+			if p, _, errOut := validateMerged(t, o.runCheckout(t, merged), merged); p.Tag != "" || !strings.Contains(errOut, "waits for it") {
+				t.Fatalf("%+v %s", p, errOut)
+			}
+			tc.unblock(o, api)
+			actionsFiles(t)
+			if p, _, errOut := validateMerged(t, o.runCheckout(t, merged), merged); p.Tag != "v1.0.0" {
+				t.Fatalf("%+v %s", p, errOut)
 			}
 		})
 	}
