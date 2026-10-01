@@ -307,6 +307,17 @@ func TestValidateAfterMergeRefusesAWithdrawnRequest(t *testing.T) {
 			o.git("checkout", "-q", "main")
 			o.git("merge", "-q", "--no-ff", "side", "-m", "Merge pull request #6 from fabricahq/side")
 		}, ""},
+		// Rebased instead, each of the branch's commits is a step of main, so the deletion counts
+		// and the run refuses, though the notes end up unchanged.
+		"deleted and added back on one branch, rebased": {func(o *origin) {
+			o.git("checkout", "-q", "-b", "side")
+			o.git("rm", "-q", "_releases/v1.0.0.md")
+			o.repo.commit("Withdraw v1.0.0")
+			o.write("_releases/v1.0.0.md", "Approved notes\n")
+			o.repo.commit("Request v1.0.0 again")
+			o.git("checkout", "-q", "main")
+			o.git("cherry-pick", "main..side")
+		}, "so v1.0.0 was withdrawn or requested again"},
 		// Two pull requests withdraw it, then request it again, at a newer release commit.
 		"deleted, then added back": {func(o *origin) {
 			o.git("rm", "-q", "_releases/v1.0.0.md")

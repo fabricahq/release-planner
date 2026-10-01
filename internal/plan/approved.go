@@ -51,19 +51,20 @@ func shortSHA(sha string) string {
 // branch must still hold exactly what the plan's merge approved, for the requested release
 // until its version is tagged, and for every edited release.
 //
-// Release Planner reads a request from a pull request's whole diff, and each pull request lands
-// on the release branch as one step of its first-parent history: a merge commit, a squash, or
-// the last commit of a rebase. So a request is the step that approved it, and it stands when:
+// The steps are the commits of the release branch's first-parent history. A pull request merged
+// with a merge commit or squashed lands as one step; a rebased one lands as one step per
+// rebased commit, the last of which is its merged commit. A request stands when:
 //
-//   - that step, the plan's merged commit, is on tip's first-parent history;
-//   - no later step changed the notes file compared with the step before it, so no pull
-//     request withdrew it, edited it, or requested the version again; an exact move into the
-//     notes directory tip configures isn't a change; and
+//   - the plan's merged commit is on tip's first-parent history;
+//   - no later step changed the notes file compared with the step before it, so nothing
+//     withdrew it, edited it, or requested the version again; an exact move into the notes
+//     directory tip configures isn't a change; and
 //   - tip holds the approved notes.
 //
-// Only steps count, never the commits on the branches they merged, so a branch that merged the
-// release branch in, or deleted and restored the file, changes nothing unless its own merge
-// does. A history rewritten so it no longer runs through the merge, as by a fast-forward to a
+// Commits on the branches that merge commits merged never count, so a branch that merged the
+// release branch in, or deleted and restored the file, changes nothing unless its merge does.
+// A rebased pull request's commits do count, each one, so one that deletes and restores the
+// file refuses even though the notes end unchanged; that fails in the safe direction. A history rewritten so it no longer runs through the merge, as by a fast-forward to a
 // branch that started before it, can't be checked, so it refuses.
 //
 // tip must come from the branch itself, not origin/branch: in a re-run, actions/checkout moves
