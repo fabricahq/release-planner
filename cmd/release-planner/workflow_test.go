@@ -204,7 +204,7 @@ func TestReportListsEachPostPublishWorkflow(t *testing.T) {
 		t.Fatalf("%d %s %s", code, out, errOut)
 	}
 	body := api.sent("PATCH /pulls/2")
-	if !strings.Contains(api.sent("POST /issues/2/comments"), "**post-publish (deploy.yml)** job failed") {
+	if !strings.Contains(api.sent("POST /issues/2/comments"), "The release's **Deploy** job failed") {
 		t.Fatal(api.requests)
 	}
 	for _, want := range []string{
@@ -278,18 +278,21 @@ func TestReportLinksEachHookAtTheLatestAttempt(t *testing.T) {
 		`{"job":"post-publish-2","name":"post-publish (fabricahq/release-planner-sandbox:update.yml)","when":"post-publish","workflow":"update.yml","repository":"fabricahq/release-planner-sandbox"}]`
 	file := writePlan(t, plan.Plan{Tag: "v0.14.0", Commit: strings.Repeat("a", 40), PullRequest: 2})
 	for _, tc := range []struct {
-		attempt int
-		deploy  string
-		want    []string
+		attempt         int
+		deploy          string
+		failed, comment string
+		want            []string
 	}{
-		{2, "failure", []string{
-			"| ❌ | Deploy | [Details](https://github.com/fabricahq/example/actions/runs/100/job/110608183785) |",
-			"| ❌ | Run fabricahq/release-planner-sandbox `update.yml` | [Details](https://github.com/fabricahq/example/actions/runs/100/job/110608183369) |",
-		}},
-		{3, "success", []string{
-			"| ✅ | Deploy | [Details](https://github.com/fabricahq/example/actions/runs/100/job/110608822417) |",
-			"| ❌ | Run fabricahq/release-planner-sandbox `update.yml` | [Details](https://github.com/fabricahq/example/actions/runs/100/job/110608822213) |",
-		}},
+		{2, "failure", "❌ **The Deploy and fabricahq/release-planner-sandbox `update.yml` jobs failed.**",
+			"The release's **Deploy** and **fabricahq/release-planner-sandbox `update.yml`** jobs failed in", []string{
+				"| ❌ | Deploy | [Details](https://github.com/fabricahq/example/actions/runs/100/job/110608183785) |",
+				"| ❌ | Run fabricahq/release-planner-sandbox `update.yml` | [Details](https://github.com/fabricahq/example/actions/runs/100/job/110608183369) |",
+			}},
+		{3, "success", "❌ **The fabricahq/release-planner-sandbox `update.yml` job failed.**",
+			"The release's **fabricahq/release-planner-sandbox `update.yml`** job failed in", []string{
+				"| ✅ | Deploy | [Details](https://github.com/fabricahq/example/actions/runs/100/job/110608822417) |",
+				"| ❌ | Run fabricahq/release-planner-sandbox `update.yml` | [Details](https://github.com/fabricahq/example/actions/runs/100/job/110608822213) |",
+			}},
 	} {
 		t.Run(fmt.Sprintf("attempt %d", tc.attempt), func(t *testing.T) {
 			t.Setenv("GITHUB_RUN_ATTEMPT", fmt.Sprint(tc.attempt))
@@ -306,7 +309,10 @@ func TestReportLinksEachHookAtTheLatestAttempt(t *testing.T) {
 				t.Fatalf("%d %s %s", code, out, errOut)
 			}
 			body := api.sent("PATCH /pulls/2")
-			for _, want := range append(tc.want,
+			if comment := api.sent("POST /issues/2/comments"); !strings.Contains(comment, tc.comment) {
+				t.Errorf("comment lacks %q:\n%s", tc.comment, comment)
+			}
+			for _, want := range append(tc.want, tc.failed,
 				"| ✅ | Migrate the database | [Details](https://github.com/fabricahq/example/actions/runs/100/job/110608821335) |",
 				"| ✅ | Warm the caches | [Details](https://github.com/fabricahq/example/actions/runs/100/job/110608822302) |",
 				"| ✅ | Publish | [Details](https://github.com/fabricahq/example/actions/runs/100/job/110608822796) |",
