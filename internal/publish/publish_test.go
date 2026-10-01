@@ -341,16 +341,25 @@ func TestRefusesUnsafePublication(t *testing.T) {
 			f.tags["v1.1.0"] = ref{"tag", "tagobject"}
 			f.annotated["tagobject"] = other
 		}, nil, "already points to"},
-		"different release": {func(f *fakeGitHub) { f.release("v1.1.0", true, "Other") }, nil, "differs from the approved notes"},
-		"tags changed":      {func(f *fakeGitHub) { f.tags["v1.2.0"] = ref{"commit", other} }, nil, "changed since planning"},
-		"draft previous":    {func(f *fakeGitHub) { f.releases[0].Draft = true }, nil, "publish v1.0.0 first"},
-		"missing previous":  {func(f *fakeGitHub) { f.releases = nil }, nil, "publish v1.0.0 first"},
-		"short commit":      {nil, func(p *plan.Plan) { p.Commit = "aaaaaaa" }, "not a full commit SHA"},
-		"no release":        {nil, func(p *plan.Plan) { p.Tag = "" }, "requests no release"},
-		"not merged":        {nil, func(p *plan.Plan) { p.Merged = "" }, "names no merged pull request"},
-		"other head":        {nil, func(p *plan.Plan) { p.Head = other }, "not the planned #7"},
-		"other pull":        {nil, func(p *plan.Plan) { p.PullRequest = 8 }, "not the planned #8"},
-		"direct push":       {func(f *fakeGitHub) { f.pulls = nil }, nil, "a direct push publishes nothing"},
+		// A withdrawn attempt left a draft with its own notes and commit; requesting the version
+		// again finds it, and the message says how to clear it.
+		"draft from an earlier request": {func(f *fakeGitHub) {
+			f.release("v1.1.0", true, "Other")
+			f.releases[1].TargetCommitish = other
+		}, nil, "an unpublished v1.1.0 draft release, left by an earlier attempt, has other notes than this request; delete that draft on GitHub, then retry"},
+		"published release with other settings": {func(f *fakeGitHub) {
+			f.release("v1.1.0", false, "## Notes\n")
+			f.releases[1].Prerelease = true
+		}, nil, "differs from the approved notes"},
+		"tags changed":     {func(f *fakeGitHub) { f.tags["v1.2.0"] = ref{"commit", other} }, nil, "changed since planning"},
+		"draft previous":   {func(f *fakeGitHub) { f.releases[0].Draft = true }, nil, "publish v1.0.0 first"},
+		"missing previous": {func(f *fakeGitHub) { f.releases = nil }, nil, "publish v1.0.0 first"},
+		"short commit":     {nil, func(p *plan.Plan) { p.Commit = "aaaaaaa" }, "not a full commit SHA"},
+		"no release":       {nil, func(p *plan.Plan) { p.Tag = "" }, "requests no release"},
+		"not merged":       {nil, func(p *plan.Plan) { p.Merged = "" }, "names no merged pull request"},
+		"other head":       {nil, func(p *plan.Plan) { p.Head = other }, "not the planned #7"},
+		"other pull":       {nil, func(p *plan.Plan) { p.PullRequest = 8 }, "not the planned #8"},
+		"direct push":      {func(f *fakeGitHub) { f.pulls = nil }, nil, "a direct push publishes nothing"},
 		"unmerged pull": {func(f *fakeGitHub) {
 			f.pulls = map[int]pull{7: {commit: merged, merge: merged, base: "main", head: head}}
 		}, nil, "a direct push publishes nothing"},

@@ -232,7 +232,12 @@ func release(ctx context.Context, gh *GitHub, p plan.Plan, assets []File, check 
 	}
 	// Notes are editable after publication, so only a draft's must still be the plan's.
 	changed := release != nil && normalize(release.Body) != normalize(p.Notes)
-	if release != nil && (release.Name != p.Tag || changed && release.Draft || release.Prerelease != p.Prerelease) {
+	if release != nil && release.Draft && changed {
+		// Such as a draft an attempt staged before its request was withdrawn, which a new
+		// request for the version finds.
+		return Result{}, fmt.Errorf("an unpublished %s draft release, left by an earlier attempt, has other notes than this request; delete that draft on GitHub, then retry", p.Tag)
+	}
+	if release != nil && (release.Name != p.Tag || release.Prerelease != p.Prerelease) {
 		return Result{}, fmt.Errorf("an existing %s release differs from the approved notes; resolve it by hand", p.Tag)
 	}
 	if release != nil && release.Draft && existing == "" && release.TargetCommitish != commit {
