@@ -46,6 +46,8 @@ type fakeGitHub struct {
 	content     map[int64][]byte
 	pulls       map[int]pull
 	server      *httptest.Server
+	// auth records each request's method and token.
+	auth []string
 }
 
 // pull is a pull request as the commits/{sha}/pulls endpoint lists it for commit.
@@ -67,10 +69,12 @@ func (f *fakeGitHub) release(tag string, draft bool, body string) {
 func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if r.Header.Get("Authorization") != "Bearer token" {
+	token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if token != "token" && token != "write" {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	f.auth = append(f.auth, r.Method+" "+token)
 	path := strings.TrimPrefix(r.URL.Path, "/repos/fabricahq/example")
 	f.host = r.Host
 	send := func(v any) { _ = json.NewEncoder(w).Encode(v) }
@@ -655,5 +659,29 @@ func TestPublishedMeansAReleaseThatIsNotADraft(t *testing.T) {
 		if got, err := Published(context.Background(), gh, tag); err != nil || got != want {
 			t.Errorf("Published(%s) = %v, %v; want %v", tag, got, err, want)
 		}
+	}
+}
+
+// With a release App, only writes use its token; reads and downloads keep the workflow's.
+func TestWritesUseTheWriteToken(t *testing.T) {
+	f := withPrevious()
+	f.server = httptest.NewServer(f)
+	t.Cleanup(f.server.Close)
+	gh := &GitHub{BaseURL: f.server.URL, Token: "token", WriteToken: "write", Repository: "fabricahq/example", HTTP: f.server.Client()}
+	if _, err := Publish(context.Background(), gh, minor(), "main", files(t, map[string]string{"a.tar.gz": "a"})); err != nil {
+		t.Fatal(err)
+	}
+	writes := 0
+	for _, a := range f.auth {
+		method, token, _ := strings.Cut(a, " ")
+		if (method == http.MethodGet) != (token == "token") {
+			t.Errorf("%s", a)
+		}
+		if token == "write" {
+			writes++
+		}
+	}
+	if writes != 3 {
+		t.Fatalf("%d writes with the App token: %v", writes, f.auth)
 	}
 }

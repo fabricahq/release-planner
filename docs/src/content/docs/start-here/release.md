@@ -40,6 +40,8 @@ If anything fails, the top of the description names the failed job and how to re
 
 Open the run the description links to. Once the problem is fixed, use **Re-run failed jobs** on that run. Re-running is always safe: it publishes the same release commit and files, and if the release was already published, the workflow changes nothing.
 
+If publishing failed with `Resource not accessible by integration`, the release commit's workflow files match no branch any more, and the workflow's own token can't tag it. [Publish with a release GitHub App](/start-here/set-up/#publish-with-a-release-github-app), then use **Re-run failed jobs**.
+
 ## Correct published notes
 
 Published tags and files never change, but notes can. Ask your agent to fix the notes of a release, or edit its file, such as `_releases/v1.1.0.md`, in a pull request of its own. Its description says merging updates that release's notes, and warns if someone edited them on GitHub since, because merging replaces those edits. Merging updates the release on GitHub. Deleting a published release's notes file isn't allowed.

@@ -736,7 +736,10 @@ func cmdPublish(ctx context.Context, args []string, out io.Writer) error {
 	if err := plan.StillApproved(ctx, gitrepo.Repo{Dir: *dir}, *branch, p); err != nil {
 		return err
 	}
-	res, err := publish.Publish(ctx, api(token, *repository), p, *branch, assets)
+	gh := api(token, *repository)
+	// A release GitHub App's token, when the release environment configures one, makes the writes.
+	gh.WriteToken = os.Getenv("RELEASE_TOKEN")
+	res, err := publish.Publish(ctx, gh, p, *branch, assets)
 	if err != nil {
 		return err
 	}

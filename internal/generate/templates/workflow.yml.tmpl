@@ -219,9 +219,36 @@ jobs:
       cancel-in-progress: false
       queue: max
     steps:
+      # An optional release GitHub App publishes instead of the workflow's token, so a tag
+      # ruleset can let only it create release tags, and it can tag a commit that changes
+      # workflow files, which the workflow's token can't.
+      - name: Check the release GitHub App settings
+        id: app
+        env:
+          CLIENT_ID: ${{"{{"}} vars.RELEASE_APP_CLIENT_ID {{"}}"}}
+          HAS_KEY: ${{"{{"}} secrets.RELEASE_APP_PRIVATE_KEY != '' {{"}}"}}
+        run: |
+          if [ -z "$CLIENT_ID" ] && [ "$HAS_KEY" != true ]; then
+            echo "use=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -z "$CLIENT_ID" ] || [ "$HAS_KEY" != true ]; then
+            echo "::error title=Release App::Set both RELEASE_APP_CLIENT_ID and RELEASE_APP_PRIVATE_KEY in the release environment, or neither: {{.ReleaseAppDocs}}"
+            exit 1
+          fi
+          echo "use=true" >> "$GITHUB_OUTPUT"
+      - uses: {{.Actions.CreateGitHubAppToken}}
+        id: token
+        if: steps.app.outputs.use == 'true'
+        with:
+          client-id: ${{"{{"}} vars.RELEASE_APP_CLIENT_ID {{"}}"}}
+          private-key: ${{"{{"}} secrets.RELEASE_APP_PRIVATE_KEY {{"}}"}}
+          permission-contents: write
+          permission-workflows: write
       # The release branch's history, to check that no later commit withdrew or replaced the
       # notes the merge approved. Nothing from it runs.
-      - uses: {{.Actions.Checkout}}
+      - name: Check out the release branch's history
+        uses: {{.Actions.Checkout}}
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -250,6 +277,8 @@ jobs:
       - name: Publish the approved release
         env:
           GITHUB_TOKEN: ${{"{{"}} github.token {{"}}"}}
+          # Empty without the release App, so writes use GITHUB_TOKEN.
+          RELEASE_TOKEN: ${{"{{"}} steps.token.outputs.token {{"}}"}}
         run: release-planner publish --plan "$RUNNER_TEMP/plan/release-plan.json" --built-plan "$RUNNER_TEMP/built/release-plan.json" --branch {{.Branch}}{{if .ReleaseAssets.Workflow}} --assets "$RUNNER_TEMP/release-assets" --signer-workflow .github/workflows/release-planner.yml{{end}}
 {{- if .ReleaseAssets.Workflow}}
 

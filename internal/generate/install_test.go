@@ -4,6 +4,7 @@ import (
 	"errors"
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -521,12 +522,29 @@ type job struct {
 	Environment string            `yaml:"environment"`
 	Permissions map[string]string `yaml:"permissions"`
 	Concurrency map[string]any    `yaml:"concurrency"`
-	Steps       []struct {
-		Uses string            `yaml:"uses"`
-		If   string            `yaml:"if"`
-		With map[string]string `yaml:"with"`
-		Run  string            `yaml:"run"`
-	} `yaml:"steps"`
+	Steps       []step            `yaml:"steps"`
+}
+
+type step struct {
+	ID   string            `yaml:"id"`
+	Name string            `yaml:"name"`
+	Uses string            `yaml:"uses"`
+	If   string            `yaml:"if"`
+	With map[string]string `yaml:"with"`
+	Env  map[string]string `yaml:"env"`
+	Run  string            `yaml:"run"`
+}
+
+// named returns the job's step with the name or ID, or fails the test.
+func (j job) named(t *testing.T, name string) step {
+	t.Helper()
+	for _, s := range j.Steps {
+		if s.Name == name || s.ID == name {
+			return s
+		}
+	}
+	t.Fatalf("no step %q in %+v", name, j.Steps)
+	return step{}
 }
 
 // installCombination renders the workflow for a combination, with the workflows it calls.
@@ -605,8 +623,19 @@ func TestWorkflowCombinations(t *testing.T) {
 				t.Errorf("publish concurrency %v", publish.Concurrency)
 			}
 			// Publish reads the release branch's history to refuse a withdrawn request.
-			if checkout := publish.Steps[0]; !strings.HasPrefix(checkout.Uses, "actions/checkout@") || checkout.With["fetch-depth"] != "0" || checkout.With["persist-credentials"] != "false" {
+			if checkout := publish.named(t, "Check out the release branch's history"); !strings.HasPrefix(checkout.Uses, "actions/checkout@") || checkout.With["fetch-depth"] != "0" || checkout.With["persist-credentials"] != "false" {
 				t.Errorf("publish starts with %+v", checkout)
+			}
+			// With a release App, publish writes with an App token that can also create a tag on a
+			// commit that changes workflow files; reads keep the workflow's token.
+			token := publish.named(t, "token")
+			if !strings.HasPrefix(token.Uses, "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1") || token.If != "steps.app.outputs.use == 'true'" ||
+				token.With["client-id"] != "${{ vars.RELEASE_APP_CLIENT_ID }}" || token.With["private-key"] != "${{ secrets.RELEASE_APP_PRIVATE_KEY }}" ||
+				token.With["permission-contents"] != "write" || token.With["permission-workflows"] != "write" || token.With["owner"] != "" || token.With["repositories"] != "" {
+				t.Errorf("publish mints %+v", token)
+			}
+			if env := publish.Steps[len(publish.Steps)-1].Env; env["GITHUB_TOKEN"] != "${{ github.token }}" || env["RELEASE_TOKEN"] != "${{ steps.token.outputs.token }}" {
+				t.Errorf("publish runs with %v", env)
 			}
 			run := publish.Steps[len(publish.Steps)-1].Run
 			if assets != strings.Contains(run, "--assets \"$RUNNER_TEMP/release-assets\" --signer-workflow .github/workflows/release-planner.yml") || !strings.Contains(run, "--built-plan") {
@@ -723,5 +752,40 @@ func TestWorkflowCombinations(t *testing.T) {
 				t.Errorf("report: %+v", report)
 			}
 		})
+	}
+}
+
+// The release App is optional, but half a setup fails instead of publishing without it.
+func TestReleaseAppSettingsNeedBothOrNeither(t *testing.T) {
+	check := installCombination(t, t.TempDir(), "")["publish"].named(t, "app")
+	for name, tc := range map[string]struct {
+		clientID, hasKey string
+		ok               bool
+		use              string
+	}{
+		"neither":   {"", "false", true, "use=false"},
+		"both":      {"Iv1.abc", "true", true, "use=true"},
+		"no key":    {"Iv1.abc", "false", false, ""},
+		"no client": {"", "true", false, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			output := filepath.Join(t.TempDir(), "output")
+			cmd := exec.Command("bash", "-e", "-c", check.Run)
+			cmd.Env = append(os.Environ(), "CLIENT_ID="+tc.clientID, "HAS_KEY="+tc.hasKey, "GITHUB_OUTPUT="+output)
+			out, err := cmd.CombinedOutput()
+			if (err == nil) != tc.ok {
+				t.Fatalf("%v: %s", err, out)
+			}
+			got, _ := os.ReadFile(output)
+			if strings.TrimSpace(string(got)) != tc.use {
+				t.Fatalf("outputs %q", got)
+			}
+			if !tc.ok && !strings.Contains(string(out), "Set both RELEASE_APP_CLIENT_ID and RELEASE_APP_PRIVATE_KEY in the release environment, or neither") {
+				t.Fatalf("%s", out)
+			}
+		})
+	}
+	if check.Env["CLIENT_ID"] != "${{ vars.RELEASE_APP_CLIENT_ID }}" || check.Env["HAS_KEY"] != "${{ secrets.RELEASE_APP_PRIVATE_KEY != '' }}" {
+		t.Fatalf("%v", check.Env)
 	}
 }

@@ -59,6 +59,8 @@ type data struct {
 	Needs string
 	// DownstreamDocs explains how to set up the downstream environment.
 	DownstreamDocs string
+	// ReleaseAppDocs explains how to set up the optional release GitHub App.
+	ReleaseAppDocs string
 }
 
 func render(name string, c config.Config, marker string) string {
@@ -83,7 +85,7 @@ func render(name string, c config.Config, marker string) string {
 	d := data{Config: c, Module: Module, Actions: Actions, Marker: marker, ReleaseChecksRun: run.String(),
 		PolicyPath: config.Policy, StyleText: style(c), IsRelease: IsRelease(c.Version), Install: InstallCommand(c.Version),
 		StartsBeforeOne: semver.MustParse(c.FirstVersion).Major == 0, Needs: strings.Join(needs, ", "),
-		DownstreamDocs: publish.DownstreamEnvironmentDocs}
+		DownstreamDocs: publish.DownstreamEnvironmentDocs, ReleaseAppDocs: publish.ReleaseAppDocs}
 	if err := parsed.ExecuteTemplate(&b, name, d); err != nil {
 		// Templates are embedded and the config is validated, so this is a programming error.
 		panic(err)

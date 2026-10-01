@@ -62,6 +62,25 @@ The job that publishes a release runs in an environment named `release`. The env
 
 If you skip this step, GitHub creates the environment the first time a release runs, but without the branch restriction.
 
+### Publish with a release GitHub App
+
+This is optional. By default, the publish job writes with the workflow's own token. A dedicated GitHub App, whose key only the `release` environment holds, does two things that token can't:
+
+- **It can tag a commit whose workflow files have since changed.** GitHub refuses to let the workflow's token create a release, even a draft, on a commit whose `.github/workflows/` files match no branch: publishing then fails with `Resource not accessible by integration`. That happens when a workflow change, such as a Release Planner upgrade, merges while a release pull request is open and the release pull request's branch is deleted when it merges, or when you retry a release after such a change. Set up the App if that can happen in your repository.
+- **It lets a ruleset reserve release tags for it.** Without it, anyone who can push can create a `v*` tag outside Release Planner.
+
+To set it up:
+
+1. Create a GitHub App owned by the repository's owner (**Settings → Developer settings → GitHub Apps → New GitHub App**). Turn off **Webhook**. Under **Repository permissions**, set **Contents** and **Workflows** to **Read and write**, and leave everything else at no access. Subscribe to no events.
+2. Install the App on this repository only.
+3. Note the App's **Client ID**, and generate a **private key**.
+4. In the `release` environment, add the variable `RELEASE_APP_CLIENT_ID`, set to the Client ID, and the secret `RELEASE_APP_PRIVATE_KEY`, set to the private key.
+5. Optionally, add a tag ruleset (**Settings → Rules → Rulesets → New tag ruleset**) that targets `v*`, restricts creations, updates, and deletions, and lists only the App and repository admins under **Bypass list**.
+
+The publish job mints a token for this repository only, with **Contents** and **Workflows** write, and uses it only to write; it reads with the workflow's token. With neither setting, it publishes with the workflow's token as before. With only one, it fails and names the missing one.
+
+Tags and releases the App creates start workflows, which those made with the workflow's token never do: `create` and `push` for the tag, and `release` events (`created` for the draft, then `published`, and `released` or `prereleased`). They fire before the release's assets are attested from the release branch, so don't deploy or redistribute from them. Start that work as a [downstream workflow](/customize/downstream/) instead, which runs after the attestation, or have it verify the attestation first. To find workflows these events start, run `grep -lE 'release:|tags:' .github/workflows/*`.
+
 ## 6. Commit and release
 
 Commit the new files. Then tell your agent "let's release." See [Make a release](/start-here/release/).

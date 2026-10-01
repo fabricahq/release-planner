@@ -18,8 +18,11 @@ import (
 
 // GitHub is the small part of the REST API that publication needs.
 type GitHub struct {
-	BaseURL    string // such as https://api.github.com
-	Token      string
+	BaseURL string // such as https://api.github.com
+	Token   string
+	// WriteToken, if set, makes every request other than a GET, such as a release App's
+	// token; reads and downloads keep Token.
+	WriteToken string
 	Repository string // owner/name
 	HTTP       *http.Client
 }
@@ -110,8 +113,12 @@ func (g *GitHub) do(ctx context.Context, method, target string, body any, out an
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-	if g.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+g.Token)
+	token := g.Token
+	if method != http.MethodGet && g.WriteToken != "" {
+		token = g.WriteToken
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", contentType)
@@ -471,6 +478,7 @@ func branchRule(pattern, branch string) bool {
 const (
 	EnvironmentDocs           = "https://release-planner.fabricahq.com/start-here/set-up/#create-the-release-environment"
 	DownstreamEnvironmentDocs = "https://release-planner.fabricahq.com/customize/downstream/#set-up-the-downstream-environment"
+	ReleaseAppDocs            = "https://release-planner.fabricahq.com/start-here/set-up/#publish-with-a-release-github-app"
 )
 
 // EnvironmentWarnings explains how an environment differs from the recommended setup, which
