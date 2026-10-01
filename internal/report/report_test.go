@@ -347,10 +347,10 @@ func TestRendersFailures(t *testing.T) {
 	s = status(release(), true, results("validate", "success", "publish", "success", "post-publish-1", "success", "post-publish-2", "failure", "post-publish-3", "success"))
 	s.Hooks = []Hook{tap, bucket, deploy}
 	blocks = render(t, s)
-	contains(t, blocks.Summary, "✅ Published [v1.2.0](https://github.com/o/r/releases/tag/v1.2.0) from `0123456`.\n\n❌ **The post-publish (o/bucket:update.yml) job failed.** See [the workflow run](https://github.com/o/r/actions/runs/100). Once the cause is fixed, use **Re-run failed jobs** on that run.")
+	contains(t, blocks.Summary, "✅ Published [v1.2.0](https://github.com/o/r/releases/tag/v1.2.0) from `0123456`.\n\n❌ **The o/bucket `update.yml` job failed.** See [the workflow run](https://github.com/o/r/actions/runs/100). Once the cause is fixed, use **Re-run failed jobs** on that run.")
 	contains(t, blocks.Status, "| ✅ | Publish | [Details](https://github.com/o/r/actions/runs/100) |\n| ✅ | Run o/tap `update.yml` |",
 		"| ❌ | Run o/bucket `update.yml` |", "| ✅ | Deploy |")
-	contains(t, Failure(s), "The release's **post-publish (o/bucket:update.yml)** job failed")
+	contains(t, Failure(s), "The release's **o/bucket `update.yml`** job failed")
 	// Re-run failed jobs runs only that one.
 	s.Jobs["post-publish-2"] = Job{Result: "success"}
 	blocks = render(t, s)
@@ -376,6 +376,50 @@ func TestRendersFailures(t *testing.T) {
 	blocks = render(t, status(release(), false, results("validate", "success", "release-assets", "success", "attest", "cancelled")))
 	contains(t, blocks.Summary, "❌ **The attest job was cancelled.**")
 	contains(t, blocks.Status, "| ⚪ | Attest the release assets |")
+}
+
+// The failure sentence and comment name each hook as its row in the jobs table does, and name
+// every job that failed or was cancelled, not just the first.
+func TestNamesEveryFailedJobAsTheTableDoes(t *testing.T) {
+	const run = " See [the workflow run](https://github.com/o/r/actions/runs/100)."
+	const comment = " -->\n@mona The release's "
+	untitled := deploy
+	untitled.Title = ""
+	for _, tc := range []struct {
+		name            string
+		hooks           []Hook
+		results         []string
+		summary, failed string
+	}{
+		{"one", []Hook{tap, deploy}, []string{"post-publish-1", "success", "post-publish-3", "failure"},
+			"❌ **The Deploy job failed.**", "**Deploy** job failed in"},
+		{"two", []Hook{tap, deploy}, []string{"post-publish-1", "failure", "post-publish-3", "failure"},
+			"❌ **The o/tap `update.yml` and Deploy jobs failed.**", "**o/tap `update.yml`** and **Deploy** jobs failed in"},
+		{"three", []Hook{tap, bucket, untitled}, []string{"post-publish-1", "failure", "post-publish-2", "failure", "post-publish-3", "failure"},
+			"❌ **The o/tap `update.yml`, o/bucket `update.yml`, and `deploy.yml` jobs failed.**",
+			"**o/tap `update.yml`**, **o/bucket `update.yml`**, and **`deploy.yml`** jobs failed in"},
+		{"failed and cancelled", []Hook{tap, bucket, deploy}, []string{"post-publish-1", "failure", "post-publish-2", "cancelled", "post-publish-3", "cancelled"},
+			"❌ **The o/tap `update.yml` job failed, and the o/bucket `update.yml` and Deploy jobs were cancelled.**",
+			"**o/tap `update.yml`** job failed, and the **o/bucket `update.yml`** and **Deploy** jobs were cancelled, in"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := status(release(), true, results(append([]string{"validate", "success", "publish", "success"}, tc.results...)...))
+			s.Hooks, s.MergedBy = tc.hooks, "mona"
+			contains(t, render(t, s).Summary, tc.summary+run)
+			contains(t, Failure(s), comment+tc.failed+" [this workflow run](https://github.com/o/r/actions/runs/100).")
+		})
+	}
+
+	// Pre-publish workflows that failed together are named together.
+	caches := Hook{Job: "pre-publish-2", Name: "pre-publish (warm-caches.yml)", When: "pre-publish", Workflow: "warm-caches.yml"}
+	s := status(release(), true, results("validate", "success", "pre-publish-1", "failure", "pre-publish-2", "failure", "publish", "skipped"))
+	s.Hooks = []Hook{migrate, caches}
+	contains(t, render(t, s).Summary, "❌ **The Migrate the database and `warm-caches.yml` jobs failed,** so this attempt stopped before publishing.")
+	contains(t, Failure(s), "The release's **Migrate the database** and **`warm-caches.yml`** jobs failed in")
+	s.Jobs["pre-publish-2"] = Job{Result: "cancelled"}
+	contains(t, render(t, s).Summary, "❌ **The Migrate the database job failed, and the `warm-caches.yml` job was cancelled,** so this attempt stopped before publishing.")
+	s.Jobs["pre-publish-1"] = Job{Result: "cancelled"}
+	contains(t, render(t, s).Summary, "⚪ **The Migrate the database and `warm-caches.yml` jobs were cancelled,** so this attempt stopped before publishing. Use **Re-run failed jobs**")
 }
 
 func TestRendersRuleWarnings(t *testing.T) {
@@ -414,6 +458,39 @@ func TestJobURLMatchesTheJobOrItsCalledWorkflow(t *testing.T) {
 	} {
 		if got := jobURL(jobs, name, "fallback"); got != want {
 			t.Errorf("%s: %s", name, got)
+		}
+	}
+}
+
+// After Re-run failed jobs, the run's jobs hold each name at its latest attempt, but a job
+// that calls a workflow is named alone when an attempt skipped it, and with its called jobs
+// when one ran it, so both names can stand. The link follows the latest attempt.
+func TestJobURLFollowsTheLatestAttempt(t *testing.T) {
+	job := func(name string, attempt, id int) publish.RunJob {
+		return publish.RunJob{Name: name, Conclusion: "success", RunAttempt: attempt, URL: fmt.Sprintf("https://github.com/o/r/actions/runs/1/job/%d", id)}
+	}
+	failed := func(j publish.RunJob) publish.RunJob {
+		j.Conclusion = "failure"
+		return j
+	}
+	for _, tc := range []struct {
+		name string
+		jobs []publish.RunJob
+		want int
+	}{
+		{"skipped, then ran", []publish.RunJob{job("deploy", 1, 1), job("deploy / run", 2, 2)}, 2},
+		{"skipped, then ran twice", []publish.RunJob{job("deploy", 1, 1), job("deploy / run", 3, 3)}, 3},
+		{"ran, then skipped", []publish.RunJob{job("deploy / run", 1, 1), job("deploy", 2, 2)}, 2},
+		// A called workflow's jobs each stand at their latest attempt; one that succeeded was
+		// copied into the new attempt, with a new ID.
+		{"several called jobs", []publish.RunJob{job("deploy / build", 2, 1), job("deploy / ship", 2, 2), job("deploy", 1, 3)}, 1},
+		// The called job that failed shows why the row did.
+		{"several called jobs, one failed", []publish.RunJob{job("deploy / build", 2, 1), failed(job("deploy / ship", 2, 2))}, 2},
+		{"a called job only an earlier attempt lists", []publish.RunJob{job("deploy / build", 1, 1), job("deploy / ship", 2, 2)}, 2},
+	} {
+		want := fmt.Sprintf("https://github.com/o/r/actions/runs/1/job/%d", tc.want)
+		if got := jobURL(tc.jobs, "deploy", "fallback"); got != want {
+			t.Errorf("%s: got %s, want %s", tc.name, got, want)
 		}
 	}
 }
@@ -685,7 +762,7 @@ func TestRendersThePrePublishWorkflow(t *testing.T) {
 	blocks = render(t, s)
 	equal(t, blocks.Summary, `**[✏️ Edit the v1.2.0 release notes](https://github.com/o/r/edit/main/_releases/v1.2.0.md)**
 
-❌ **The pre-publish (migrate-database.yml) job failed,** so this attempt stopped before publishing. See [the workflow run](https://github.com/o/r/actions/runs/100). If the cause was outside the release commit, fix it, then use **Re-run failed jobs** on that run. If the release commit itself is broken, withdraw v1.2.0: delete `+"`_releases/v1.2.0.md`"+` in the pull request that fixes it, then release again. [What to do when pre-publish fails](https://release-planner.fabricahq.com/customize/pre-publish/#if-it-fails)
+❌ **The `+"`migrate-database.yml`"+` job failed,** so this attempt stopped before publishing. See [the workflow run](https://github.com/o/r/actions/runs/100). If the cause was outside the release commit, fix it, then use **Re-run failed jobs** on that run. If the release commit itself is broken, withdraw v1.2.0: delete `+"`_releases/v1.2.0.md`"+` in the pull request that fixes it, then release again. [What to do when pre-publish fails](https://release-planner.fabricahq.com/customize/pre-publish/#if-it-fails)
 
 ### Release status
 
@@ -695,12 +772,12 @@ func TestRendersThePrePublishWorkflow(t *testing.T) {
 `)
 	contains(t, blocks.Status, "| ✅ | Check the version and release notes | [Details](https://github.com/o/r/actions/runs/100/job/1) |\n| ❌ | Run `migrate-database.yml` | [Details](https://github.com/o/r/actions/runs/100/job/2) |\n")
 	lacks(t, blocks.Status, "Publish")
-	if s.Failed() != "pre-publish-1" || !strings.Contains(Failure(s), "The release's **pre-publish (migrate-database.yml)** job failed") {
+	if s.Failed() != "pre-publish-1" || !strings.Contains(Failure(s), "The release's **`migrate-database.yml`** job failed") {
 		t.Fatal(Failure(s))
 	}
 
 	s.Jobs["pre-publish-1"] = Job{Result: "cancelled"}
-	contains(t, render(t, s).Summary, "⚪ **The pre-publish (migrate-database.yml) job was cancelled,** so this attempt stopped before publishing. Use **Re-run failed jobs** on [that run](https://github.com/o/r/actions/runs/100).\n")
+	contains(t, render(t, s).Summary, "⚪ **The `migrate-database.yml` job was cancelled,** so this attempt stopped before publishing. Use **Re-run failed jobs** on [that run](https://github.com/o/r/actions/runs/100).\n")
 
 	s.Jobs["pre-publish-1"], s.Jobs["publish"] = Job{Result: "success"}, Job{Result: "success"}
 	contains(t, render(t, s).Status, "| ✅ | Run `migrate-database.yml` |", "| ✅ | Publish |")
@@ -720,7 +797,7 @@ func TestRendersSeveralPrePublishWorkflows(t *testing.T) {
 	s = status(release(), true, results("validate", "success", "pre-publish-1", "success", "pre-publish-2", "failure", "publish", "skipped"))
 	s.Hooks, s.RunJobs = []Hook{migrate, caches}, runJobs("100", "validate", "pre-publish (migrate-database.yml) / migrate", "pre-publish (warm-caches.yml) / warm", "report")
 	blocks = render(t, s)
-	contains(t, blocks.Summary, "❌ **The pre-publish (warm-caches.yml) job failed,**")
+	contains(t, blocks.Summary, "❌ **The `warm-caches.yml` job failed,**")
 	contains(t, blocks.Status, "| ✅ | Migrate the database | [Details](https://github.com/o/r/actions/runs/100/job/2) |\n| ❌ | Run `warm-caches.yml` | [Details](https://github.com/o/r/actions/runs/100/job/3) |\n")
 
 	// Re-run failed jobs ran only that one, then published.
@@ -783,6 +860,17 @@ func TestRendersThePrePublishWorkflowsName(t *testing.T) {
 	blocks = render(t, s)
 	contains(t, blocks.Summary, "- First, **Migrate \\~\\~production\\~\\~** runs on the release commit.")
 	contains(t, blocks.Status, "| ⏸️ | Migrate \\~\\~production\\~\\~ | Runs when you merge |\n")
+
+	// A name can't mention anyone or reference an issue, even in the failure comment, which
+	// notifies: a word joiner after @ and # keeps GitHub from linking them.
+	s.Hooks = named("Migrate for @o/team, see #12")
+	blocks = render(t, s)
+	contains(t, blocks.Summary, "- First, **Migrate for @\u2060o/team, see \\#\u206012** runs")
+	contains(t, blocks.Status, "| ⏸️ | Migrate for @\u2060o/team, see \\#\u206012 |")
+	failed := status(release(), true, results("validate", "success", "pre-publish-1", "failure", "publish", "skipped"))
+	failed.Hooks, failed.MergedBy = s.Hooks, "mona"
+	contains(t, Failure(failed), "@mona The release's **Migrate for @\u2060o/team, see \\#\u206012** job failed")
+	lacks(t, Failure(failed)+render(t, failed).Summary, "@o/team", "#12")
 
 	// A name shaped like a file name is still a name.
 	s.Hooks = named("Deploy.yml")

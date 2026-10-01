@@ -34,7 +34,7 @@ The release contains the changes up to the commit the pull request branched from
 
 Merging the pull request is the approval. Wait for the release status to show the checks passed first. The workflow then tags the release commit and publishes the notes as the GitHub release, with the files the pull request built, and updates the description with a link to it. If you configured [post-publish workflows](/customize/post-publish/), it runs them next.
 
-If anything fails, the top of the description names the failed job and how to retry, and the workflow comments on the pull request to mention you, since GitHub doesn't notify anyone about an edited description.
+If anything fails, the top of the description names the failed jobs and how to retry, and the workflow comments on the pull request to mention you, since GitHub doesn't notify anyone about an edited description.
 
 ## If publishing fails
 

@@ -97,26 +97,35 @@ type Hook struct {
 	Prereleases bool `json:"prereleases,omitempty"`
 }
 
-// label names the hook in its row of the jobs table.
-func (h Hook) label() string {
+// title is the hook's display name: the name its workflow declares, or its file name, after
+// its repository when that's another one.
+func (h Hook) title() string {
 	switch {
 	case h.Repository != "":
-		return "Run " + h.Repository + " `" + h.Workflow + "`"
+		return markdownText(h.Repository) + " `" + h.Workflow + "`"
 	case h.Title != "":
 		return markdownText(h.Title)
 	}
-	return "Run `" + h.Workflow + "`"
+	return "`" + h.Workflow + "`"
 }
 
-// mention names the hook in a sentence: its name in bold, or its file name.
-func (h Hook) mention() string {
-	switch {
-	case h.Repository != "":
-		return h.Repository + " `" + h.Workflow + "`"
-	case h.Title != "":
-		return "**" + markdownText(h.Title) + "**"
+// named is true when the hook's display name is the name its workflow declares.
+func (h Hook) named() bool { return h.Repository == "" && h.Title != "" }
+
+// label names the hook in its row of the jobs table: by its name, or by what it runs.
+func (h Hook) label() string {
+	if h.named() {
+		return h.title()
 	}
-	return "`" + h.Workflow + "`"
+	return "Run " + h.title()
+}
+
+// mention names the hook in a sentence: its name in bold, or what it runs.
+func (h Hook) mention() string {
+	if h.named() {
+		return "**" + h.title() + "**"
+	}
+	return h.title()
 }
 
 // Blocks are the contents of the description's summary and status blocks, without their markers.
@@ -133,8 +142,6 @@ var jobs = []struct{ id, label string }{
 }
 
 var icons = map[string]string{"success": "✅", "failure": "❌", "cancelled": "⚪"}
-
-var failedVerb = map[string]string{"failure": "failed", "cancelled": "was cancelled"}
 
 // row is one job of the Release workflow, in the jobs table: a fixed job, or a hook's.
 type row struct {
@@ -184,28 +191,85 @@ func (s Status) hook(job string) *Hook {
 	return nil
 }
 
-// jobName is how the report names a job: a hook's job by its name, such as
-// "pre-publish (migrate-database.yml)", and any other by its ID.
-func (s Status) jobName(job string) string {
-	if h := s.hook(job); h != nil {
-		return h.Name
+// failures lists the Release workflow's jobs that failed or were cancelled, in the order they run.
+func (s Status) failures() []row {
+	var rows []row
+	for _, j := range s.order() {
+		if r := s.Jobs[j.id].Result; r == "failure" || r == "cancelled" {
+			rows = append(rows, j)
+		}
 	}
-	return job
+	return rows
 }
 
 // Failed returns the first Release workflow job that failed or was cancelled, or "".
 func (s Status) Failed() string {
-	for _, j := range s.order() {
-		if r := s.Jobs[j.id].Result; r == "failure" || r == "cancelled" {
-			return j.id
-		}
+	if rows := s.failures(); len(rows) > 0 {
+		return rows[0].id
 	}
 	return ""
 }
 
-// markdownText escapes text so Markdown shows it as written, even in a table cell.
+// failedJobs says which jobs failed and which were cancelled, in a clause for each, such as
+// "The Deploy and o/tap `update.yml` jobs failed" and "the publish job was cancelled". It
+// names a hook's job by the hook's display name, as the jobs table does, and any other job by
+// its ID, each through emphasize. The first clause starts with the determiner first.
+func (s Status) failedJobs(first string, emphasize func(string) string) []string {
+	var clauses []string
+	for _, result := range []string{"failure", "cancelled"} {
+		var names []string
+		for _, j := range s.failures() {
+			if s.Jobs[j.id].Result != result {
+				continue
+			}
+			name := j.id
+			if j.hook != nil {
+				name = j.hook.title()
+			}
+			names = append(names, emphasize(name))
+		}
+		if len(names) == 0 {
+			continue
+		}
+		determiner := "the"
+		if len(clauses) == 0 {
+			determiner = first
+		}
+		verb := "failed"
+		switch {
+		case result == "cancelled" && len(names) == 1:
+			verb = "was cancelled"
+		case result == "cancelled":
+			verb = "were cancelled"
+		}
+		clauses = append(clauses, fmt.Sprintf("%s %s %s %s", determiner, list(names), plural(len(names), "job"), verb))
+	}
+	return clauses
+}
+
+// list joins names into a list such as "a, b, and c".
+func list(names []string) string {
+	switch len(names) {
+	case 0:
+		return ""
+	case 1:
+		return names[0]
+	case 2:
+		return names[0] + " and " + names[1]
+	}
+	return strings.Join(names[:len(names)-1], ", ") + ", and " + names[len(names)-1]
+}
+
+func plain(name string) string { return name }
+
+func bold(name string) string { return "**" + name + "**" }
+
+// markdownText escapes text so Markdown shows it as written, even in a table cell. GitHub
+// links mentions and issue references even when escaped, so an invisible word joiner follows
+// each @ and #, and the text can't notify anyone from the failure comment.
 func markdownText(s string) string {
-	return markdownSpecial.ReplaceAllString(s, `\$0`)
+	s = markdownSpecial.ReplaceAllString(s, `\$0`)
+	return strings.NewReplacer("@", "@⁠", "#", "#⁠").Replace(s)
 }
 
 var markdownSpecial = regexp.MustCompile("[\\\\`*_~\\[\\]<>|#]")
@@ -228,10 +292,13 @@ func (s Status) stopped(p *plan.Plan, failed string) string {
 		return fmt.Sprintf("⚪ **A later change to the release notes on %s withdrew or replaced what this pull request approved,** so this run doesn't publish it. Any newer request publishes from its own run.", s.Branch)
 	}
 	if h := s.hook(failed); h != nil && h.When == "pre-publish" {
-		if s.Jobs[failed].Result == "cancelled" {
-			return fmt.Sprintf("⚪ **The %s job was cancelled,** so this attempt stopped before publishing. Use **Re-run failed jobs** on [that run](%s).", h.Name, s.RunURL)
+		// Pre-publish workflows run in parallel, once every job before them succeeded, so the
+		// jobs that failed or were cancelled are all pre-publish workflows.
+		what := strings.Join(s.failedJobs("The", plain), ", and ")
+		if !slices.ContainsFunc(s.failures(), func(j row) bool { return s.Jobs[j.id].Result == "failure" }) {
+			return fmt.Sprintf("⚪ **%s,** so this attempt stopped before publishing. Use **Re-run failed jobs** on [that run](%s).", what, s.RunURL)
 		}
-		return fmt.Sprintf("❌ **The %s job failed,** so this attempt stopped before publishing. See [the workflow run](%s). If the cause was outside the release commit, fix it, then use **Re-run failed jobs** on that run. If the release commit itself is broken, withdraw %s: delete `%s` in the pull request that fixes it, then release again. [What to do when pre-publish fails](%s)", h.Name, s.RunURL, p.Tag, p.File, PrePublishDocs)
+		return fmt.Sprintf("❌ **%s,** so this attempt stopped before publishing. See [the workflow run](%s). If the cause was outside the release commit, fix it, then use **Re-run failed jobs** on that run. If the release commit itself is broken, withdraw %s: delete `%s` in the pull request that fixes it, then release again. [What to do when pre-publish fails](%s)", what, s.RunURL, p.Tag, p.File, PrePublishDocs)
 	}
 	return ""
 }
@@ -294,7 +361,7 @@ func (s Status) summary() string {
 
 	failure := func(fix string) {
 		if failed != "" {
-			line("❌ **The %s job %s.** See [the workflow run](%s). %s\n", s.jobName(failed), failedVerb[s.Jobs[failed].Result], s.RunURL, fix)
+			line("❌ **%s.** See [the workflow run](%s). %s\n", strings.Join(s.failedJobs("The", plain), ", and "), s.RunURL, fix)
 		}
 	}
 	switch {
@@ -483,16 +550,31 @@ func (s Status) details(run []publish.RunJob, name, fallback string) string {
 	return fmt.Sprintf("[Details](%s)", jobURL(run, name, fallback))
 }
 
-// jobURL returns the page of the run's job with the name, or of the first job of the
-// reusable workflow that job calls, whose jobs are named like "release-assets / build", or
-// fallback when the run has none.
+// jobURL returns the page of the run's job with the name, or of a job of the reusable
+// workflow that job calls, whose jobs are named like "release-assets / build", or fallback
+// when the run has none. Jobs only count from the latest attempt that lists any of them:
+// GitHub names a calling job alone in an attempt that skips it, and by its called jobs in one
+// that runs them, so after Re-run failed jobs an earlier attempt's job can stand under the
+// other name. Of the called jobs, the first that failed or was cancelled shows why the row
+// did, and otherwise the first.
 func jobURL(run []publish.RunJob, name, fallback string) string {
+	var latest []publish.RunJob
 	for _, j := range run {
-		if (j.Name == name || strings.HasPrefix(j.Name, name+" / ")) && j.URL != "" {
-			return j.URL
+		switch {
+		case (j.Name != name && !strings.HasPrefix(j.Name, name+" / ")) || j.URL == "":
+		case len(latest) == 0 || j.RunAttempt > latest[0].RunAttempt:
+			latest = []publish.RunJob{j}
+		case j.RunAttempt == latest[0].RunAttempt:
+			latest = append(latest, j)
 		}
 	}
-	return fallback
+	if len(latest) == 0 {
+		return fallback
+	}
+	if i := slices.IndexFunc(latest, func(j publish.RunJob) bool { return j.Conclusion == "failure" || j.Conclusion == "cancelled" }); i >= 0 {
+		return latest[i].URL
+	}
+	return latest[0].URL
 }
 
 func plural(n int, word string) string {
@@ -618,8 +700,14 @@ func Failure(s Status) string {
 	if s.MergedBy != "" {
 		mention = "@" + s.MergedBy + " "
 	}
-	return fmt.Sprintf("%s\n%sThe release's **%s** job %s in [this workflow run](%s). The pull request description has the details and how to retry.\n",
-		failureMarker(s, failed), mention, s.jobName(failed), map[string]string{"failure": "failed", "cancelled": "was cancelled"}[s.Jobs[failed].Result], s.RunURL)
+	clauses := s.failedJobs("The release's", bold)
+	what := strings.Join(clauses, ", and ")
+	if len(clauses) > 1 {
+		// Sets "in this workflow run" apart from the last clause, so it reads as about them all.
+		what += ","
+	}
+	return fmt.Sprintf("%s\n%s%s in [this workflow run](%s). The pull request description has the details and how to retry.\n",
+		failureMarker(s, failed), mention, what, s.RunURL)
 }
 
 // failureMarker identifies a failure comment by the run attempt and job it reports.
