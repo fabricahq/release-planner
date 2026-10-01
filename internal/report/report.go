@@ -90,9 +90,9 @@ type Status struct {
 	MergedBy string
 	// Downstream lists the downstream workflows, with their jobs' results.
 	Downstream []Target
-	// PrePublish names the pre-publish workflow, by the name it declares or else its file
-	// name, or is "" when there's none.
-	PrePublish string
+	// PrePublish is the pre-publish workflow's file name, or "" when there's none, and
+	// PrePublishName the name it declares, or "" when it declares none.
+	PrePublish, PrePublishName string
 }
 
 // Blocks are the contents of the description's summary and status blocks, without their markers.
@@ -126,25 +126,22 @@ func (s Status) Failed() string {
 
 // label is the job's row label: the pre-publish workflow's own, or the job's.
 func (s Status) label(id, label string) string {
-	if id == "pre-publish" && s.PrePublish != "" {
-		if workflowFile.MatchString(s.PrePublish) {
-			return "Run `" + s.PrePublish + "`"
-		}
-		return markdownText(s.PrePublish)
+	switch {
+	case id != "pre-publish" || s.PrePublish == "":
+		return label
+	case s.PrePublishName != "":
+		return markdownText(s.PrePublishName)
 	}
-	return label
+	return "Run `" + s.PrePublish + "`"
 }
 
 // prePublish names the pre-publish workflow in a sentence: its name in bold, or its file name.
 func (s Status) prePublish() string {
-	if workflowFile.MatchString(s.PrePublish) {
-		return "`" + s.PrePublish + "`"
+	if s.PrePublishName != "" {
+		return "**" + markdownText(s.PrePublishName) + "**"
 	}
-	return "**" + markdownText(s.PrePublish) + "**"
+	return "`" + s.PrePublish + "`"
 }
-
-// workflowFile matches a workflow's file name, which the report shows when it has no name.
-var workflowFile = regexp.MustCompile(`^[0-9A-Za-z._-]+\.ya?ml$`)
 
 // markdownText escapes text so Markdown shows it as written, even in a table cell.
 func markdownText(s string) string {

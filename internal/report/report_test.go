@@ -718,20 +718,26 @@ func TestRendersWhatPublishDid(t *testing.T) {
 // The pre-publish workflow appears by the name it declares, or by its file name without one.
 func TestRendersThePrePublishWorkflowsName(t *testing.T) {
 	s := status(release(), false, results("validate", "success", "pre-publish", "skipped", "publish", "skipped"))
-	s.PrePublish = "Migrate the database"
+	s.PrePublish, s.PrePublishName = "migrate-database.yml", "Migrate the database"
 	blocks := render(t, s)
 	contains(t, blocks.Summary, "- First, **Migrate the database** runs on the release commit. If it fails, the release isn't published.\n")
 	contains(t, blocks.Status, "| ⏸️ | Migrate the database | Runs when you merge |\n")
 
 	// Markdown in a name stays text, and can't break the table.
-	s.PrePublish = "Migrate | *all* the [databases]"
+	s.PrePublishName = "Migrate | *all* the [databases]"
 	contains(t, render(t, s).Status, "| ⏸️ | Migrate \\| \\*all\\* the \\[databases\\] | Runs when you merge |\n")
-	s.PrePublish = "Migrate ~~production~~"
+	s.PrePublishName = "Migrate ~~production~~"
 	blocks = render(t, s)
 	contains(t, blocks.Summary, "- First, **Migrate \\~\\~production\\~\\~** runs on the release commit.")
 	contains(t, blocks.Status, "| ⏸️ | Migrate \\~\\~production\\~\\~ | Runs when you merge |\n")
 
-	s.PrePublish = "migrate-database.yml"
+	// A name shaped like a file name is still a name.
+	s.PrePublishName = "Deploy.yml"
+	blocks = render(t, s)
+	contains(t, blocks.Summary, "- First, **Deploy.yml** runs on the release commit.")
+	contains(t, blocks.Status, "| ⏸️ | Deploy.yml | Runs when you merge |\n")
+
+	s.PrePublishName = ""
 	blocks = render(t, s)
 	contains(t, blocks.Summary, "- First, `migrate-database.yml` runs on the release commit.")
 	contains(t, blocks.Status, "| ⏸️ | Run `migrate-database.yml` | Runs when you merge |\n")

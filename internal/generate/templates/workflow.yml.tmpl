@@ -434,9 +434,9 @@ jobs:
           HEAD_REF: ${{"{{"}} github.event.pull_request.head.ref {{"}}"}}
           HEAD_REPOSITORY: ${{"{{"}} github.event.pull_request.head.repo.full_name {{"}}"}}
           MERGED: ${{"{{"}} inputs.merged-commit || github.sha {{"}}"}}
-{{- if .PrePublish.Workflow}}
-          PRE_PUBLISH: {{yamlString .PrePublish.Label}}
+{{- if .PrePublish.Name}}
+          PRE_PUBLISH_NAME: {{yamlString .PrePublish.Name}}
 {{- end}}
         run: |
           if [ -n "$PULL_REQUEST" ]; then target=(--pull-request "$PULL_REQUEST" --head-sha "$HEAD_SHA" --head-ref "$HEAD_REF" --head-repository "$HEAD_REPOSITORY"); else target=(--merged "$MERGED"); fi
-          release-planner report --needs "$NEEDS" --branch {{.Branch}} --plan "$RUNNER_TEMP/plan/release-plan.json"{{if .ReleaseAssets.Workflow}} --assets "$RUNNER_TEMP/release-assets"{{end}}{{if .PrePublish.Workflow}} --pre-publish "$PRE_PUBLISH"{{end}}{{range .Downstream}} --downstream {{.Repository}}:{{.Workflow}}{{end}} "${target[@]}"
+          release-planner report --needs "$NEEDS" --branch {{.Branch}} --plan "$RUNNER_TEMP/plan/release-plan.json"{{if .ReleaseAssets.Workflow}} --assets "$RUNNER_TEMP/release-assets"{{end}}{{if .PrePublish.Workflow}} --pre-publish {{.PrePublish.Workflow}}{{end}}{{if .PrePublish.Name}} --pre-publish-name "$PRE_PUBLISH_NAME"{{end}}{{range .Downstream}} --downstream {{.Repository}}:{{.Workflow}}{{end}} "${target[@]}"

@@ -647,9 +647,9 @@ func TestWorkflowCombinations(t *testing.T) {
 				publish.named(t, "publish").Name != "Publish the approved release" {
 				t.Errorf("publish outputs %v", publish.Outputs)
 			}
-			// The report names the pre-publish workflow by its own name.
-			if step := jobs["report"].Steps[len(jobs["report"].Steps)-1]; prePublish != strings.Contains(step.Run, ` --pre-publish "$PRE_PUBLISH" `) ||
-				prePublish != (step.Env["PRE_PUBLISH"] == "Migrate the database") {
+			// The report names the pre-publish workflow by its file and its own name.
+			if step := jobs["report"].Steps[len(jobs["report"].Steps)-1]; prePublish != strings.Contains(step.Run, ` --pre-publish migrate-database.yml --pre-publish-name "$PRE_PUBLISH_NAME" `) ||
+				prePublish != (step.Env["PRE_PUBLISH_NAME"] == "Migrate the database") {
 				t.Errorf("report runs %q with %v", step.Run, step.Env)
 			}
 			if prePublish {
@@ -948,12 +948,12 @@ func TestReportNamesThePrePublishWorkflow(t *testing.T) {
 	long := strings.Repeat("m", 101)
 	for name, tc := range map[string]struct{ to, want string }{
 		"named":          {"name: Migrate the database\n", "Migrate the database"},
-		"unnamed":        {"", "migrate-database.yml"},
+		"unnamed":        {"", ""},
 		"quoted":         {"name: 'Migrate: the database'\n", "Migrate: the database"},
 		"an apostrophe":  {"name: \"Migrate Josh's database\"\n", "Migrate Josh's database"},
-		"an expression":  {"name: Migrate ${{ github.ref }}\n", "migrate-database.yml"},
-		"multi-line":     {"name: |\n  Migrate\n  the database\n", "migrate-database.yml"},
-		"over-long":      {"name: " + long + "\n", "migrate-database.yml"},
+		"an expression":  {"name: Migrate ${{ github.ref }}\n", ""},
+		"multi-line":     {"name: |\n  Migrate\n  the database\n", ""},
+		"over-long":      {"name: " + long + "\n", ""},
 		"100 characters": {"name: " + long[:100] + "\n", long[:100]},
 		"a substitution": {"name: Migrate $(touch pwned)\n", "Migrate $(touch pwned)"},
 		"a backtick":     {"name: Migrate `id`\n", "Migrate `id`"},
@@ -963,8 +963,9 @@ func TestReportNamesThePrePublishWorkflow(t *testing.T) {
 			root := t.TempDir()
 			put(t, root, ".github/workflows/migrate-database.yml", strings.Replace(migrateWorkflow, "name: Migrate the database\n", tc.to, 1))
 			jobs := installCombination(t, root, combinations["pre-publish"])
-			if got := jobs["report"].Steps[len(jobs["report"].Steps)-1].Env["PRE_PUBLISH"]; got != tc.want {
-				t.Fatalf("PRE_PUBLISH is %q, want %q", got, tc.want)
+			step := jobs["report"].Steps[len(jobs["report"].Steps)-1]
+			if got := step.Env["PRE_PUBLISH_NAME"]; got != tc.want || strings.Contains(step.Run, "--pre-publish-name") != (tc.want != "") {
+				t.Fatalf("PRE_PUBLISH_NAME is %q, want %q; report runs %q", got, tc.want, step.Run)
 			}
 		})
 	}
@@ -979,8 +980,8 @@ func TestReportStepPassesThePrePublishNameAsWritten(t *testing.T) {
 			put(t, root, ".github/workflows/migrate-database.yml", strings.Replace(migrateWorkflow, "name: Migrate the database\n", "name: '"+strings.ReplaceAll(payload, "'", "''")+"'\n", 1))
 			step := installCombination(t, root, combinations["pre-publish"])["report"].Steps
 			report := step[len(step)-1]
-			if report.Env["PRE_PUBLISH"] != payload {
-				t.Fatalf("PRE_PUBLISH is %q", report.Env["PRE_PUBLISH"])
+			if report.Env["PRE_PUBLISH_NAME"] != payload {
+				t.Fatalf("PRE_PUBLISH_NAME is %q", report.Env["PRE_PUBLISH_NAME"])
 			}
 			// Run the step with a release-planner that records its arguments.
 			bin, work := t.TempDir(), t.TempDir()
@@ -991,13 +992,13 @@ func TestReportStepPassesThePrePublishNameAsWritten(t *testing.T) {
 			}
 			cmd := exec.Command("bash", "-e", "-c", report.Run)
 			cmd.Dir = work
-			cmd.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "PRE_PUBLISH="+report.Env["PRE_PUBLISH"],
+			cmd.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "PRE_PUBLISH_NAME="+report.Env["PRE_PUBLISH_NAME"],
 				"NEEDS={}", "MERGED="+strings.Repeat("d", 40), "RUNNER_TEMP="+work)
 			if out, err := cmd.CombinedOutput(); err != nil {
 				t.Fatalf("%v: %s", err, out)
 			}
 			got, _ := os.ReadFile(args)
-			if !strings.Contains(string(got), "\n--pre-publish\n"+payload+"\n") {
+			if !strings.Contains(string(got), "\n--pre-publish\nmigrate-database.yml\n--pre-publish-name\n"+payload+"\n") {
 				t.Fatalf("report got:\n%s", got)
 			}
 			if _, err := os.Stat(filepath.Join(work, "pwned")); err == nil {

@@ -139,14 +139,6 @@ type PrePublish struct {
 	Name string `yaml:"-"`
 }
 
-// Label is how the release status names the workflow: its own name, or its file name.
-func (p PrePublish) Label() string {
-	if p.Name != "" {
-		return p.Name
-	}
-	return p.Workflow
-}
-
 // Enabled reports whether the repository has a pre-publish workflow.
 func (p PrePublish) Enabled() bool { return p.Workflow != "" || p.Environment != "" }
 
