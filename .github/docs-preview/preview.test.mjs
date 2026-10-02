@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, symlinkSync, writeFi
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { checkDeployment, deletePreviews, deployPreview, keepOpenPullRequests, keepOtherBranches } from './cloudflare.mjs';
-import { isNewer, renderComment, writeComment } from './comment.mjs';
+import { isNewer, renderComment, reportRetargeted, writeComment } from './comment.mjs';
 import { commentMarker, pagePath, previewBranch } from './config.mjs';
 import { recheck, resolve } from './resolve.mjs';
 import { addPreviewHeaders, validateSite } from './site.mjs';
@@ -256,7 +256,7 @@ describe('resolve', () => {
     const context = { ...runContext(), eventName: 'schedule' };
     const retargeted = pullRequest({ number: 34, base: { ref: 'release', repo: { id: repositoryID } } });
     await resolve({ github: fakeGitHub({ pulls: [pullRequest(), forkPullRequest({ state: 'closed' }), retargeted] }).github, context, core });
-    expect(outputs).toMatchObject({ action: 'reconcile', open_prs: '[32]' });
+    expect(outputs).toMatchObject({ action: 'reconcile', open_prs: '[32]', retargeted_prs: '[34]' });
     expect(Date.parse(outputs.cutoff)).toBeLessThanOrEqual(Date.now());
   });
 
@@ -366,6 +366,41 @@ describe('comments', () => {
     const { github, calls } = fakeGitHub();
     await writeComment({ github, context, core: fakeCore().core }, { pr: 32, state: 'removed' });
     expect(calls).toEqual([]);
+  });
+
+  test('reports a closed pull request\'s removal over a newer run\'s comment', async () => {
+    const comments = [{ id: 1, user: { login: 'github-actions[bot]' }, body: `${commentMarker}\n<!-- run:10 attempt:1 state:deployed -->` }];
+    const { github, calls } = fakeGitHub({ comments });
+    await writeComment({ github, context, core: fakeCore().core }, { pr: 32, state: 'removed' });
+    expect(calls.map(([kind]) => kind)).toEqual(['update']);
+  });
+
+  describe('after the reconciler removes retargeted previews', () => {
+    const reconcileContext = { ...context, payload: { repository: { id: repositoryID, default_branch: 'main' } } };
+    const retargeted = pullRequest({ base: { ref: 'release', repo: { id: repositoryID } } });
+    const comment = (stamp) => [{ id: 1, user: { login: 'github-actions[bot]' }, body: `${commentMarker}\n${stamp}` }];
+    const report = async (options) => {
+      const { github, calls } = fakeGitHub(options);
+      await reportRetargeted({ github, context: reconcileContext, core: fakeCore().core }, [32]);
+      return calls;
+    };
+
+    test('marks the comment of a pull request that still targets another branch', async () => {
+      const calls = await report({ pulls: [retargeted], comments: comment('<!-- run:8 attempt:1 state:deployed -->') });
+      expect(calls).toHaveLength(1);
+      expect(calls[0][1].body).toContain('<!-- run:9 attempt:1 state:removed -->');
+      expect(calls[0][1].body).toContain('no longer targets the default branch');
+    });
+
+    test.each([
+      ['targets main again', { pulls: [pullRequest()], comments: comment('<!-- run:8 attempt:1 state:deployed -->') }],
+      ['closed since', { pulls: [{ ...retargeted, state: 'closed' }], comments: comment('<!-- run:8 attempt:1 state:deployed -->') }],
+      ['has no preview comment', { pulls: [retargeted] }],
+      ['is already marked removed', { pulls: [retargeted], comments: comment('<!-- run:8 attempt:1 state:removed -->') }],
+      ['has a newer run\'s comment', { pulls: [retargeted], comments: comment('<!-- run:10 attempt:1 state:deployed -->') }],
+    ])('leaves the comment of a pull request that %s', async (_, options) => {
+      expect(await report(options)).toEqual([]);
+    });
   });
 });
 

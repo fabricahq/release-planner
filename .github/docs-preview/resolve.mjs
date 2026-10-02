@@ -4,7 +4,8 @@
  *
  * Outputs: action (deploy, stop, reconcile, or skip). For deploy and stop: pr. For deploy:
  * sha, run_id, trusted, pages (a JSON list of the first changed pages' site paths), and
- * pages_total. For reconcile: open_prs (a JSON list) and cutoff (an ISO time).
+ * pages_total. For reconcile: open_prs and retargeted_prs, JSON lists of open pull requests
+ * into the default branch and into other branches, and cutoff (an ISO time).
  */
 
 import { approvalEnvironment, commentMarker, deployEnvironment, isDocsFile, pagePath } from './config.mjs';
@@ -35,11 +36,11 @@ export async function resolve({ github, context, core }) {
     const cutoff = new Date().toISOString();
     // Only pull requests into the default branch keep previews, so one retargeted elsewhere
     // loses its previews here, as recheck refuses to deploy it.
-    const open = await github.paginate(github.rest.pulls.list, {
-      owner, repo, state: 'open', base: defaultBranch, per_page: 100,
-    });
+    const open = await github.paginate(github.rest.pulls.list, { owner, repo, state: 'open', per_page: 100 });
+    const numbers = (prs) => JSON.stringify(prs.map((pr) => pr.number));
     core.setOutput('action', 'reconcile');
-    core.setOutput('open_prs', JSON.stringify(open.filter((pr) => targetsDefaultBranch(pr, context)).map((pr) => pr.number)));
+    core.setOutput('open_prs', numbers(open.filter((pr) => targetsDefaultBranch(pr, context))));
+    core.setOutput('retargeted_prs', numbers(open.filter((pr) => !targetsDefaultBranch(pr, context))));
     core.setOutput('cutoff', cutoff);
     return;
   }
@@ -135,7 +136,7 @@ export async function recheck({ github, context, core }, { pr, sha }) {
 }
 
 /** Reports whether a pull request is into this repository's default branch. */
-function targetsDefaultBranch(pr, context) {
+export function targetsDefaultBranch(pr, context) {
   const { id, default_branch: defaultBranch } = context.payload.repository;
   return pr.base.repo.id === id && pr.base.ref === defaultBranch;
 }

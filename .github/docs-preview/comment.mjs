@@ -5,13 +5,15 @@
  */
 
 import { approvalEnvironment, commentMarker } from './config.mjs';
-import { findPreviewComment } from './resolve.mjs';
+import { findPreviewComment, targetsDefaultBranch } from './resolve.mjs';
 
 const heading = '### Documentation preview';
 
 /**
- * Creates or updates the preview comment. Each body records the run that wrote it, and a
- * comment from a newer run is never replaced by an older one. Removal always applies.
+ * Creates or updates the preview comment. Each body records the run that wrote it and its
+ * state, and a comment from a newer run is never replaced by an older one. Removal after
+ * the pull request closed always applies, since nothing can follow it. Removal after a
+ * retarget doesn't: the pull request may target the default branch again by then.
  *
  * @param {{github: any, context: any, core: any}} script
  * @param {{pr: number, state: 'pending' | 'deployed' | 'failed' | 'removed', sha?: string,
@@ -22,15 +24,17 @@ export async function writeComment({ github, context, core }, preview) {
   const { owner, repo } = context.repo;
   const issue_number = preview.pr;
   const previous = await findPreviewComment(github, { owner, repo, issue_number });
+  const retargeted = preview.state === 'removed' && preview.reason === 'retargeted';
   if (preview.state === 'removed' && !previous) return;
-  if (preview.state !== 'removed' && isNewer(previous?.body, context.runId, context.runAttempt)) {
+  if (retargeted && stampOf(previous.body)?.state === 'removed') return;
+  if ((preview.state !== 'removed' || retargeted) && isNewer(previous?.body, context.runId, context.runAttempt)) {
     core.notice('A newer run has already updated the preview comment.');
     return;
   }
   const body = renderComment(preview, {
     runURL: `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`,
     commitURL: (sha) => `${context.serverUrl}/${owner}/${repo}/commit/${sha}`,
-    stamp: `<!-- run:${context.runId} attempt:${context.runAttempt} -->`,
+    stamp: `<!-- run:${context.runId} attempt:${context.runAttempt} state:${preview.state} -->`,
   });
   if (previous) {
     await github.rest.issues.updateComment({ owner, repo, comment_id: previous.id, body });
@@ -39,12 +43,32 @@ export async function writeComment({ github, context, core }, preview) {
   }
 }
 
+/**
+ * Marks the preview comments of pull requests whose previews the reconciler removed because
+ * they no longer targeted the default branch, if they still don't.
+ *
+ * @param {{github: any, context: any, core: any}} script
+ * @param {number[]} prs
+ */
+export async function reportRetargeted({ github, context, core }, prs) {
+  for (const pr of prs) {
+    const { data } = await github.rest.pulls.get({ ...context.repo, pull_number: pr });
+    if (data.state !== 'open' || targetsDefaultBranch(data, context)) continue;
+    await writeComment({ github, context, core }, { pr, state: 'removed', reason: 'retargeted' });
+  }
+}
+
 /** Reports whether a comment body was written by a later run, or a later attempt of this one. */
 export function isNewer(body, runId, runAttempt) {
-  const stamp = body?.match(/<!-- run:(\d+) attempt:(\d+) -->/);
+  const stamp = stampOf(body);
   if (!stamp) return false;
-  const [stampRun, stampAttempt] = [Number(stamp[1]), Number(stamp[2])];
-  return stampRun > runId || (stampRun === runId && stampAttempt > runAttempt);
+  return stamp.run > runId || (stamp.run === runId && stamp.attempt > runAttempt);
+}
+
+/** Reads the run, attempt, and state that a comment body records, if any. */
+function stampOf(body) {
+  const match = body?.match(/<!-- run:(\d+) attempt:(\d+)(?: state:([a-z]+))? -->/);
+  return match && { run: Number(match[1]), attempt: Number(match[2]), state: match[3] };
 }
 
 /** Renders a preview comment body. */

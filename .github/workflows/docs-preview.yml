@@ -33,6 +33,7 @@ jobs:
       pages: ${{ steps.resolve.outputs.pages }}
       pages_total: ${{ steps.resolve.outputs.pages_total }}
       open_prs: ${{ steps.resolve.outputs.open_prs }}
+      retargeted_prs: ${{ steps.resolve.outputs.retargeted_prs }}
       cutoff: ${{ steps.resolve.outputs.cutoff }}
     steps:
       # Every event this workflow accepts checks out main's commit, so the scripts come from main.
@@ -233,3 +234,12 @@ jobs:
           PREVIEW_OPEN_PRS: ${{ needs.resolve.outputs.open_prs }}
           PREVIEW_CUTOFF: ${{ needs.resolve.outputs.cutoff }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.DOCS_PREVIEW_CLOUDFLARE_API_TOKEN }}
+      # Tells pull requests retargeted away from main that their previews are gone.
+      - if: needs.resolve.outputs.action == 'reconcile'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          PREVIEW_RETARGETED_PRS: ${{ needs.resolve.outputs.retargeted_prs }}
+        with:
+          script: |
+            const { reportRetargeted } = await import(`${process.env.GITHUB_WORKSPACE}/.github/docs-preview/comment.mjs`);
+            await reportRetargeted({ github, context, core }, JSON.parse(process.env.PREVIEW_RETARGETED_PRS));

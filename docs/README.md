@@ -26,7 +26,7 @@ The Documentation workflow publishes the site to GitHub Pages at <https://releas
 
 ### Pull request previews
 
-When a pull request into `main` changes anything under `docs/`, its build is published as a public preview on Cloudflare Pages, at `pr-<number>.release-planner-docs-previews.pages.dev`. A pull request comment links the preview and the changed pages. Every push updates the preview, and closing the pull request deletes its previews. A pull request retargeted away from `main` gets no new preview, and loses its previews at its next deploy attempt or the daily run. That daily run also deletes any previews of closed pull requests that were left behind. Previews aren't indexed by search engines.
+When a pull request into `main` changes anything under `docs/`, its build is published as a public preview on Cloudflare Pages, at `pr-<number>.release-planner-docs-previews.pages.dev`. A pull request comment links the preview and the changed pages. Every push updates the preview, and closing the pull request deletes its previews. A pull request retargeted away from `main` gets no new preview, and loses its previews at its next deploy attempt or the daily run, which updates its comment. That daily run also deletes any previews of closed pull requests that were left behind. Previews aren't indexed by search engines.
 
 The repository is public, so anyone can open a pull request, and a build runs the pull request's code. The design keeps that code away from the Cloudflare token, which can change every Pages project in Fabrica's account:
 
