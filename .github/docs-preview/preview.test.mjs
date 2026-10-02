@@ -337,6 +337,14 @@ describe('comments', () => {
 
   const context = { repo: { owner: 'fabricahq', repo: 'release-planner' }, serverUrl: 'https://github.test', runId: 9, runAttempt: 1 };
 
+  // Jobs of one run share a stamp, so only job order keeps a pending comment from
+  // replacing that run's result, or two jobs from each creating a comment.
+  test('reports a result only after the pending comment is written', async () => {
+    const { jobs } = Bun.YAML.parse(await Bun.file(new URL('../workflows/docs-preview.yml', import.meta.url)).text());
+    const needs = (job) => [jobs[job].needs ?? []].flat().flatMap((need) => [need, ...needs(need)]);
+    expect(needs('publish')).toContain('announce');
+  });
+
   test('never replaces a newer run\'s comment', async () => {
     const comments = [{ id: 1, user: { login: 'github-actions[bot]' }, body: `${commentMarker}\n<!-- run:10 attempt:1 -->` }];
     const { github, calls } = fakeGitHub({ comments });
