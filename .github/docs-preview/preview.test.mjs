@@ -325,8 +325,10 @@ describe('comments', () => {
 
   test('explains why a preview was removed', () => {
     expect(renderComment({ pr: 32, state: 'removed' }, links)).toContain('because this pull request closed');
+    // A retargeted pull request may never have had a preview: one could have been pending.
     const retargeted = renderComment({ pr: 32, state: 'removed', reason: 'retargeted' }, links);
-    expect(retargeted).toContain('no longer targets the default branch');
+    expect(retargeted).toContain('no longer targets the default branch, so it has no preview, and any earlier one was removed');
+    expect(retargeted).not.toContain('Preview removed');
     expect(retargeted).toContain('its next push publishes a new preview');
   });
 

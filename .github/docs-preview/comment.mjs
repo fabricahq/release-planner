@@ -46,8 +46,9 @@ export async function writeComment({ github, context, core }, preview) {
 }
 
 /**
- * Marks the preview comments of pull requests whose previews the reconciler removed because
- * they no longer targeted the default branch, if they still don't.
+ * Updates the preview comments of open pull requests that the reconciler found targeting
+ * another branch, whose previews it removed, if they still target another branch. A comment
+ * may have been pending or failed, so the notice doesn't claim a preview existed.
  *
  * @param {{github: any, context: any, core: any}} script
  * @param {number[]} prs
@@ -101,7 +102,7 @@ export function renderComment(preview, { runURL, commitURL, stamp }) {
       break;
     case 'removed':
       status = [preview.reason === 'retargeted'
-        ? 'Preview removed because this pull request no longer targets the default branch. If it targets the default branch again, its next push publishes a new preview.'
+        ? 'This pull request no longer targets the default branch, so it has no preview, and any earlier one was removed. If it targets the default branch again, its next push publishes a new preview.'
         : 'Preview removed because this pull request closed.'];
       break;
     default:
