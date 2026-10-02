@@ -1,0 +1,245 @@
+# Publish each pull request's checked documentation build as a public Cloudflare Pages preview,
+# and link it in a pull request comment. The Documentation workflow builds the pull request's
+# code on a GitHub-hosted runner without secrets; this workflow runs only from main, treats
+# that build as data, and is the only code that can read the Cloudflare token. The scripts and
+# the security model are described in docs/README.md.
+name: Documentation previews
+on:
+  workflow_run:
+    workflows: [Documentation]
+    types: [completed]
+  # Runs main's copy of this file, never pull request code: it only removes a preview.
+  pull_request_target:
+    types: [closed]
+  # Removes previews that a missed or failed removal left behind.
+  schedule:
+    - cron: '17 9 * * *'
+  workflow_dispatch:
+permissions: {}
+jobs:
+  # Decides what to do before any job that can read the Cloudflare token starts.
+  resolve:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    outputs:
+      action: ${{ steps.resolve.outputs.action }}
+      pr: ${{ steps.resolve.outputs.pr }}
+      sha: ${{ steps.resolve.outputs.sha }}
+      run_id: ${{ steps.resolve.outputs.run_id }}
+      trusted: ${{ steps.resolve.outputs.trusted }}
+      pages: ${{ steps.resolve.outputs.pages }}
+      pages_total: ${{ steps.resolve.outputs.pages_total }}
+      open_prs: ${{ steps.resolve.outputs.open_prs }}
+      retargeted_prs: ${{ steps.resolve.outputs.retargeted_prs }}
+      cutoff: ${{ steps.resolve.outputs.cutoff }}
+    steps:
+      # Every event this workflow accepts checks out main's commit, so the scripts come from main.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: resolve
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { resolve } = await import(`${process.env.GITHUB_WORKSPACE}/.github/docs-preview/resolve.mjs`);
+            await resolve({ github, context, core });
+
+  # Tells the author and maintainers that an untrusted preview is waiting for approval.
+  announce:
+    needs: resolve
+    if: needs.resolve.outputs.action == 'deploy' && needs.resolve.outputs.trusted != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          PREVIEW_PR: ${{ needs.resolve.outputs.pr }}
+          PREVIEW_SHA: ${{ needs.resolve.outputs.sha }}
+        with:
+          script: |
+            const { writeComment } = await import(`${process.env.GITHUB_WORKSPACE}/.github/docs-preview/comment.mjs`);
+            await writeComment({ github, context, core }, {
+              pr: Number(process.env.PREVIEW_PR), state: 'pending', sha: process.env.PREVIEW_SHA,
+            });
+
+  # The approval environment's required reviewers gate untrusted previews. A newer push
+  # cancels a pending approval, and deploy rechecks the head, so only the latest commit deploys.
+  # Approval waits for the pending comment, so that comment can never land after, and
+  # replace, this run's result.
+  approve:
+    needs: [resolve, announce]
+    if: needs.resolve.outputs.action == 'deploy' && needs.resolve.outputs.trusted != 'true'
+    runs-on: ubuntu-latest
+    environment: docs-preview-approval
+    permissions: {}
+    concurrency:
+      group: docs-preview-approval-pr-${{ needs.resolve.outputs.pr }}
+      cancel-in-progress: true
+    steps:
+      - run: echo "Approved the documentation preview of $PREVIEW_SHA."
+        env:
+          PREVIEW_SHA: ${{ needs.resolve.outputs.sha }}
+
+  deploy:
+    needs: [resolve, approve]
+    if: >-
+      !cancelled() && needs.resolve.outputs.action == 'deploy' &&
+      (needs.approve.result == 'success' || (needs.approve.result == 'skipped' && needs.resolve.outputs.trusted == 'true'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # The only environment holding the Cloudflare token. It admits deployments from main only.
+    environment:
+      name: docs-preview
+      url: ${{ steps.deploy.outputs.alias }}
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    # Deploys and removals for a pull request run one at a time, in order.
+    concurrency:
+      group: docs-preview-pr-${{ needs.resolve.outputs.pr }}
+      cancel-in-progress: false
+    outputs:
+      state: ${{ steps.recheck.outputs.state }}
+      url: ${{ steps.deploy.outputs.url }}
+      alias: ${{ steps.deploy.outputs.alias }}
+    env:
+      PREVIEW_PR: ${{ needs.resolve.outputs.pr }}
+      PREVIEW_SHA: ${{ needs.resolve.outputs.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Approval can take a while, so check that this commit is still the one to preview.
+      - id: recheck
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { recheck } = await import(`${process.env.GITHUB_WORKSPACE}/.github/docs-preview/resolve.mjs`);
+            await recheck({ github, context, core }, { pr: Number(process.env.PREVIEW_PR), sha: process.env.PREVIEW_SHA });
+      - if: steps.recheck.outputs.state != 'superseded'
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.11
+      - if: steps.recheck.outputs.state != 'superseded'
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: '22'
+      # wrangler comes from main's lockfile.
+      - if: steps.recheck.outputs.state != 'superseded'
+        run: bun install --frozen-lockfile
+        working-directory: .github/docs-preview
+      - if: steps.recheck.outputs.state == 'current'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: docs-site
+          run-id: ${{ needs.resolve.outputs.run_id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/docs-site
+      - id: deploy
+        if: steps.recheck.outputs.state == 'current'
+        run: node .github/docs-preview/cli.mjs deploy
+        env:
+          PREVIEW_SITE: ${{ runner.temp }}/docs-site
+          CLOUDFLARE_API_TOKEN: ${{ secrets.DOCS_PREVIEW_CLOUDFLARE_API_TOKEN }}
+      # The pull request closed while this run waited, possibly after its removal ran, or it
+      # no longer targets main, so it keeps no preview.
+      - if: steps.recheck.outputs.state == 'closed' || steps.recheck.outputs.state == 'retargeted'
+        run: node .github/docs-preview/cli.mjs teardown
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.DOCS_PREVIEW_CLOUDFLARE_API_TOKEN }}
+
+  publish:
+    needs: [resolve, deploy]
+    # Reports a deploy, a failure, or a removal by a deploy that found the pull request closed
+    # or retargeted.
+    if: >-
+      !cancelled() && needs.resolve.outputs.action == 'deploy' &&
+      ((needs.deploy.result == 'success' && needs.deploy.outputs.state != 'superseded') || needs.deploy.result == 'failure')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          PREVIEW_PR: ${{ needs.resolve.outputs.pr }}
+          PREVIEW_SHA: ${{ needs.resolve.outputs.sha }}
+          PREVIEW_PAGES: ${{ needs.resolve.outputs.pages }}
+          PREVIEW_PAGES_TOTAL: ${{ needs.resolve.outputs.pages_total }}
+          PREVIEW_URL: ${{ needs.deploy.outputs.url }}
+          PREVIEW_ALIAS: ${{ needs.deploy.outputs.alias }}
+          STATE: ${{ needs.deploy.result != 'success' && 'failed' || needs.deploy.outputs.state == 'current' && 'deployed' || 'removed' }}
+          REASON: ${{ needs.deploy.outputs.state }}
+        with:
+          script: |
+            const { writeComment } = await import(`${process.env.GITHUB_WORKSPACE}/.github/docs-preview/comment.mjs`);
+            await writeComment({ github, context, core }, {
+              pr: Number(process.env.PREVIEW_PR),
+              state: process.env.STATE,
+              sha: process.env.PREVIEW_SHA,
+              url: process.env.PREVIEW_URL,
+              alias: process.env.PREVIEW_ALIAS,
+              pages: JSON.parse(process.env.PREVIEW_PAGES),
+              pagesTotal: Number(process.env.PREVIEW_PAGES_TOTAL),
+              reason: process.env.REASON,
+            });
+
+  # Removes a closed pull request's previews, or, on schedule, any left behind.
+  cleanup:
+    needs: resolve
+    if: needs.resolve.outputs.action == 'stop' || needs.resolve.outputs.action == 'reconcile'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: docs-preview
+    permissions:
+      contents: read
+      pull-requests: write
+    concurrency:
+      group: docs-preview-pr-${{ needs.resolve.outputs.pr || 'reconcile' }}
+      cancel-in-progress: false
+    env:
+      PREVIEW_PR: ${{ needs.resolve.outputs.pr }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: '22'
+      - if: needs.resolve.outputs.action == 'stop'
+        run: node .github/docs-preview/cli.mjs teardown
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.DOCS_PREVIEW_CLOUDFLARE_API_TOKEN }}
+      - if: needs.resolve.outputs.action == 'stop'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { writeComment } = await import(`${process.env.GITHUB_WORKSPACE}/.github/docs-preview/comment.mjs`);
+            await writeComment({ github, context, core }, { pr: Number(process.env.PREVIEW_PR), state: 'removed' });
+      - if: needs.resolve.outputs.action == 'reconcile'
+        run: node .github/docs-preview/cli.mjs reconcile
+        env:
+          PREVIEW_OPEN_PRS: ${{ needs.resolve.outputs.open_prs }}
+          PREVIEW_CUTOFF: ${{ needs.resolve.outputs.cutoff }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.DOCS_PREVIEW_CLOUDFLARE_API_TOKEN }}
+      # Tells pull requests retargeted away from main that their previews are gone.
+      - if: needs.resolve.outputs.action == 'reconcile'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          PREVIEW_RETARGETED_PRS: ${{ needs.resolve.outputs.retargeted_prs }}
+        with:
+          script: |
+            const { reportRetargeted } = await import(`${process.env.GITHUB_WORKSPACE}/.github/docs-preview/comment.mjs`);
+            await reportRetargeted({ github, context, core }, JSON.parse(process.env.PREVIEW_RETARGETED_PRS));

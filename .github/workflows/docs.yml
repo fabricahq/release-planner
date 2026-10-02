@@ -30,6 +30,15 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run check
       - run: bun run build
+      # docs-preview.yml publishes this checked build as the pull request's preview. It's data
+      # from pull request code: the preview workflow uploads it but never runs it.
+      - if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: docs-site
+          path: docs/dist
+          if-no-files-found: error
+          retention-days: 7
       - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
