@@ -203,6 +203,14 @@ describe('resolve', () => {
     await expect(resolve({ github, context: runContext(), core: fakeCore().core })).rejects.toThrow('admit only the main branch');
   });
 
+  test.each(['getEnvironment', 'listDeploymentBranchPolicies'])('fails closed when %s is forbidden', async (method) => {
+    const { github } = fakeGitHub({ pulls: [forkPullRequest()], files: docsFiles });
+    github.rest.repos[method] = async () => { throw Object.assign(new Error('Resource not accessible by integration'), { status: 403 }); };
+    const { core, outputs } = fakeCore();
+    await expect(resolve({ github, context: runContext(forkRun), core })).rejects.toThrow('not accessible');
+    expect(outputs.action).toBeUndefined();
+  });
+
   test('skips pull requests that do not change the documentation', async () => {
     expect(await resolved({ pulls: [pullRequest()], files: [docsFiles[2]], permissions: { writer: 'write' } })).toEqual({ action: 'skip' });
   });
