@@ -24,9 +24,11 @@ export async function writeComment({ github, context, core }, preview) {
   const { owner, repo } = context.repo;
   const issue_number = preview.pr;
   const previous = await findPreviewComment(github, { owner, repo, issue_number });
+  // The stamp records a removal after a retarget as its own state, distinct from a close.
   const retargeted = preview.state === 'removed' && preview.reason === 'retargeted';
+  const state = retargeted ? 'retargeted' : preview.state;
   if (preview.state === 'removed' && !previous) return;
-  if (retargeted && stampOf(previous.body)?.state === 'removed') return;
+  if (retargeted && stampOf(previous.body)?.state === 'retargeted') return;
   if ((preview.state !== 'removed' || retargeted) && isNewer(previous?.body, context.runId, context.runAttempt)) {
     core.notice('A newer run has already updated the preview comment.');
     return;
@@ -34,7 +36,7 @@ export async function writeComment({ github, context, core }, preview) {
   const body = renderComment(preview, {
     runURL: `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`,
     commitURL: (sha) => `${context.serverUrl}/${owner}/${repo}/commit/${sha}`,
-    stamp: `<!-- run:${context.runId} attempt:${context.runAttempt} state:${preview.state} -->`,
+    stamp: `<!-- run:${context.runId} attempt:${context.runAttempt} state:${state} -->`,
   });
   if (previous) {
     await github.rest.issues.updateComment({ owner, repo, comment_id: previous.id, body });

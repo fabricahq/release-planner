@@ -390,15 +390,20 @@ describe('comments', () => {
     test('marks the comment of a pull request that still targets another branch', async () => {
       const calls = await report({ pulls: [retargeted], comments: comment('<!-- run:8 attempt:1 state:deployed -->') });
       expect(calls).toHaveLength(1);
-      expect(calls[0][1].body).toContain('<!-- run:9 attempt:1 state:removed -->');
+      expect(calls[0][1].body).toContain('<!-- run:9 attempt:1 state:retargeted -->');
       expect(calls[0][1].body).toContain('no longer targets the default branch');
+    });
+
+    test('replaces the closed notice of a pull request reopened against another branch', async () => {
+      const calls = await report({ pulls: [retargeted], comments: comment('<!-- run:8 attempt:1 state:removed -->') });
+      expect(calls.map(([kind]) => kind)).toEqual(['update']);
     });
 
     test.each([
       ['targets main again', { pulls: [pullRequest()], comments: comment('<!-- run:8 attempt:1 state:deployed -->') }],
       ['closed since', { pulls: [{ ...retargeted, state: 'closed' }], comments: comment('<!-- run:8 attempt:1 state:deployed -->') }],
       ['has no preview comment', { pulls: [retargeted] }],
-      ['is already marked removed', { pulls: [retargeted], comments: comment('<!-- run:8 attempt:1 state:removed -->') }],
+      ['is already marked retargeted', { pulls: [retargeted], comments: comment('<!-- run:8 attempt:1 state:retargeted -->') }],
       ['has a newer run\'s comment', { pulls: [retargeted], comments: comment('<!-- run:10 attempt:1 state:deployed -->') }],
     ])('leaves the comment of a pull request that %s', async (_, options) => {
       expect(await report(options)).toEqual([]);
