@@ -70,7 +70,7 @@ jobs:
             });
 
   # The approval environment's required reviewers gate untrusted previews. A newer push
-  # cancels a pending approval, so a maintainer only ever approves the latest commit.
+  # cancels a pending approval, and deploy rechecks the head, so only the latest commit deploys.
   # Approval waits for the pending comment, so that comment can never land after, and
   # replace, this run's result.
   approve:
