@@ -147,15 +147,17 @@ jobs:
         env:
           PREVIEW_SITE: ${{ runner.temp }}/docs-site
           CLOUDFLARE_API_TOKEN: ${{ secrets.DOCS_PREVIEW_CLOUDFLARE_API_TOKEN }}
-      # The pull request closed while this run waited, possibly after its removal ran.
-      - if: steps.recheck.outputs.state == 'closed'
+      # The pull request closed while this run waited, possibly after its removal ran, or it
+      # no longer targets main, so it keeps no preview.
+      - if: steps.recheck.outputs.state == 'closed' || steps.recheck.outputs.state == 'retargeted'
         run: node .github/docs-preview/cli.mjs teardown
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.DOCS_PREVIEW_CLOUDFLARE_API_TOKEN }}
 
   publish:
     needs: [resolve, deploy]
-    # Reports a deploy, a failure, or a removal by a deploy that found the pull request closed.
+    # Reports a deploy, a failure, or a removal by a deploy that found the pull request closed
+    # or retargeted.
     if: >-
       !cancelled() && needs.resolve.outputs.action == 'deploy' &&
       ((needs.deploy.result == 'success' && needs.deploy.outputs.state != 'superseded') || needs.deploy.result == 'failure')
@@ -175,7 +177,8 @@ jobs:
           PREVIEW_PAGES_TOTAL: ${{ needs.resolve.outputs.pages_total }}
           PREVIEW_URL: ${{ needs.deploy.outputs.url }}
           PREVIEW_ALIAS: ${{ needs.deploy.outputs.alias }}
-          STATE: ${{ needs.deploy.result != 'success' && 'failed' || needs.deploy.outputs.state == 'closed' && 'removed' || 'deployed' }}
+          STATE: ${{ needs.deploy.result != 'success' && 'failed' || needs.deploy.outputs.state == 'current' && 'deployed' || 'removed' }}
+          REASON: ${{ needs.deploy.outputs.state }}
         with:
           script: |
             const { writeComment } = await import(`${process.env.GITHUB_WORKSPACE}/.github/docs-preview/comment.mjs`);
@@ -187,6 +190,7 @@ jobs:
               alias: process.env.PREVIEW_ALIAS,
               pages: JSON.parse(process.env.PREVIEW_PAGES),
               pagesTotal: Number(process.env.PREVIEW_PAGES_TOTAL),
+              reason: process.env.REASON,
             });
 
   # Removes a closed pull request's previews, or, on schedule, any left behind.

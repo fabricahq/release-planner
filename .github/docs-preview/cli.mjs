@@ -7,7 +7,7 @@
  *     Writes url and alias to GITHUB_OUTPUT.
  *   teardown: PREVIEW_PR. Deletes that pull request's previews.
  *   reconcile: PREVIEW_OPEN_PRS, a JSON list, and PREVIEW_CUTOFF, an ISO time. Deletes
- *     older previews of pull requests that aren't open.
+ *     older previews of pull requests that aren't open into main.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -44,7 +44,7 @@ if (command === 'deploy') {
     throw new Error('PREVIEW_OPEN_PRS must be a list of pull request numbers, and PREVIEW_CUTOFF a time.');
   }
   const count = await deletePreviews(target, keepOpenPullRequests(open, cutoff));
-  console.log(`Deleted ${count} preview deployment(s) of closed pull requests.`);
+  console.log(`Deleted ${count} preview deployment(s) of pull requests that aren't open into main.`);
 } else {
   throw new Error('Usage: cli.mjs <deploy|teardown|reconcile>');
 }

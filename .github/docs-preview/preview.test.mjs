@@ -251,10 +251,11 @@ describe('resolve', () => {
     await expect(resolve({ github: fakeGitHub().github, context, core: fakeCore().core })).rejects.toThrow('default-branch');
   });
 
-  test('lists open pull requests for a scheduled cleanup', async () => {
+  test('lists open pull requests into main for a scheduled cleanup', async () => {
     const { core, outputs } = fakeCore();
     const context = { ...runContext(), eventName: 'schedule' };
-    await resolve({ github: fakeGitHub({ pulls: [pullRequest(), forkPullRequest({ state: 'closed' })] }).github, context, core });
+    const retargeted = pullRequest({ number: 34, base: { ref: 'release', repo: { id: repositoryID } } });
+    await resolve({ github: fakeGitHub({ pulls: [pullRequest(), forkPullRequest({ state: 'closed' }), retargeted] }).github, context, core });
     expect(outputs).toMatchObject({ action: 'reconcile', open_prs: '[32]' });
     expect(Date.parse(outputs.cutoff)).toBeLessThanOrEqual(Date.now());
   });
@@ -296,6 +297,7 @@ describe('recheck', () => {
     ['current', pullRequest()],
     ['superseded', pullRequest({ head: { sha: 'b'.repeat(40) } })],
     ['closed', pullRequest({ state: 'closed' })],
+    ['retargeted', pullRequest({ base: { ref: 'release', repo: { id: repositoryID } } })],
   ])('reports %s', async (state, pr) => {
     const { core, outputs } = fakeCore();
     await recheck({ github: fakeGitHub({ pulls: [pr] }).github, context: runContext(), core }, { pr: 32, sha });
@@ -319,6 +321,11 @@ describe('comments', () => {
 
   test('tells maintainers how to approve a pending preview', () => {
     expect(renderComment({ pr: 32, state: 'pending', sha }, links)).toContain('approve the `docs-preview-approval` deployment');
+  });
+
+  test('explains why a preview was removed', () => {
+    expect(renderComment({ pr: 32, state: 'removed' }, links)).toContain('because this pull request closed');
+    expect(renderComment({ pr: 32, state: 'removed', reason: 'retargeted' }, links)).toContain('no longer targets the default branch');
   });
 
   test('orders runs and attempts', () => {

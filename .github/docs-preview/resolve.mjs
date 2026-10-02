@@ -33,9 +33,13 @@ export async function resolve({ github, context, core }) {
   if (context.eventName === 'schedule' || context.eventName === 'workflow_dispatch') {
     // Taken before listing, so a deployment made after it is never mistaken for an orphan.
     const cutoff = new Date().toISOString();
-    const open = await github.paginate(github.rest.pulls.list, { owner, repo, state: 'open', per_page: 100 });
+    // Only pull requests into the default branch keep previews, so one retargeted elsewhere
+    // loses its previews here, as recheck refuses to deploy it.
+    const open = await github.paginate(github.rest.pulls.list, {
+      owner, repo, state: 'open', base: defaultBranch, per_page: 100,
+    });
     core.setOutput('action', 'reconcile');
-    core.setOutput('open_prs', JSON.stringify(open.map((pr) => pr.number)));
+    core.setOutput('open_prs', JSON.stringify(open.filter((pr) => targetsDefaultBranch(pr, context)).map((pr) => pr.number)));
     core.setOutput('cutoff', cutoff);
     return;
   }
@@ -83,7 +87,7 @@ export async function resolve({ github, context, core }) {
   const candidates = await github.paginate(github.rest.pulls.list, {
     owner, repo, state: 'open', head: `${head.owner.login}:${run.head_branch}`, base: defaultBranch, per_page: 100,
   });
-  const matches = candidates.filter((pr) => pr.base.repo.id === repositoryID && pr.base.ref === defaultBranch &&
+  const matches = candidates.filter((pr) => targetsDefaultBranch(pr, context) &&
     pr.head.repo?.id === head.id && pr.head.ref === run.head_branch && pr.head.sha === run.head_sha);
   if (matches.length !== 1) {
     return skip(`Expected one open pull request into ${defaultBranch} with this run's branch at its head; found ${matches.length}.`);
@@ -115,16 +119,25 @@ export async function resolve({ github, context, core }) {
 
 /**
  * Rechecks a pull request right before deploying, since approval can take a while. Sets
- * the state output: current, superseded by a newer commit, or closed.
+ * the state output: current, superseded by a newer commit, closed, or retargeted to a
+ * branch other than the default. A closed or retargeted pull request loses its previews.
  *
  * @param {{github: any, context: any, core: any}} script
  * @param {{pr: number, sha: string}} preview
  */
 export async function recheck({ github, context, core }, { pr, sha }) {
   const { data } = await github.rest.pulls.get({ ...context.repo, pull_number: pr });
-  const state = data.state !== 'open' ? 'closed' : data.head.sha !== sha ? 'superseded' : 'current';
+  const state = data.state !== 'open' ? 'closed'
+    : !targetsDefaultBranch(data, context) ? 'retargeted'
+    : data.head.sha !== sha ? 'superseded' : 'current';
   if (state !== 'current') core.notice(`Not deploying ${sha}: pull request #${pr} is ${state}.`);
   core.setOutput('state', state);
+}
+
+/** Reports whether a pull request is into this repository's default branch. */
+function targetsDefaultBranch(pr, context) {
+  const { id, default_branch: defaultBranch } = context.payload.repository;
+  return pr.base.repo.id === id && pr.base.ref === defaultBranch;
 }
 
 /** Finds the workflow's own preview comment on a pull request. */

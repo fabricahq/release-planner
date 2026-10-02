@@ -15,7 +15,8 @@ const heading = '### Documentation preview';
  *
  * @param {{github: any, context: any, core: any}} script
  * @param {{pr: number, state: 'pending' | 'deployed' | 'failed' | 'removed', sha?: string,
- *   url?: string, alias?: string, pages?: string[], pagesTotal?: number}} preview
+ *   url?: string, alias?: string, pages?: string[], pagesTotal?: number,
+ *   reason?: 'closed' | 'retargeted'}} preview
  */
 export async function writeComment({ github, context, core }, preview) {
   const { owner, repo } = context.repo;
@@ -73,7 +74,9 @@ export function renderComment(preview, { runURL, commitURL, stamp }) {
       status = [`⚠️ The preview of ${commit} failed to deploy. See [the workflow run](${runURL}).`];
       break;
     case 'removed':
-      status = ['Preview removed because this pull request closed.'];
+      status = [preview.reason === 'retargeted'
+        ? 'Preview removed because this pull request no longer targets the default branch.'
+        : 'Preview removed because this pull request closed.'];
       break;
     default:
       throw new Error(`Unknown preview state: ${preview.state}`);
