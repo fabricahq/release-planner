@@ -99,7 +99,7 @@ export function renderComment(preview, { runURL, commitURL, stamp }) {
       break;
     case 'removed':
       status = [preview.reason === 'retargeted'
-        ? 'Preview removed because this pull request no longer targets the default branch.'
+        ? 'Preview removed because this pull request no longer targets the default branch. If it targets the default branch again, its next push publishes a new preview.'
         : 'Preview removed because this pull request closed.'];
       break;
     default:

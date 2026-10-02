@@ -325,7 +325,9 @@ describe('comments', () => {
 
   test('explains why a preview was removed', () => {
     expect(renderComment({ pr: 32, state: 'removed' }, links)).toContain('because this pull request closed');
-    expect(renderComment({ pr: 32, state: 'removed', reason: 'retargeted' }, links)).toContain('no longer targets the default branch');
+    const retargeted = renderComment({ pr: 32, state: 'removed', reason: 'retargeted' }, links);
+    expect(retargeted).toContain('no longer targets the default branch');
+    expect(retargeted).toContain('its next push publishes a new preview');
   });
 
   test('orders runs and attempts', () => {
