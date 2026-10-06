@@ -24,6 +24,8 @@ The output is `dist/`. These commands do not publish the site.
 
 The Documentation workflow publishes the site to GitHub Pages at <https://release-planner.fabricahq.com> after each push to `main`. Pull requests only check and build it. The site is served at the domain root, so page links are root-relative. The Pages settings, custom domain, and DNS record are managed in Fabrica's infrastructure repository, not here.
 
+Every page loads Cloudflare Web Analytics, which counts visits without cookies, only when served from release-planner.fabricahq.com, so local builds and pull request previews report nothing. `src/analytics.mjs` builds that script, and `astro.config.mjs` holds the public site token from the Cloudflare dashboard. The footer links to Fabrica's privacy policy, which describes the analytics.
+
 ### Pull request previews
 
 When a pull request into `main` changes anything under `docs/`, its build is published as a public preview on Cloudflare Pages, at `pr-<number>.release-planner-docs-previews.pages.dev`. A pull request comment links the preview and the changed pages. Every push updates the preview, and closing the pull request deletes its previews. A pull request retargeted away from `main` gets no new preview, and loses its previews at its next deploy attempt or the daily run, which updates its comment. If it targets `main` again, its next push publishes a new preview. The daily run also deletes any previews of closed pull requests that were left behind. Previews aren't indexed by search engines.

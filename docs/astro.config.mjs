@@ -5,11 +5,14 @@ import { unified } from '@astrojs/markdown-remark';
 import starlight from '@astrojs/starlight';
 import tailwindcss from '@tailwindcss/vite';
 import accessibleAsideTitles from './src/plugins/accessible-aside-titles.mjs';
+import { cloudflareWebAnalytics } from './src/analytics.mjs';
+
+// Served at the domain root; page links are root-relative.
+const site = 'https://release-planner.fabricahq.com';
 
 // The look, theme menu, and callout handling follow the Code Rules documentation site.
 export default defineConfig({
-  // Served at the domain root; page links are root-relative.
-  site: 'https://release-planner.fabricahq.com',
+  site,
   devToolbar: { enabled: false },
   // Keep native bindings outside the SSR bundle: https://vite.dev/config/ssr-options.html#ssr-external
   vite: { plugins: [tailwindcss()], ssr: { external: ['satteri'] } },
@@ -18,6 +21,10 @@ export default defineConfig({
     title: 'Release Planner',
     description: 'Agent-drafted, maintainer-approved GitHub releases',
     favicon: '/favicon.svg',
+    head: [
+      // The Web Analytics site token is public and grants no access.
+      cloudflareWebAnalytics({ host: new URL(site).hostname, token: '00da0b9892124b36bf56939ec4059eee' }),
+    ],
     customCss: ['./src/styles/tailwind.css', './src/styles/custom.css'],
     components: {
       SiteTitle: './src/components/SiteTitle.astro',
